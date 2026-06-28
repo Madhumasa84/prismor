@@ -44,6 +44,7 @@ _Generated from `warden/integrations/registry.yaml` — do not edit by hand._
 | OpenAI Agents SDK | framework | sdk | ✅ | `throw` |
 | CrewAI | framework | sdk | ✅ | `throw` |
 | LangChain / LangGraph | framework | sdk | ✅ | `throw` |
+| browser-use | framework | sdk | ✅ | `throw` |
 | MCP Proxy (any MCP-speaking agent) | framework | mcp | 🟡 | `proxy-deny` |
 
 Legend: ✅ shipped · 🟡 roadmap · — sweep-only / not applicable. Surfaces: `hook-config` (config-file hooks) · `sdk` (in-process adapter) · `mcp` (proxy) · `rules-only` (static guardrails).

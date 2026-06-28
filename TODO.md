@@ -6,9 +6,6 @@ Items are ordered by priority. Each has a registry anchor where relevant.
 
 ## High priority
 
-### Commit framework-adapters work
-All of Phases A–D (registry, runtime.py, principal.py, three adapters, tests) is implemented and tested but **not yet committed**. 623 tests pass. Commit before any further work.
-
 ### MCP proxy (`immunity mcp-proxy`)
 Registry: `id: mcp-proxy, status: roadmap`
 
@@ -24,6 +21,9 @@ Rough sketch:
 ---
 
 ## Medium priority
+
+### `docs/frameworks-browser-use.md`
+Full integration doc parallel to `docs/frameworks-openai-agents.md`: install, `guard_controller`, `use_subject` multi-tenant pattern, event-type mapping table (network/file_write/shell), per-user IAM example, observe vs enforce.
 
 ### Dashboard subject filter
 Data is already captured and tagged per-user in findings/events (field: `subject`). The dashboard (`warden/server.py` `/api/findings`, `/api/events`) and `warden/dashboard.html` don't yet expose a subject filter or column. Add:
