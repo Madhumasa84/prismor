@@ -80,10 +80,23 @@ By default events are emitted as `type: shell`, so `destructive-command`,
 tools whose risk is a path, URL, or output, pass `event_type="file_write"` /
 `"network"` / `"tool_result"` and a `command_builder`.
 
-## Adding the other frameworks
+## Reference
 
-CrewAI and LangChain/LangGraph follow the identical pattern — wrap tool
-execution, build a canonical event, call `evaluate_tool_call`, raise on deny —
-differing only in the SDK hook point (CrewAI tool wrapper;
-`BaseCallbackHandler.on_tool_start` for LangChain). Each gets a registry entry
-and its own `adapters/<framework>/` package.
+| Symbol | Purpose |
+|---|---|
+| `guard_agent(agent_obj, **kwargs)` | Guard all FunctionTools on an Agent in one call |
+| `warden_guard(tool, **kwargs)` | Guard a single tool or callable |
+| `use_subject(value)` | Per-request subject contextmanager |
+| `WardenBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
+| `build_event(...)` | Build a canonical event dict for custom hook points |
+
+All functions accept: `subject`, `workspace`, `agent`, `mode`, `session_id`,
+`event_type`, `command_builder`, `raise_on_block`. See
+[`adapters/openai-agents/`](../adapters/openai-agents/) for full signatures.
+
+## Other frameworks
+
+- [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools([...])`, `WardenCallbackHandler`
+- [CrewAI](frameworks-crewai.md) — `guard_tools([...])`, BaseTool and structured tool support
+- [browser-use](frameworks-browser-use.md) — `guard_controller(controller)`, network/file/shell event mapping
+- [All frameworks — UX overview](frameworks-overview.md)

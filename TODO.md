@@ -22,17 +22,14 @@ Rough sketch:
 
 ## Medium priority
 
-### `docs/frameworks-browser-use.md`
-Full integration doc parallel to `docs/frameworks-openai-agents.md`: install, `guard_controller`, `use_subject` multi-tenant pattern, event-type mapping table (network/file_write/shell), per-user IAM example, observe vs enforce.
-
 ### Dashboard subject filter
 Data is already captured and tagged per-user in findings/events (field: `subject`). The dashboard (`warden/server.py` `/api/findings`, `/api/events`) and `warden/dashboard.html` don't yet expose a subject filter or column. Add:
 - `?subject=user:alice` query param on `/api/findings` / `/api/events`
 - A "User" column in the findings table
 - A user dropdown filter in `dashboard.html`
 
-### Docs: `docs/frameworks-crewai.md` + `docs/frameworks-langchain.md`
-Only adapter README files exist. Write full integration docs parallel to `docs/frameworks-openai-agents.md`: install, `guard_tools`, `use_subject` multi-tenant pattern, event mapping table, per-user IAM example.
+### ~~Docs: framework docs~~ — DONE
+All framework docs written: frameworks-openai-agents.md, frameworks-langchain.md, frameworks-crewai.md, frameworks-browser-use.md, frameworks-overview.md.
 
 ### Coding-agent adapters: Gemini CLI, Kiro, OpenCode
 Registry entries exist (`status: roadmap`), hook surfaces documented. Need normalizers + `_merge_*`/`_normalize_*` functions in `warden/hooks.py`, entries in `_SUPPORTED_AGENTS`. Gemini and Kiro use `exit-2` (same convention as Claude/Cursor); OpenCode uses `throw`.
