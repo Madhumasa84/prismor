@@ -1,0 +1,24 @@
+{
+  "name": "prismor-warden-vercel",
+  "version": "0.1.0",
+  "description": "Prismor Warden adapter for the Vercel AI SDK — policy-controlled tool calls via HTTP eval-server",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "ai": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": { "optional": true }
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ai": "^4.0.0"
+  },
+  "keywords": ["prismor", "warden", "ai-security", "vercel-ai", "tool-call"],
+  "license": "MIT"
+}

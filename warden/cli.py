@@ -151,6 +151,17 @@ def main(argv: Optional[List[str]] = None) -> None:
         ws_value = os.environ.get("PRISMOR_WARDEN_WORKSPACE")
     workspace = Path(ws_value).resolve() if ws_value else infer_default_workspace(Path.cwd())
 
+    # ── eval-server: HTTP evaluation endpoint for non-Python adapters ────
+    if args.command == "eval-server":
+        from warden.eval_server import run_eval_server
+        from pathlib import Path as _Path
+        run_eval_server(
+            host=args.host,
+            port=args.port,
+            workspace=_Path(args.workspace) if getattr(args, "workspace", None) else None,
+        )
+        return
+
     # ── dashboard / serve: local web dashboard (HTTP server) ─────────────
     # `dashboard` starts the server and opens a browser tab. `serve` is the
     # deprecated alias that defaults to headless (no browser).
@@ -1723,6 +1734,15 @@ def build_parser() -> argparse.ArgumentParser:
             "--no-open", action="store_true",
             help="Don't open a browser tab (headless server only)",
         )
+
+    # ── eval-server: HTTP evaluation endpoint ───────────────────────────
+    _ep = subparsers.add_parser(
+        "eval-server",
+        help="Start an HTTP evaluation server for non-Python adapters (Vercel AI SDK, etc.)",
+    )
+    _ep.add_argument("--port", type=int, default=7071, help="Port to listen on (default: 7071)")
+    _ep.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    _ep.add_argument("--workspace", default=None, help="Workspace path for policy/IAM (default: cwd)")
 
     # ── check ──────────────────────────────────────────────────────────
     check_parser = subparsers.add_parser("check", help="Quick pre-check a command or file path")
