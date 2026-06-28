@@ -546,11 +546,19 @@ class PolicyEngine:
         event: Dict[str, Any],
         index: int,
         session_id: str = "",
+        subject: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
-        """Evaluate a single event against all loaded rules. Returns findings."""
+        """Evaluate a single event against all loaded rules. Returns findings.
+
+        ``subject`` is the resolved end-user principal (``warden.principal.Subject``);
+        when supplied, each finding is tagged with it so per-user policy scoping,
+        telemetry, and the dashboard can attribute the call to a specific user.
+        """
         event_type = str(event.get("type", "")).lower()
         if not event_type:
             return []
+
+        subject_dict = subject.as_dict() if subject is not None else None
 
         # Pre-extract fields that rules might match against.
         field_values = _extract_fields(event)
@@ -598,6 +606,7 @@ class PolicyEngine:
                 "eventIndex": index,
                 "ruleId": rule.id,
                 "action": rule.action,
+                "subject": subject_dict,
                 # Effective observe/enforce for this finding — per-rule override
                 # else the policy's default_mode. should_block() blocks only when
                 # this is "enforce". EXCEPTION: the non-overridable floor (core

@@ -78,6 +78,7 @@ except ImportError:
 from warden.feed import load_feed, match_advisories
 from warden.hooks import install_hooks, legacy_should_block, normalize_payload, should_block, uninstall_hooks
 from warden.policy_engine import PolicyEngine, validate_policy
+from warden.runtime import evaluate_tool_call
 from warden.store import (
     append_session_event,
     get_db_path,
@@ -845,7 +846,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         payload = json.loads(sys.stdin.read() or "{}")
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
-        append_session_event(workspace, normalized["sessionId"], event)
 
         # ── Scoped agent: synthesize rules on first prompt ────────────
         if event.get("agent_event") == "UserPromptSubmit":
@@ -870,135 +870,24 @@ def main(argv: Optional[List[str]] = None) -> None:
             except Exception as _scoped_exc:
                 sys.stderr.write(f"[warden] scoped agent error: {_scoped_exc}\n")
 
-        events = read_session_events(workspace, normalized["sessionId"])
-        result = analyze_events(events, repo_root=repo_root, workspace=workspace, session_id=normalized["sessionId"])
-        save_session_snapshot(
+        # Run the shared evaluation pipeline: persists the event, analyzes the
+        # session, evaluates policy + scoped rules + IAM + cross-call learning,
+        # forwards telemetry, records the heartbeat, and returns the per-rule
+        # enforce decision. The same entrypoint backs production SDK adapters and
+        # the MCP proxy, so every agent gets identical semantics. Subject is
+        # resolved inside (WARDEN_SUBJECT / device identity) — single-user installs
+        # are unchanged.
+        decision = evaluate_tool_call(
+            event=event,
             workspace=workspace,
-            session_id=normalized["sessionId"],
             agent=args.agent,
-            source="hook",
-            repo_url=None,
-            events=events,
-            analysis=result,
+            mode=args.mode,
+            session_id=normalized["sessionId"],
+            repo_root=repo_root,
         )
-        # Only evaluate the current event for real-time blocking decisions.
-        # Using all session findings would cause stale shell-event findings
-        # (e.g. from a previous agent run) to block unrelated UserPromptSubmit
-        # events, creating a false-positive loop.
-        from warden.policy_engine import PolicyEngine as _PolicyEngine
-        _current_engine = _PolicyEngine(workspace=workspace)
-        current_findings = _current_engine.evaluate(event, len(events) - 1, session_id=normalized["sessionId"])
-
-        # ── Scoped agent: enforce session-scoped rules ────────────────
-        try:
-            from warden.scoped_agent import load_scoped_rules as _load_sr, check_scoped_rules as _check_sr
-            _sr = _load_sr(workspace, normalized["sessionId"])
-            if _sr is not None:
-                _sr_finding = _check_sr(_sr, event, session_id=normalized["sessionId"])
-                if _sr_finding:
-                    current_findings.append(_sr_finding)
-        except Exception as _sr_exc:
-            sys.stderr.write(f"[warden] scoped enforcement error: {_sr_exc}\n")
-
-        # ── IAM: named agent identity enforcement ────────────────────
-        try:
-            from warden.iam import check_iam as _check_iam
-            _iam_finding = _check_iam(workspace=workspace, event=event, session_id=normalized["sessionId"])
-            if _iam_finding:
-                current_findings.append(_iam_finding)
-        except Exception as _iam_exc:
-            sys.stderr.write(f"[warden] IAM enforcement error: {_iam_exc}\n")
-
-        # ── Learning: evasion detection on passing shell events ───────
-        if not current_findings and event.get("type") == "shell":
-            try:
-                from warden.learning import detect_evasion as _detect_evasion
-                _evasion_findings = _detect_evasion(workspace, normalized["sessionId"], event, current_findings)
-                if _evasion_findings:
-                    current_findings.extend(_evasion_findings)
-            except Exception as _ev_exc:
-                sys.stderr.write(f"[warden] evasion detection error: {_ev_exc}\n")
-
-        # ── Learning: staged-execution / fetch-then-exec / exfil correlation ──
-        # Catches the cross-call bypass where a file is created in one tool call
-        # (download, redirect, Write) and executed/exfiltrated in another.
-        if not current_findings and event.get("type") == "shell":
-            try:
-                from warden.learning import detect_staged_execution as _detect_staged
-                _staged_findings = _detect_staged(workspace, normalized["sessionId"], event, current_findings)
-                if _staged_findings:
-                    current_findings.extend(_staged_findings)
-            except Exception as _staged_exc:
-                sys.stderr.write(f"[warden] staged-exec detection error: {_staged_exc}\n")
-
-        # Forward findings to configured telemetry sinks (webhook/syslog/file)
-        # BEFORE the blocking decision — so a SIEM sees every event, even
-        # the ones that get blocked. Dispatch is best-effort.
-        if _current_engine.outputs and current_findings:
-            try:
-                from warden.sinks import dispatch as _sink_dispatch
-                # Tag telemetry with the repo and the policy scope so the org
-                # dashboard SHOWS when a repo is running under a granted
-                # exemption (vs full org policy) — exempted repos stay visible.
-                _exm = getattr(_current_engine, "active_exemption", None)
-                _policy_scope = f"repo_exemption:{_exm.get('id')}" if isinstance(_exm, dict) and _exm.get("id") else "org"
-                # Only attach the repo identifier for org-MANAGED workspaces
-                # (audit #17): a personal/local-only repo must never have its
-                # remote leaked to the org, regardless of sink configuration.
-                # Mirrors the explicit gate on the heartbeat below.
-                _repo = None
-                if getattr(_current_engine, "workspace_managed", False):
-                    try:
-                        from warden.enterprise import workspace_scope as _ws
-                        _repo = _ws.detect_git_remote(workspace)
-                    except Exception:
-                        _repo = None
-                _sink_dispatch(
-                    current_findings,
-                    _current_engine.outputs,
-                    extra={
-                        "session_id": normalized["sessionId"],
-                        "agent": args.agent,
-                        "mode": args.mode,
-                        "workspace": str(workspace),
-                        "policy_scope": _policy_scope,
-                        "repo": _repo,
-                    },
-                    raw_event=event,
-                )
-            except Exception as _sink_exc:
-                sys.stderr.write(f"[warden] sink dispatch error: {_sink_exc}\n")
-
-        # Per-call inspected-volume heartbeat (enterprise observability): count
-        # this tool call; flush the accumulated count at most once per minute.
-        # Carries only a number — no command/path/content. Gated on workspace
-        # scope: personal/local-only workspaces report nothing to the org.
-        if getattr(_current_engine, "workspace_managed", False):
-            try:
-                from warden.enterprise import heartbeat as _heartbeat
-                _heartbeat.record_call(agent=args.agent, session_id=normalized["sessionId"])
-                _heartbeat.maybe_flush()
-            except Exception:
-                pass
-
-        # Enforcement is per-rule and policy-authoritative: should_block() returns
-        # a finding only when its effective mode is "enforce" (the rule's mode, or
-        # the policy's default_mode — both default to "observe"). This is honored
-        # regardless of how the hook was installed (--mode), so an admin flipping a
-        # rule to enforce in the control plane blocks even on observe-installed
-        # devices. A local `--mode observe` still acts as a dry-run kill-switch.
-        blocking = should_block(current_findings, event)
-        # Backward-compat enforce bridge: a policy that predates per-rule
-        # observe/enforce (sets block_categories but no default_mode/mode) keeps
-        # its original semantics — block its block_categories when installed with
-        # --mode enforce — so upgrading an existing install doesn't silently stop
-        # blocking. Any policy that adopts the per-rule model is unaffected.
-        if (
-            blocking is None
-            and args.mode == "enforce"
-            and getattr(_current_engine, "is_legacy_policy", False)
-        ):
-            blocking = legacy_should_block(current_findings, event, _current_engine.block_categories)
+        _current_engine = decision.engine
+        current_findings = decision.findings
+        blocking = decision.blocking
         force_observe = args.mode == "observe" and os.environ.get("PRISMOR_LOCAL_DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
         if blocking is not None and not force_observe:
             if args.agent == "copilot":
