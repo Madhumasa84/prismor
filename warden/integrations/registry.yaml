@@ -252,6 +252,32 @@ agents:
     notes: "Patches Registry.execute_action — single dispatch point for all browser actions. go_to_url/search_google → network event; upload_file/save_pdf → file_write; everything else → shell. pip install prismor-warden-browser-use."
     sources: ["https://github.com/browser-use/browser-use"]
 
+  # ── Vercel AI SDK (TypeScript, via HTTP eval-server) ─────────────────────
+  - id: vercel-ai
+    name: Vercel AI SDK
+    kind: framework
+    surface: http
+    status: shipped
+    config_paths: {}
+    events: [tool_call]
+    blocking: throw
+    normalizer: null
+    notes: "TypeScript wardenTool/wardenTools wraps tool.execute(); calls POST /v1/evaluate on the eval-server sidecar before each tool runs. Fails open if eval-server is unreachable. npm install prismor-warden-vercel."
+    sources: ["https://sdk.vercel.ai/docs/foundations/tools"]
+
+  # ── HTTP eval-server (language-agnostic) ──────────────────────────────────
+  - id: eval-server
+    name: HTTP Eval-Server (any language)
+    kind: framework
+    surface: http
+    status: shipped
+    config_paths: {}
+    events: [tool_call]
+    blocking: client-side
+    normalizer: null
+    notes: "Sidecar HTTP server (immunity eval-server --port 7071). POST /v1/evaluate accepts tool name/args/subject/mode, runs full evaluate_tool_call pipeline, returns Decision JSON. Any language with an HTTP client works as adapter. Validated: Node.js, Ruby, Java 21, Rust."
+    sources: []
+
   # ── Universal — MCP proxy (follow-on) ────────────────────────────────────
   - id: mcp-proxy
     name: MCP Proxy (any MCP-speaking agent)

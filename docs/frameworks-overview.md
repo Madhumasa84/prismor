@@ -6,16 +6,21 @@ on your existing agent or controller object, with no changes to your tool logic.
 
 ## UX at a glance
 
-| Framework | Install | Guard | Multi-tenant |
-|---|---|---|---|
-| OpenAI Agents SDK | `pip install prismor-warden-openai` | `guard_agent(agent)` | `use_subject("user:alice")` |
-| LangChain / LangGraph | `pip install prismor-warden-langchain` | `guard_tools([...])` | `use_subject("user:alice")` |
-| CrewAI | `pip install prismor-warden-crewai` | `guard_tools([...])` | `use_subject("user:alice")` |
-| browser-use | `pip install prismor-warden-browser-use` | `guard_controller(controller)` | `use_subject("user:alice")` |
+| Framework | Language | Install | Guard | Multi-tenant |
+|---|---|---|---|---|
+| OpenAI Agents SDK | Python | `pip install prismor-warden-openai` | `guard_agent(agent)` | `use_subject("user:alice")` |
+| LangChain / LangGraph | Python | `pip install prismor-warden-langchain` | `guard_tools([...])` | `use_subject("user:alice")` |
+| CrewAI | Python | `pip install prismor-warden-crewai` | `guard_tools([...])` | `use_subject("user:alice")` |
+| browser-use | Python | `pip install prismor-warden-browser-use` | `guard_controller(controller)` | `use_subject("user:alice")` |
+| Vercel AI SDK | TypeScript | `npm install prismor-warden-vercel` | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
+| Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Warden-Subject` header |
 
-The multi-tenant pattern is identical across all four: guard once at startup
-with no bound subject, then wrap each request with `use_subject`. A context var
-threads the subject through the evaluation pipeline — thread-safe and async-safe.
+The Python multi-tenant pattern: guard once at startup with no bound subject,
+then wrap each request with `use_subject`. A context var threads the subject
+through the evaluation pipeline — thread-safe and async-safe.
+
+For non-Python languages: pass `subject` per call in the request body or
+`X-Warden-Subject` header. The eval-server resolves it identically.
 
 ## What "guard" does
 
@@ -37,6 +42,47 @@ Regardless of framework, every adapter does the same three things:
 | LangChain / LangGraph | `tool.func` + `tool.coroutine` | before `tool.invoke()` / `tool.ainvoke()` executes |
 | CrewAI | `tool.func` → `tool._run` → `tool.run` (first found) | before the tool implementation runs |
 | browser-use | `Registry.execute_action` | before Playwright executes any browser action |
+| Vercel AI SDK | `tool.execute` | before the tool body runs, after the LLM emits the tool call |
+| HTTP (any language) | caller-side `POST /v1/evaluate` | before calling the tool implementation |
+
+## Eval-server (non-Python languages)
+
+For TypeScript, Go, Ruby, Java, Rust — any language that can make an HTTP request
+— run the **eval-server** as a sidecar and call it before executing each tool:
+
+```bash
+immunity eval-server --port 7071 --workspace /path/to/project
+```
+
+```
+POST /v1/evaluate
+{
+  "tool_name": "run_shell",
+  "arguments": { "command": "rm -rf /" },
+  "event_type": "shell",
+  "mode": "enforce",
+  "subject": "user:alice"
+}
+
+→ { "allow": false, "reason": "[CRITICAL] ...", "subject": { "user_id": "alice" } }
+```
+
+The Python policy engine, IAM, and telemetry run inside the sidecar. Adapters
+in other languages are ~25 lines of HTTP client code with no Python dependency.
+The adapter **fails open** if the eval-server is down — agents are never broken
+by infrastructure issues.
+
+Validated live on an Ubuntu EC2 instance with real OpenAI function calls:
+
+| Language | Adapter size | Dependencies |
+|---|---|---|
+| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor-warden-vercel` |
+| Node.js (raw) | ~25 lines | built-in `fetch` |
+| Ruby | ~20 lines | stdlib `Net::HTTP` |
+| Java 21 | ~25 lines | stdlib `java.net.http` |
+| Rust | ~25 lines | `ureq` crate |
+
+See `examples/multilang/` for runnable examples in all four languages.
 
 ## Modes
 
@@ -70,3 +116,4 @@ org-wide defaults.
 - [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools`, `WardenCallbackHandler`
 - [CrewAI](frameworks-crewai.md) — `guard_tools`, BaseTool and structured tool support
 - [browser-use](frameworks-browser-use.md) — `guard_controller`, network/file/shell event mapping
+- [Vercel AI SDK](frameworks-vercel-ai.md) — `wardenTools`, TypeScript, eval-server HTTP protocol

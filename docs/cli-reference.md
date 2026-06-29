@@ -55,7 +55,8 @@ immunity
 │   ├─ analyze / ingest       Run the engine over a JSONL session
 │   ├─ sessions / session     List / show stored sessions
 │   ├─ status --all           Terminal overview of all workspaces
-│   └─ dashboard              Local web dashboard (127.0.0.1:7070, opens browser)
+│   ├─ dashboard              Local web dashboard (127.0.0.1:7070, opens browser)
+│   └─ eval-server            HTTP policy evaluation sidecar for non-Python agents
 │
 ├─ Secret prevention
 │   ├─ cloak <action>         install · add · list · remove · status · pattern
@@ -120,6 +121,7 @@ Full policy model, rule schema, and the default rule list: [Warden](warden.md).
 | `immunity status --all` | `--days N` | Terminal overview of every registered workspace. See [Dashboard](dashboard.md). |
 | `immunity dashboard` | `--port`, `--host`, `--no-open` | Local web dashboard at `http://127.0.0.1:7070` (opens a browser tab). See [Dashboard](dashboard.md). |
 | `immunity serve` | `--port`, `--host`, `--no-open` | _Deprecated_ alias of `dashboard --no-open` (headless server only). |
+| `immunity eval-server` | `--port` (default 7071), `--host` (default 127.0.0.1), `--workspace` | Start an HTTP policy evaluation sidecar for non-Python agents. Exposes `POST /v1/evaluate` and `GET /health`. TypeScript, Ruby, Java, Go, Rust adapters call this instead of linking Python directly. See [Vercel AI SDK adapter](frameworks-vercel-ai.md#eval-server-api-reference). |
 
 ---
 
