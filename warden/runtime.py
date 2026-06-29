@@ -207,6 +207,13 @@ def evaluate_tool_call(
     if blocking is None and mode == "enforce" and getattr(engine, "is_legacy_policy", False):
         blocking = legacy_should_block(findings, event, engine.block_categories)
 
+    # Per-agent observe override: if the effective mode was downgraded to observe
+    # (by the agent registry), suppress blocking even when policy findings say enforce.
+    # Kill-switch (agent-control category) is exempt — it always blocks.
+    if blocking is not None and mode == "observe":
+        if blocking.get("category") != "agent-control":
+            blocking = None
+
     return Decision(
         allow=blocking is None,
         findings=findings,
