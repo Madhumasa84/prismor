@@ -83,7 +83,7 @@ def _build_event(*, tool_name, payload, event_type, session_id, agent, args=(), 
     }
 
 
-def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_type) -> Decision:
+def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_type, agent_name="") -> Decision:
     event = _build_event(
         tool_name=tool_name,
         payload=_payload(args, kwargs),
@@ -94,8 +94,8 @@ def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_t
         kwargs=kwargs,
     )
     return evaluate_tool_call(
-        event=event, workspace=ws, agent=agent, mode=mode, session_id=sid,
-        subject=resolve_subject(subject),
+        event=event, workspace=ws, agent=agent, agent_name=agent_name,
+        mode=mode, session_id=sid, subject=resolve_subject(subject),
     )
 
 
@@ -105,6 +105,7 @@ def warden_guard_tool(
     subject: Optional[Union[str, Subject]] = None,
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "langchain",
+    name: str = "",
     mode: str = "enforce",
     session_id: Optional[str] = None,
     event_type: str = "shell",
@@ -120,12 +121,13 @@ def warden_guard_tool(
         return tool
     ws = Path(workspace) if workspace else Path.cwd()
     sid = session_id or f"langchain-{os.getpid()}"
-    name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
+    _agent_name = name  # per-instance label (distinct from framework id)
+    tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
 
     def _decide(args: tuple, kwargs: dict):
         decision = _evaluate(
-            tool_name=name, args=args, kwargs=kwargs, subject=subject, ws=ws,
-            agent=agent, mode=mode, sid=sid, event_type=event_type,
+            tool_name=tool_name, args=args, kwargs=kwargs, subject=subject, ws=ws,
+            agent=agent, agent_name=_agent_name, mode=mode, sid=sid, event_type=event_type,
         )
         if not decision.allow and mode == "enforce":
             reason = decision.reason or "policy violation"

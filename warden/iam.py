@@ -201,6 +201,7 @@ def check_iam(
     event: Optional[Dict[str, Any]] = None,
     session_id: str = "",
     subject: Optional[Any] = None,
+    agent_profile: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Check an event against the IAM profile for the active identity.
 
@@ -222,6 +223,9 @@ def check_iam(
 
     config = load_iam_config(workspace)
     agent_id = _resolve_identity(config, subject)
+    # Fall back to the per-agent IAM profile assigned in agents.yaml
+    if not agent_id and agent_profile:
+        agent_id = agent_profile
     if not agent_id:
         return None
 

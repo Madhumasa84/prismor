@@ -62,6 +62,7 @@ def evaluate_tool_call(
     repo_root: Optional[Path] = None,
     subject: Optional[Subject] = None,
     persist: bool = True,
+    agent_name: str = "",
 ) -> Decision:
     """Evaluate one normalized tool-call ``event`` against active policy.
 
@@ -85,10 +86,27 @@ def evaluate_tool_call(
     """
     repo_root = repo_root or workspace
     subject = subject or resolve_subject()
-    # Stamp the principal onto the event so rules/IAM/telemetry can scope by user.
+    # Normalise agent_name: default to the framework id for backward compat.
+    _agent_name = agent_name or agent
+
+    # Stamp principal and agent identity onto the event.
     meta = event.setdefault("metadata", {})
     if "subject" not in meta:
         meta["subject"] = subject.as_dict()
+    meta.setdefault("agent_name", _agent_name)
+
+    # Resolve per-agent control (kill-switch, mode override, IAM profile).
+    _control = None
+    try:
+        from warden.agents import resolve_agent_control, record_seen, make_disabled_finding
+        _control = resolve_agent_control(_agent_name, workspace)
+        # Throttled auto-registration — once per agent per process.
+        record_seen(_agent_name, framework=agent, workspace=workspace)
+        # Per-agent mode override: takes precedence over the caller's mode.
+        if _control.mode:
+            mode = _control.mode
+    except Exception as _exc:
+        sys.stderr.write(f"[warden] agent control error: {_exc}\n")
 
     if persist:
         append_session_event(workspace, session_id, event)
@@ -102,6 +120,7 @@ def evaluate_tool_call(
                 workspace=workspace,
                 session_id=session_id,
                 agent=agent,
+                agent_name=_agent_name,
                 source="hook",
                 repo_url=None,
                 events=events,
@@ -128,11 +147,24 @@ def evaluate_tool_call(
     except Exception as exc:
         sys.stderr.write(f"[warden] scoped enforcement error: {exc}\n")
 
-    # IAM named-identity enforcement (now subject-aware).
+    # Per-agent kill-switch: inject a CRITICAL finding when the agent is disabled.
+    # This runs before IAM so the disabled state always wins.
+    if _control is not None and not _control.enabled:
+        try:
+            from warden.agents import make_disabled_finding
+            findings.insert(0, make_disabled_finding(_agent_name, session_id))
+        except Exception as exc:
+            sys.stderr.write(f"[warden] kill-switch error: {exc}\n")
+
+    # IAM named-identity enforcement (now subject-aware + per-agent profile).
     try:
         from warden.iam import check_iam
         iam_finding = check_iam(
-            workspace=workspace, event=event, session_id=session_id, subject=subject
+            workspace=workspace,
+            event=event,
+            session_id=session_id,
+            subject=subject,
+            agent_profile=_control.iam_profile if _control else None,
         )
         if iam_finding:
             findings.append(iam_finding)

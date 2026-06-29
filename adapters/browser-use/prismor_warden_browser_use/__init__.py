@@ -119,6 +119,7 @@ def guard_controller(
     subject: Optional[Union[str, Subject]] = None,
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "browser-use",
+    name: str = "",
     mode: str = "enforce",
     session_id: Optional[str] = None,
     raise_on_block: bool = False,
@@ -138,6 +139,7 @@ def guard_controller(
     original_execute = registry.execute_action
     ws = Path(workspace) if workspace else Path.cwd()
     sid = session_id or f"browser-use-{os.getpid()}"
+    _agent_name = name  # per-instance label
 
     @functools.wraps(original_execute)
     async def _guarded_execute(action_name: str, params: Any, **kwargs: Any) -> Any:
@@ -153,6 +155,7 @@ def guard_controller(
             event=event,
             workspace=ws,
             agent=agent,
+            agent_name=_agent_name,
             mode=mode,
             session_id=sid,
             subject=resolved,

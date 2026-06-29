@@ -270,6 +270,33 @@
   }
   .src-pill.supply { background: #fef3c7; color: #92400e; }
 
+  /* Named agents panel */
+  .row-disabled td { opacity: 0.55; }
+  .seg-toggle { display: inline-flex; border: 1px solid var(--gray-200); border-radius: 4px; overflow: hidden; }
+  .seg-btn {
+    padding: 2px 8px; font-size: 10px; background: transparent; border: none;
+    cursor: pointer; color: var(--gray-500); transition: background .12s, color .12s;
+  }
+  .seg-btn.active { background: var(--gray-800); color: #fff; }
+  .toggle-switch { position: relative; display: inline-block; width: 32px; height: 18px; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0; border-radius: 18px;
+    background: var(--gray-200); cursor: pointer; transition: .2s;
+  }
+  .toggle-slider:before {
+    position: absolute; content: ''; height: 12px; width: 12px;
+    left: 3px; bottom: 3px; border-radius: 50%;
+    background: white; transition: .2s;
+  }
+  input:checked + .toggle-slider { background: var(--green-500); }
+  input:checked + .toggle-slider:before { transform: translateX(14px); }
+  .iam-select {
+    font-size: 11px; padding: 2px 4px; border: 1px solid var(--gray-200);
+    border-radius: 3px; background: transparent; color: var(--gray-600);
+    max-width: 120px;
+  }
+
   @media (max-width: 768px) {
     .grid-4, .grid-3, .grid-2, .grid-1-2 { grid-template-columns: 1fr; }
     body { padding: 12px; }
@@ -415,6 +442,36 @@
         </tr></thead>
         <tbody id="scSessionsBody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ NAMED AGENTS ═══════════════════════════════════════════════ -->
+<div class="section">
+  <h2>Named Agents</h2><div class="rule"></div>
+  <span id="hintAgents" class="hint">per-instance control</span>
+</div>
+
+<div class="grid" style="grid-template-columns:1fr">
+  <div class="card">
+    <div class="card-title">Agent Control Panel</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Name</th>
+          <th>Framework</th>
+          <th>Last Seen</th>
+          <th class="right">Calls</th>
+          <th class="right">Blocked</th>
+          <th>Mode</th>
+          <th>Enabled</th>
+          <th>IAM Profile</th>
+        </tr></thead>
+        <tbody id="agentsBody"></tbody>
+      </table>
+    </div>
+    <div id="agentsEmpty" style="display:none;color:var(--dim);padding:1rem 0;font-size:.85rem">
+      No named agents seen yet. Pass <code>name="my-agent"</code> to an adapter or <code>agent_name</code> to the eval-server.
     </div>
   </div>
 </div>
@@ -1122,6 +1179,72 @@ async function loadSupplyChain() {
   } catch (e) { console.error('[warden] supply-chain fetch failed:', e); }
 }
 
+// ── Named Agents ─────────────────────────────────────────────────────────────
+let _agentIamProfiles = [];
+
+async function loadAgents() {
+  try {
+    const res = await fetch('/api/agents');
+    if (!res.ok) return;
+    const data = await res.json();
+    _agentIamProfiles = data.iam_profiles || [];
+    const agents = data.agents || [];
+    const tbody = document.getElementById('agentsBody');
+    const empty = document.getElementById('agentsEmpty');
+    if (!agents.length) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = agents.map(a => {
+      const modeToggle =
+        '<span class="seg-toggle" data-agent="' + safeAttr(a.name) + '" data-field="mode">' +
+        '<button class="seg-btn' + (a.mode === 'observe' ? ' active' : '') + '" onclick="setAgent(\'' + safeAttr(a.name) + '\',{mode:\'observe\'})" title="observe only">observe</button>' +
+        '<button class="seg-btn' + (!a.mode || a.mode === 'enforce' ? ' active' : '') + '" onclick="setAgent(\'' + safeAttr(a.name) + '\',{mode:\'enforce\'})" title="enforce policy">enforce</button>' +
+        '</span>';
+      const enableToggle =
+        '<label class="toggle-switch" title="' + (a.enabled ? 'Click to pause (kill-switch)' : 'Click to enable') + '">' +
+        '<input type="checkbox"' + (a.enabled ? ' checked' : '') + ' onchange="setAgent(\'' + safeAttr(a.name) + '\',{enabled:this.checked})">' +
+        '<span class="toggle-slider"></span>' +
+        '</label>';
+      const iamOpts = '<option value="">— none —</option>' +
+        _agentIamProfiles.map(p =>
+          '<option value="' + safeAttr(p) + '"' + (a.iam_profile === p ? ' selected' : '') + '>' + safe(p) + '</option>'
+        ).join('');
+      const iamSelect = '<select class="iam-select" onchange="setAgent(\'' + safeAttr(a.name) + '\',{iam_profile:this.value})">' + iamOpts + '</select>';
+      const pct = a.total_calls > 0 ? Math.round(a.blocked_calls / a.total_calls * 100) : 0;
+      const blockedStyle = pct > 30 ? 'color:var(--pink-600);font-weight:600' : '';
+      return '<tr class="' + (!a.enabled ? 'row-disabled' : '') + '">' +
+        '<td class="mono" style="font-weight:500">' + safe(a.name) + (!a.enabled ? ' <span class="sev-badge sev-critical" style="font-size:9px">paused</span>' : '') + '</td>' +
+        '<td style="color:var(--gray-400)">' + safe(a.framework || '—') + '</td>' +
+        '<td>' + tsCell(a.last_seen, a.last_seen) + '</td>' +
+        '<td class="right">' + fmtNum(a.total_calls) + '</td>' +
+        '<td class="right" style="' + blockedStyle + '">' + fmtNum(a.blocked_calls) + (a.total_calls > 0 ? ' <span style="color:var(--dim);font-size:10px">(' + pct + '%)</span>' : '') + '</td>' +
+        '<td>' + modeToggle + '</td>' +
+        '<td>' + enableToggle + '</td>' +
+        '<td>' + iamSelect + '</td>' +
+      '</tr>';
+    }).join('');
+  } catch (e) { console.error('[warden] agents fetch failed:', e); }
+}
+
+async function setAgent(name, fields) {
+  try {
+    const res = await fetch('/api/agents/' + encodeURIComponent(name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn('[warden] setAgent error:', err);
+      return;
+    }
+    await loadAgents();
+  } catch (e) { console.error('[warden] setAgent failed:', e); }
+}
+
 // ── Period filter ────────────────────────────────────────────────────────────
 document.getElementById('globalDays').addEventListener('change', () => {
   loadStats();
@@ -1130,12 +1253,13 @@ document.getElementById('globalDays').addEventListener('change', () => {
 
 // ── Boot + poll ──────────────────────────────────────────────────────────────
 initCharts();
-Promise.all([loadStats(), loadSessions(), loadFindings(), loadEvents(), loadSupplyChain()]);
+Promise.all([loadStats(), loadSessions(), loadFindings(), loadEvents(), loadSupplyChain(), loadAgents()]);
 
 setInterval(() => {
   loadStats();
   loadSessions();
   loadSupplyChain();
+  loadAgents();
   // Reload findings/events only if on page 1 with no active filters (avoid disrupting investigation)
   if (findState.page === 1 && !findState.agent && !findState.severity && !findState.category && !findState.q) {
     loadFindings();

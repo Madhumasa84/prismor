@@ -1152,6 +1152,63 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         return
 
+    # ── agents ─────────────────────────────────────────────────────────
+    if args.command == "agents":
+        from warden.agents import (
+            list_agents as _list_agents,
+            resolve_agent_control as _resolve_agent_ctl,
+            upsert_agent as _upsert_agent,
+            format_agent_table as _fmt_agent_table,
+        )
+        subcmd = getattr(args, "agents_subcommand", None)
+
+        if subcmd == "list" or subcmd is None:
+            agents = _list_agents(workspace)
+            print(f"\n  {_color('PRISMOR IMMUNITY', _BOLD)}  named agents\n")
+            print(_fmt_agent_table(agents))
+            print()
+            return
+
+        if subcmd == "show":
+            agent_name_arg = getattr(args, "agent_name", None)
+            if not agent_name_arg:
+                sys.stderr.write("error: agent name required for 'agents show'\n")
+                raise SystemExit(1)
+            ctl = _resolve_agent_ctl(agent_name_arg, workspace)
+            print(f"\n  name:        {ctl.name}")
+            print(f"  framework:   {ctl.framework or '(unknown)'}")
+            print(f"  enabled:     {'yes' if ctl.enabled else _color('NO (paused)', _RED)}")
+            print(f"  mode:        {ctl.mode or '(global)'}")
+            print(f"  iam_profile: {ctl.iam_profile or '(none)'}")
+            print(f"  last_seen:   {ctl.last_seen or '(never)'}")
+            print()
+            return
+
+        if subcmd == "set":
+            agent_name_arg = getattr(args, "agent_name", None)
+            if not agent_name_arg:
+                sys.stderr.write("error: agent name required for 'agents set'\n")
+                raise SystemExit(1)
+            fields = {}
+            if getattr(args, "enabled", False):
+                fields["enabled"] = True
+            if getattr(args, "disabled", False):
+                fields["enabled"] = False
+            mode_val = getattr(args, "mode", None)
+            if mode_val:
+                fields["mode"] = mode_val
+            iam_val = getattr(args, "iam_profile", None)
+            if iam_val is not None:
+                fields["iam_profile"] = iam_val or None
+            if not fields:
+                sys.stderr.write("error: specify at least one of --enabled, --disabled, --mode, --iam-profile\n")
+                raise SystemExit(1)
+            ctl = _upsert_agent(agent_name_arg, workspace, **fields)
+            print(f"Updated '{agent_name_arg}': enabled={ctl.enabled}, mode={ctl.mode or '(global)'}, iam_profile={ctl.iam_profile or '(none)'}")
+            return
+
+        return
+
     # ── sweep ──────────────────────────────────────────────────────────
     if args.command == "sweep":
         from warden.sweep import (
@@ -2067,6 +2124,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Event type to test (default: command)",
     )
     iam_check.add_argument("--value", required=True, help="Value to test (command, path, or URL)")
+
+    # ── agents ───────────────────────────────────────────────────────────
+    agents_parser = subparsers.add_parser(
+        "agents",
+        help="Manage named agent instances (kill-switch, mode, IAM profile)",
+    )
+    agents_subs = agents_parser.add_subparsers(dest="agents_subcommand")
+
+    agents_subs.add_parser("list", help="List all known named agents")
+
+    agents_show = agents_subs.add_parser("show", help="Show control settings for a named agent")
+    agents_show.add_argument("agent_name", help="Agent instance name")
+
+    agents_set = agents_subs.add_parser("set", help="Update control settings for a named agent")
+    agents_set.add_argument("agent_name", help="Agent instance name")
+    agents_set_group = agents_set.add_mutually_exclusive_group()
+    agents_set_group.add_argument("--enabled", action="store_true", dest="enabled", default=False,
+                                  help="Enable the agent (lift kill-switch)")
+    agents_set_group.add_argument("--disabled", action="store_true", dest="disabled", default=False,
+                                  help="Disable the agent (kill-switch: all tool calls blocked)")
+    agents_set.add_argument(
+        "--mode",
+        choices=["observe", "enforce"],
+        default=None,
+        help="Per-agent mode override (observe or enforce)",
+    )
+    agents_set.add_argument(
+        "--iam-profile",
+        dest="iam_profile",
+        default=None,
+        metavar="PROFILE",
+        help="Bind agent to an IAM profile (empty string to clear)",
+    )
 
     # ── setup ────────────────────────────────────────────────────────────
     setup_parser = subparsers.add_parser(

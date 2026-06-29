@@ -55,7 +55,7 @@ def _payload(args: tuple, kwargs: dict) -> str:
     return " ".join(parts).strip()
 
 
-def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_type) -> Decision:
+def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_type, agent_name="") -> Decision:
     field = _TYPE_FIELD.get(event_type, "command")
     event = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -72,8 +72,8 @@ def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_t
         },
     }
     return evaluate_tool_call(
-        event=event, workspace=ws, agent=agent, mode=mode, session_id=sid,
-        subject=resolve_subject(subject),
+        event=event, workspace=ws, agent=agent, agent_name=agent_name,
+        mode=mode, session_id=sid, subject=resolve_subject(subject),
     )
 
 
@@ -83,6 +83,7 @@ def warden_guard_tool(
     subject: Optional[Union[str, Subject]] = None,
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "crewai",
+    name: str = "",
     mode: str = "enforce",
     session_id: Optional[str] = None,
     event_type: str = "shell",
@@ -93,12 +94,13 @@ def warden_guard_tool(
         return tool
     ws = Path(workspace) if workspace else Path.cwd()
     sid = session_id or f"crewai-{os.getpid()}"
-    name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
+    _agent_name = name  # per-instance label
+    tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
 
     def _decide(args: tuple, kwargs: dict):
         decision = _evaluate(
-            tool_name=name, args=args, kwargs=kwargs, subject=subject, ws=ws,
-            agent=agent, mode=mode, sid=sid, event_type=event_type,
+            tool_name=tool_name, args=args, kwargs=kwargs, subject=subject, ws=ws,
+            agent=agent, agent_name=_agent_name, mode=mode, sid=sid, event_type=event_type,
         )
         if not decision.allow and mode == "enforce":
             reason = decision.reason or "policy violation"

@@ -20,8 +20,11 @@ Request body (POST /v1/evaluate):
       "mode":       "enforce",           # optional, default "enforce"
       "session_id": "req-abc123",        # optional
       "subject":    "user:alice",        # optional — user:<id> or user=x;team=y
+      "agent_name": "support-bot",       # optional — per-instance name (enables kill-switch + control)
       "workspace":  "/path/to/project"   # optional, overrides server default
     }
+
+    X-Warden-Agent-Name header also accepted (takes precedence over body field).
 
 Response:
     {
@@ -139,6 +142,11 @@ class EvalHandler(BaseHTTPRequestHandler):
         agent: str = body.get("agent", "sdk")
         mode: str = body.get("mode", "enforce")
         session_id: str = body.get("session_id", f"eval-{os.getpid()}")
+        # Agent name: prefer X-Warden-Agent-Name header, then body field
+        agent_name: str = (
+            self.headers.get("X-Warden-Agent-Name")
+            or body.get("agent_name", "")
+        )
 
         # Subject: prefer X-Warden-Subject header, then body field
         subject_str: Optional[str] = (
@@ -165,6 +173,7 @@ class EvalHandler(BaseHTTPRequestHandler):
                 event=event,
                 workspace=workspace,
                 agent=agent,
+                agent_name=agent_name,
                 mode=mode,
                 session_id=session_id,
                 subject=subject,

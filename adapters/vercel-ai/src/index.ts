@@ -19,8 +19,14 @@ export interface WardenOptions {
   mode?: "enforce" | "observe";
   /** Workspace path forwarded to the policy engine. Default: process.cwd() */
   workspace?: string;
-  /** Agent identifier recorded in telemetry. Default: "vercel-ai" */
+  /** Framework identifier (e.g. "vercel-ai"). Default: "vercel-ai" */
   agent?: string;
+  /**
+   * Per-instance agent name — used for the dashboard kill-switch and per-agent
+   * mode/IAM controls. Distinct from `agent` (the framework). Example: "support-bot".
+   * Default: same as `agent`.
+   */
+  agentName?: string;
   /**
    * Map tool argument keys to a Warden event type.
    * Default: "shell" (args serialised to command string).
@@ -57,12 +63,14 @@ async function evaluate(
     headers: {
       "Content-Type": "application/json",
       ...(opts.subject ? { "X-Warden-Subject": opts.subject } : {}),
+      ...(opts.agentName ? { "X-Warden-Agent-Name": opts.agentName } : {}),
     },
     body: JSON.stringify({
       tool_name: toolName,
       arguments: args,
       event_type: opts.eventType,
       agent: opts.agent,
+      agent_name: opts.agentName,
       mode: opts.mode,
       session_id: sessionId,
       subject: opts.subject,
@@ -79,12 +87,14 @@ async function evaluate(
 }
 
 function resolveOpts(opts: WardenOptions): Required<WardenOptions> {
+  const agent = opts.agent ?? "vercel-ai";
   return {
     evalUrl: opts.evalUrl ?? "http://127.0.0.1:7071",
     subject: opts.subject ?? "",
     mode: opts.mode ?? "enforce",
     workspace: opts.workspace ?? process.cwd(),
-    agent: opts.agent ?? "vercel-ai",
+    agent,
+    agentName: opts.agentName ?? agent,
     eventType: opts.eventType ?? "shell",
   };
 }

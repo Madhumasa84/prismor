@@ -112,6 +112,7 @@ def warden_guard(
     subject: Optional[Union[str, Subject]] = None,
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "openai-agents",
+    name: str = "",
     mode: str = "enforce",
     session_id: Optional[str] = None,
     event_type: str = "shell",
@@ -156,6 +157,7 @@ def warden_guard(
     ws = Path(workspace) if workspace else Path.cwd()
     sid = session_id or f"openai-agents-{os.getpid()}"
     builder = command_builder or _default_command
+    _agent_name = name  # per-instance label
 
     def _evaluate(args: tuple, kwargs: dict) -> Decision:
         payload = builder(args, kwargs)
@@ -172,6 +174,7 @@ def warden_guard(
             event=event,
             workspace=ws,
             agent=agent,
+            agent_name=_agent_name,
             mode=mode,
             session_id=sid,
             subject=resolve_subject(subject),
@@ -222,6 +225,7 @@ def _guard_function_tool(
     subject: Optional[Union[str, Subject]],
     workspace: Optional[Union[str, Path]],
     agent: str,
+    name: str = "",
     mode: str,
     session_id: Optional[str],
     event_type: str,
@@ -239,12 +243,13 @@ def _guard_function_tool(
     original = tool.on_invoke_tool
     ws = Path(workspace) if workspace else Path.cwd()
     sid = session_id or f"openai-agents-{os.getpid()}"
-    name = getattr(tool, "name", "tool")
+    tool_name = getattr(tool, "name", "tool")
+    _agent_name = name  # per-instance label
 
     @functools.wraps(original)
     async def guarded(ctx: Any, input_str: Any) -> Any:
         event = build_event(
-            tool_name=name,
+            tool_name=tool_name,
             payload=_payload_from_tool_input(input_str),
             event_type=event_type,
             session_id=sid,
@@ -255,6 +260,7 @@ def _guard_function_tool(
             event=event,
             workspace=ws,
             agent=agent,
+            agent_name=_agent_name,
             mode=mode,
             session_id=sid,
             subject=resolve_subject(subject),
@@ -277,6 +283,7 @@ def guard_agent(
     subject: Optional[Union[str, Subject]] = None,
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "openai-agents",
+    name: str = "",
     mode: str = "enforce",
     session_id: Optional[str] = None,
     event_type: str = "shell",
@@ -302,6 +309,7 @@ def guard_agent(
                 subject=subject,
                 workspace=workspace,
                 agent=agent,
+                name=name,
                 mode=mode,
                 session_id=session_id,
                 event_type=event_type,
