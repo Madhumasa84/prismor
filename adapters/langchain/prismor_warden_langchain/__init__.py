@@ -129,7 +129,7 @@ def warden_guard_tool(
             tool_name=tool_name, args=args, kwargs=kwargs, subject=subject, ws=ws,
             agent=agent, agent_name=_agent_name, mode=mode, sid=sid, event_type=event_type,
         )
-        if not decision.allow and mode == "enforce":
+        if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             reason = decision.reason or "policy violation"
             if raise_on_block:
                 raise WardenBlocked(reason, decision)
@@ -204,5 +204,5 @@ class WardenCallbackHandler(_BaseCB):  # type: ignore[misc]
             ws=self._ws, agent=self._agent, mode=self._mode, sid=self._sid,
             event_type=self._event_type,
         )
-        if not decision.allow and self._mode == "enforce":
+        if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             raise WardenBlocked(decision.reason or "policy violation", decision)

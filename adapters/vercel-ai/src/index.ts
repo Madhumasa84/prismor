@@ -122,7 +122,7 @@ export function wardenTool<
 
   const guarded = async (args: Record<string, unknown>, ctx: unknown) => {
     const decision = await evaluate(toolName, args, resolved, sid);
-    if (!decision.allow && resolved.mode === "enforce") {
+    if (!decision.allow) {  // honor the runtime decision (incl. org kill-switch), not the app-passed mode
       throw new WardenBlocked(decision.reason ?? "policy violation", decision);
     }
     return original(args, ctx);

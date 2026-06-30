@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Prismor Warden adapter for browser-use — policy-controlled browser actions"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
 dependencies = ["immunity-agent>=1.11.0"]
 
 [project.optional-dependencies]
