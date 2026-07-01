@@ -46,3 +46,31 @@ agent.invoke({...}, config={"callbacks": [WardenCallbackHandler(subject="user:al
 
 Captures and evaluates every tool call via `on_tool_start` even for tools you did
 not wrap (raises to abort the call in enforce mode).
+
+## Trace findings to your control plane
+
+Guarding a tool evaluates it, but findings only **upload** to your Prismor
+control plane if two things are in place — otherwise `evaluate_tool_call` runs
+locally and silently ships nothing:
+
+1. **An enrolled identity** at `~/.prismor/identity.json` (or `$PRISMOR_HOME`),
+   written by `prismor enroll <token>`. It carries the `device_key` +
+   `api_base` the telemetry sink authenticates with.
+
+2. **The `prismor` telemetry sink** in your workspace policy — this is the
+   switch that turns findings into uploads:
+
+   ```yaml
+   # .prismor-warden/policy.yaml
+   settings:
+     outputs:
+       - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest
+   ```
+
+Each finding is then attributed with the framework (`langchain`), the
+`subject` (end-user), the device, verdict, and category. Point `api_base` at
+`http://localhost:3000` to trace into a local dev control plane instead of prod.
+
+> If your agent runs but nothing shows up in the dashboard, it's almost always a
+> missing `outputs: [{type: prismor}]` in the active policy, or an un-enrolled
+> machine.
