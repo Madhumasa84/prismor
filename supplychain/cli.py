@@ -118,7 +118,7 @@ def _print_report(event, verdicts, feed_hits: list, recommendations=None) -> Non
     recommendations = recommendations or {}
 
     print()
-    print(f"  {_c('IMMUNITY', _BOLD)}  supply chain  {_c(f'[{event.ecosystem}]', _DIM)}")
+    print(f"  {_c('PRISMOR', _BOLD)}  supply chain  {_c(f'[{event.ecosystem}]', _DIM)}")
     print(f"  {_c('─' * 52, _DIM)}")
     print()
 

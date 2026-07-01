@@ -595,7 +595,7 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
         _spinner_run("Updating Prismor", _update)
     else:
         def _pip_note():
-            return True, "run `pip install --upgrade immunity-agent` to update"
+            return True, "run `pip install --upgrade prismor` to update"
         _spinner_run("Prismor (pip install)", _pip_note)
 
     # 2. Policy overrides for disabled rules

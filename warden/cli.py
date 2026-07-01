@@ -1164,7 +1164,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         if subcmd == "list" or subcmd is None:
             agents = _list_agents(workspace)
-            print(f"\n  {_color('PRISMOR IMMUNITY', _BOLD)}  named agents\n")
+            print(f"\n  {_color('PRISMOR', _BOLD)}  named agents\n")
             print(_fmt_agent_table(agents))
             print()
             return
