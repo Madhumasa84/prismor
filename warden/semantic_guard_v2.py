@@ -2,7 +2,7 @@
 SemanticGuard v2 — local LLM subagent edition.
 
 Uses the Claude Code CLI (~/.local/bin/claude) already installed and
-authenticated on st3ve as the semantic analysis subagent. No API key
+authenticated on the host as the semantic analysis subagent. No API key
 configuration required — Claude Code's own session handles auth.
 
 Pipeline:

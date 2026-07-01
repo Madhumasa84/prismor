@@ -98,7 +98,7 @@ URL query parameter — no additional configuration needed.
 
 ## Live-validated blocks
 
-Tested on st3ve with `browser-use 0.13.1` and the real `Controller` object:
+Tested on a Linux host with `browser-use 0.13.1` and the real `Controller` object:
 
 | Action | URL / args | Result |
 |---|---|---|
