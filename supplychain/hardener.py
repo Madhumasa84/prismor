@@ -330,7 +330,7 @@ def print_harden_report(
 ) -> None:
     print()
     suffix = _c("  [dry run — no files written]", _YELLOW) if dry_run else ""
-    print(f"  {_c('IMMUNITY', _BOLD)}  harden  {_c(str(root), _DIM)}{suffix}")
+    print(f"  {_c('PRISMOR', _BOLD)}  harden  {_c(str(root), _DIM)}{suffix}")
     print(f"  {_c('─' * 60, _DIM)}")
     print()
 

@@ -108,10 +108,12 @@ prismor setup          # interactive 4-step onboarding wizard
 **Option D: git clone + wizard:**
 
 ```bash
-pip3 install pyyaml                          # required dependency
+pip3 install pyyaml                          # on Debian/Ubuntu use: sudo apt install python3-yaml
 git clone https://github.com/PrismorSec/prismor.git ~/.prismor
 PRISMOR_MODE=enforce PRISMOR_CLOAK=1 bash ~/.prismor/scripts/init.sh .
 ```
+
+> On externally-managed Pythons (PEP 668 — Ubuntu 23.04+, Homebrew) `pip3 install` refuses to run; install PyYAML from your system package manager instead (`sudo apt install python3-yaml`, `brew install pyyaml`, …). `init.sh` will tell you if it's missing.
 
 This installs enforce-mode Warden hooks and the Cloak prevention layer. To register a secret, run `prismor cloak add stripe_key` and enter the value when prompted. Reference it in tool calls as `@@SECRET:stripe_key@@` and the hook handles the rest.
 

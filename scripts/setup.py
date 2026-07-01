@@ -640,7 +640,9 @@ def do_install(target, mode, rules, agents, hooks=None):
     def info(k, v):
         print(f"  {w(k + ':', GRN)}  {w(v, DIM)}")
     n_hooks = sum(1 for d in HOOK_DEFS if hooks.get(d["id"], d["default"]))
-    info("Hooks",      f"{n_hooks}/{len(HOOK_DEFS)} installed  (mode: {mode})")
+    hooks_off = [d["label"] for d in HOOK_DEFS if not hooks.get(d["id"], d["default"])]
+    off_note = f"  — off by choice: {', '.join(hooks_off)}" if hooks_off else ""
+    info("Hooks",      f"{n_hooks}/{len(HOOK_DEFS)} layers enabled  (mode: {mode}){off_note}")
     if "claude" in agents:
         info("Skill",  str(target / ".claude" / "skills" / "immunity-agent").replace(home, "~"))
     info("Docs",       "https://github.com/PrismorSec/prismor")
