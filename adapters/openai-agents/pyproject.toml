@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismor-warden-openai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prismor Warden adapter for the OpenAI Agents SDK — per-user runtime tool-call policy for production agents."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,7 +15,7 @@ keywords = ["openai", "agents", "security", "policy", "guardrail", "prismor", "w
 # Requires the Prismor Warden runtime (the `warden` package) to be importable.
 # It provides the shared policy engine + evaluate_tool_call entrypoint.
 dependencies = [
-    "immunity-agent>=1.11.0",
+    "prismor>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -24,4 +24,4 @@ dependencies = [
 sdk = ["openai-agents>=0.0.1"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["prismor_warden_openai"]
+packages = ["prismor_warden_openai", "prismor"]

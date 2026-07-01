@@ -22,7 +22,7 @@ pip install "prismor-warden-browser-use[browser]"   # + browser-use itself
 ```python
 from browser_use import Agent, Controller
 from langchain_openai import ChatOpenAI
-from prismor_warden_browser_use import guard_controller
+from prismor.warden.browser_use import guard_controller
 
 controller = Controller()
 guard_controller(controller, mode="enforce")   # every browser action policy-checked
@@ -54,7 +54,7 @@ LLM decides to call go_to_url("https://webhook.site/…")
 ## Per-user control (multi-tenant)
 
 ```python
-from prismor_warden_browser_use import guard_controller, use_subject
+from prismor.warden.browser_use import guard_controller, use_subject
 
 controller = Controller()
 guard_controller(controller)   # once, at startup — no bound subject

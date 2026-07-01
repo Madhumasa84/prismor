@@ -23,7 +23,7 @@ pip install "prismor-warden-openai[sdk]"   # + the openai-agents SDK itself
 
 ```python
 from agents import Agent, function_tool
-from prismor_warden_openai import guard_agent
+from prismor.warden.openai import guard_agent
 
 @function_tool
 def run_shell(command: str) -> str:
@@ -46,7 +46,7 @@ tool call is attributed to the end-user, not the host device. Guard the agent
 once with no bound subject, then set the user per request:
 
 ```python
-from prismor_warden_openai import use_subject
+from prismor.warden.openai import use_subject
 
 guard_agent(agent)                       # once, at startup
 

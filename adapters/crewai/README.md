@@ -15,7 +15,7 @@ pip install prismor-warden-crewai      # + the Warden runtime (immunity-agent)
 
 ```python
 from crewai import Agent
-from prismor_warden_crewai import guard_tools
+from prismor.warden.crewai import guard_tools
 
 tools = guard_tools([run_shell], subject="user:alice", mode="enforce")
 agent = Agent(role="ops", goal="...", backstory="...", tools=tools)

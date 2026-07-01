@@ -15,7 +15,7 @@ _ADAPTER_SRC = Path(__file__).resolve().parent.parent / "adapters" / "browser-us
 if str(_ADAPTER_SRC) not in sys.path:
     sys.path.insert(0, str(_ADAPTER_SRC))
 
-from prismor_warden_browser_use import WardenBlocked, guard_controller  # noqa: E402
+from prismor.warden.browser_use import WardenBlocked, guard_controller  # noqa: E402
 
 
 def _make_controller():

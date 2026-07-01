@@ -52,7 +52,7 @@ One deployed agent serves many users. Attribute each call with `use_subject`
 (a contextvar — async/thread-safe; `warden/principal.py`):
 
 ```python
-from prismor_warden_openai import use_subject
+from prismor.warden.openai import use_subject
 with use_subject("user:alice"):       # also "user=alice;team=data;org=acme"
     Runner.run_sync(agent, prompt)
 ```
@@ -73,7 +73,7 @@ Priority: explicit `subject=` arg → `use_subject` context → `WARDEN_SUBJECT`
 ### OpenAI Agents
 ```python
 from agents import Agent, Runner
-from prismor_warden_openai import guard_agent, use_subject
+from prismor.warden.openai import guard_agent, use_subject
 agent = Agent(name="ops", tools=[run_shell])
 guard_agent(agent, subject="user:alice")     # wraps every FunctionTool
 with use_subject("user:alice"):
@@ -82,20 +82,20 @@ with use_subject("user:alice"):
 
 ### LangChain / LangGraph
 ```python
-from prismor_warden_langchain import guard_tools
+from prismor.warden.langchain import guard_tools
 tools = guard_tools([run_shell, fetch_url], subject="user:alice")
 # Observability-only: config={"callbacks": [WardenCallbackHandler()]}
 ```
 
 ### CrewAI
 ```python
-from prismor_warden_crewai import guard_tools
+from prismor.warden.crewai import guard_tools
 tools = guard_tools([run_shell], subject="user:alice")
 ```
 
 ### browser-use
 ```python
-from prismor_warden_browser_use import guard_controller, use_subject
+from prismor.warden.browser_use import guard_controller, use_subject
 controller = Controller(); guard_controller(controller)   # patch once at startup
 with use_subject("user:alice"):
     await Agent(task="…", llm=llm, controller=controller).run()

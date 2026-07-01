@@ -9,7 +9,7 @@ raises :class:`WardenBlocked` and the underlying tool never executes.
 Easy path — guard a whole agent in one call::
 
     from agents import Agent, function_tool
-    from prismor_warden_openai import guard_agent
+    from prismor.warden.openai import guard_agent
 
     @function_tool
     def run_shell(command: str) -> str:

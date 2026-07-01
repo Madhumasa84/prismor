@@ -22,7 +22,7 @@ pip install "prismor-warden-openai[sdk]"   # also installs openai-agents
 
 ```python
 from agents import Agent, function_tool
-from prismor_warden_openai import warden_guard, WardenBlocked
+from prismor.warden.openai import warden_guard, WardenBlocked
 
 @function_tool
 def run_shell(command: str) -> str:

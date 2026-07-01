@@ -16,7 +16,7 @@ pip install "prismor-warden-langchain[langchain]"  # + langchain-core itself
 
 ```python
 from langchain_core.tools import tool
-from prismor_warden_langchain import guard_tools
+from prismor.warden.langchain import guard_tools
 
 @tool
 def run_shell(command: str) -> str:
@@ -39,7 +39,7 @@ tool definitions.
 ## Guard a single tool
 
 ```python
-from prismor_warden_langchain import warden_guard_tool
+from prismor.warden.langchain import warden_guard_tool
 
 guarded = warden_guard_tool(run_shell, mode="enforce", subject="user:alice")
 ```
@@ -50,7 +50,7 @@ If you already use LangChain callbacks or need to guard an agent executor withou
 modifying its tool list, use `WardenCallbackHandler`:
 
 ```python
-from prismor_warden_langchain import WardenCallbackHandler
+from prismor.warden.langchain import WardenCallbackHandler
 
 handler = WardenCallbackHandler(mode="enforce")
 agent_executor.invoke({"input": prompt}, config={"callbacks": [handler]})
@@ -67,7 +67,7 @@ error in the agent's output.
 ## Per-user control (multi-tenant)
 
 ```python
-from prismor_warden_langchain import guard_tools, use_subject
+from prismor.warden.langchain import guard_tools, use_subject
 
 tools = guard_tools([run_shell, read_file])   # once, at startup — no bound subject
 agent = create_react_agent(llm, tools)
@@ -100,7 +100,7 @@ Works identically — guard the tools before passing them to the graph:
 
 ```python
 from langgraph.prebuilt import create_react_agent
-from prismor_warden_langchain import guard_tools, use_subject
+from prismor.warden.langchain import guard_tools, use_subject
 
 tools = guard_tools([run_shell, search])
 graph = create_react_agent(llm, tools)

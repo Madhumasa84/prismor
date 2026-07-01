@@ -17,7 +17,7 @@ pip install "prismor-warden-browser-use[browser]"  # + browser-use itself
 
 ```python
 from browser_use import Agent, Controller
-from prismor_warden_browser_use import guard_controller
+from prismor.warden.browser_use import guard_controller
 
 controller = Controller()
 guard_controller(controller, mode="enforce")   # every action now policy-checked
@@ -29,7 +29,7 @@ await agent.run()
 ## Per-user (multi-tenant)
 
 ```python
-from prismor_warden_browser_use import guard_controller, use_subject
+from prismor.warden.browser_use import guard_controller, use_subject
 
 controller = Controller()
 guard_controller(controller)                   # once at startup, no bound subject
