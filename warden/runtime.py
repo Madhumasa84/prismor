@@ -260,6 +260,10 @@ def _dispatch_telemetry(
             extra={
                 "session_id": session_id,
                 "agent": agent,
+                # Instance label (adapter `name=`), distinct from the framework
+                # id above — lets the org dashboard tell "checkout-bot" apart
+                # from every other agent on the same framework.
+                "agent_name": _agent_name if _agent_name != agent else None,
                 "mode": mode,
                 "workspace": str(workspace),
                 "policy_scope": policy_scope,

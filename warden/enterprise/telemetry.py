@@ -175,6 +175,9 @@ def build_record(
         # org dashboard for production framework agents serving many users.
         "subject": extra.get("subject"),
         "agent": extra.get("agent"),
+        # Instance label (adapter `name=`) — distinct from the framework id, so
+        # the org dashboard can name every SDK-built agent individually.
+        "agent_name": extra.get("agent_name"),
         "mode": extra.get("mode"),
         "type": event_type,
         "verdict": _verdict(finding),
