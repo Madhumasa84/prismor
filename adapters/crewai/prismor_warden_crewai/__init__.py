@@ -12,7 +12,7 @@ executes. Returns the same tool object.
 Easy path::
 
     from crewai import Agent
-    from prismor_warden_crewai import guard_tools
+    from prismor.warden.crewai import guard_tools
 
     tools = guard_tools([run_shell], subject="user:alice")
     agent = Agent(role="ops", tools=tools, ...)

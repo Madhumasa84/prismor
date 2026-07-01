@@ -2,15 +2,15 @@
 set -e
 
 # Prismor Init — Add Prismor security to any project
-# Usage: curl -fsSL https://raw.githubusercontent.com/PrismorSec/immunity-agent/main/scripts/init.sh | bash
-#    or: bash /path/to/immunity-agent/scripts/init.sh [TARGET_DIR]
+# Usage: curl -fsSL https://raw.githubusercontent.com/PrismorSec/prismor/main/scripts/init.sh | bash
+#    or: bash /path/to/prismor/scripts/init.sh [TARGET_DIR]
 #
 # Environment:
 #   PRISMOR_MODE      observe | enforce   (default: observe)
 #   PRISMOR_CLOAK     1 | true | yes      (default: off — opts into the secret
 #                                          cloaking prevention layer)
 
-PRISMOR_REPO="https://github.com/PrismorSec/immunity-agent.git"
+PRISMOR_REPO="https://github.com/PrismorSec/prismor.git"
 PRISMOR_DIR="${PRISMOR_HOME:-$HOME/.prismor}"
 TARGET_DIR="${1:-.}"
 MODE="${PRISMOR_MODE:-observe}"

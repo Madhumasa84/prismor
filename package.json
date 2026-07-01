@@ -1,6 +1,6 @@
 {
-  "name": "immunity-agent",
-  "version": "1.7.1",
+  "name": "prismor",
+  "version": "1.13.0",
   "description": "Runtime security for AI coding agents: policy enforcement, secret prevention, and supply-chain blocking.",
   "license": "Apache-2.0",
   "keywords": [
@@ -20,6 +20,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/PrismorSec/immunity-agent.git"
+    "url": "https://github.com/PrismorSec/prismor.git"
   }
 }

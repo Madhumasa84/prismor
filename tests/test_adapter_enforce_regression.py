@@ -17,8 +17,8 @@ for _pkg in ("langchain", "crewai"):
     if str(_src) not in sys.path:
         sys.path.insert(0, str(_src))
 
-import prismor_warden_langchain as lc   # noqa: E402
-import prismor_warden_crewai as crew    # noqa: E402
+import prismor.warden.langchain as lc   # noqa: E402
+import prismor.warden.crewai as crew    # noqa: E402
 from warden.runtime import Decision     # noqa: E402
 
 

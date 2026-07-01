@@ -15,12 +15,12 @@ for _pkg in ("langchain", "crewai"):
     if str(_src) not in sys.path:
         sys.path.insert(0, str(_src))
 
-from prismor_warden_langchain import (  # noqa: E402
+from prismor.warden.langchain import (  # noqa: E402
     WardenBlocked as LCBlocked,
     guard_tools as lc_guard,
     warden_guard_tool as lc_guard_one,
 )
-from prismor_warden_crewai import (  # noqa: E402
+from prismor.warden.crewai import (  # noqa: E402
     guard_tools as crew_guard,
     warden_guard_tool as crew_guard_one,
 )

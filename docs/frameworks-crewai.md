@@ -17,7 +17,7 @@ pip install "prismor-warden-crewai[crewai]"   # + crewai itself
 ```python
 from crewai import Agent, Task, Crew
 from crewai_tools import tool
-from prismor_warden_crewai import guard_tools
+from prismor.warden.crewai import guard_tools
 
 @tool("Shell runner")
 def run_shell(command: str) -> str:
@@ -42,7 +42,7 @@ unaffected.
 ## Guard a single tool
 
 ```python
-from prismor_warden_crewai import warden_guard_tool
+from prismor.warden.crewai import warden_guard_tool
 
 guarded = warden_guard_tool(run_shell, mode="enforce", subject="user:alice")
 ```
@@ -51,7 +51,7 @@ guarded = warden_guard_tool(run_shell, mode="enforce", subject="user:alice")
 
 ```python
 from crewai import Crew
-from prismor_warden_crewai import guard_tools, use_subject
+from prismor.warden.crewai import guard_tools, use_subject
 
 tools = guard_tools([run_shell, search])   # once, at startup — no bound subject
 

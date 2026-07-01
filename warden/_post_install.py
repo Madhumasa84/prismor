@@ -1,4 +1,4 @@
-"""Post-install welcome message, shown once after `pip install immunity-agent`.
+"""Post-install welcome message, shown once after `pip install prismor`.
 
 Triggered via the immunity-agent.pth file that ships in the wheel and is
 processed by Python at startup. The marker file ensures it fires exactly once,
@@ -34,7 +34,7 @@ def maybe_show() -> None:
 
     print(
         f"\n"
-        f"  {BOLD}{CYAN}immunity-agent{RST} installed\n"
+        f"  {BOLD}{CYAN}prismor{RST} installed\n"
         f"\n"
         f"  Run {BOLD}prismor setup{RST} to configure runtime hooks for your AI coding agent.\n"
         f"\n"

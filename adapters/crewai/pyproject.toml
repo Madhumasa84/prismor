@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prismor-warden-crewai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prismor Warden adapter for CrewAI — per-user runtime tool-call policy for production agents."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,11 +13,11 @@ authors = [{ name = "Prismor" }]
 keywords = ["crewai", "security", "policy", "guardrail", "prismor", "warden"]
 
 dependencies = [
-    "immunity-agent>=1.11.0",
+    "prismor>=1.13.0",
 ]
 
 [project.optional-dependencies]
 crewai = ["crewai>=0.30"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["prismor_warden_crewai"]
+packages = ["prismor_warden_crewai", "prismor"]

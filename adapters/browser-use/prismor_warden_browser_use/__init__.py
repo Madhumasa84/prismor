@@ -14,7 +14,7 @@ browser.
 Easy path::
 
     from browser_use import Agent, Controller
-    from prismor_warden_browser_use import guard_controller
+    from prismor.warden.browser_use import guard_controller
 
     controller = Controller()
     guard_controller(controller)          # every action now policy-checked
@@ -23,7 +23,7 @@ Easy path::
 
 Per-user / multi-tenant::
 
-    from prismor_warden_browser_use import use_subject
+    from prismor.warden.browser_use import use_subject
 
     guard_controller(controller)           # once, at startup
 

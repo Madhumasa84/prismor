@@ -15,7 +15,12 @@ _ADAPTER_SRC = Path(__file__).resolve().parent.parent / "adapters" / "openai-age
 if str(_ADAPTER_SRC) not in sys.path:
     sys.path.insert(0, str(_ADAPTER_SRC))
 
-from prismor_warden_openai import WardenBlocked, warden_guard  # noqa: E402
+from prismor.warden.openai import WardenBlocked, warden_guard  # noqa: E402
+
+# The legacy flat module must stay importable and share the same objects, so
+# isinstance checks work across old- and new-style imports.
+import prismor_warden_openai as _legacy  # noqa: E402
+assert _legacy.WardenBlocked is WardenBlocked
 
 
 def _make_tool():

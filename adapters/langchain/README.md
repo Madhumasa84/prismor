@@ -18,7 +18,7 @@ pip install prismor-warden-langchain      # + the Warden runtime (immunity-agent
 
 ```python
 from langgraph.prebuilt import create_react_agent
-from prismor_warden_langchain import guard_tools
+from prismor.warden.langchain import guard_tools
 
 tools = guard_tools([run_shell, fetch_url], subject="user:alice", mode="enforce")
 agent = create_react_agent(model, tools)
@@ -39,7 +39,7 @@ It is threaded into policy evaluation, IAM profile selection
 ### Observability handler
 
 ```python
-from prismor_warden_langchain import WardenCallbackHandler
+from prismor.warden.langchain import WardenCallbackHandler
 
 agent.invoke({...}, config={"callbacks": [WardenCallbackHandler(subject="user:alice")]})
 ```

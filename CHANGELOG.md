@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Added
+
+- **`prismor.warden.*` namespace imports for framework adapters** — the Python adapters are now importable as `from prismor.warden.openai import guard_agent`, `from prismor.warden import langchain`, `prismor.warden.crewai`, and `prismor.warden.browser_use` (PEP 420 namespace packages; adapter distributions bumped to 0.2.0). The old flat `prismor_warden_*` module names keep working as aliases of the same module objects.
+
+### Fixed
+
+- Adapter distributions now depend on `prismor>=1.13.0` instead of the deprecated `immunity-agent` package name.
+- The wheel now bundles the framework docs (`frameworks-*.md`), `sdk-integration.md`, and `connecting-to-the-platform.md` under `warden/data/docs/`, so links from the installed skill's `SKILL.md` resolve.
+- Post-install banner and `scripts/init.sh` no longer reference the old `immunity-agent` name/repo; `package.json` metadata updated to `prismor`.
+
 ## [1.13.0] — 2026-06-29
 
 First release published to PyPI under the new **`prismor`** package name. `immunity-agent` is now a deprecated redirect package.
