@@ -60,3 +60,19 @@ By default the emitted event `type` is `shell`, so existing rules like
 `destructive-command` and `secret-exfiltration` apply to tool arguments. Pass
 `event_type="file_write"` / `"network"` / `"tool_result"` (and a
 `command_builder`) for tools whose risk lives in a path, URL, or output.
+
+## Trace findings to your control plane
+
+Guarding evaluates tool calls, but findings only **upload** when the machine is
+enrolled (`~/.prismor/identity.json`) **and** the workspace policy enables the
+telemetry sink:
+
+```yaml
+# .prismor-warden/policy.yaml
+settings:
+  outputs:
+    - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest
+```
+
+Set `api_base` to `http://localhost:3000` to trace into a local dev control
+plane instead of prod. No sink → the agent runs but nothing reaches the dashboard.

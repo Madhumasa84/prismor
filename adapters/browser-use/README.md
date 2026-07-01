@@ -48,3 +48,19 @@ with use_subject("user:alice"):                # per-request
 
 Denied actions return a string to the LLM (`⛔ Prismor Warden blocked …`) so the
 agent recovers gracefully. Use `raise_on_block=True` to raise `WardenBlocked` instead.
+
+## Trace findings to your control plane
+
+Guarding evaluates tool calls, but findings only **upload** when the machine is
+enrolled (`~/.prismor/identity.json`) **and** the workspace policy enables the
+telemetry sink:
+
+```yaml
+# .prismor-warden/policy.yaml
+settings:
+  outputs:
+    - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest
+```
+
+Set `api_base` to `http://localhost:3000` to trace into a local dev control
+plane instead of prod. No sink → the agent runs but nothing reaches the dashboard.
