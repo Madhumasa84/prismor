@@ -6,7 +6,7 @@ call through the **local Warden runtime** before the tool body executes.
 
 See also: [docs/connecting-to-the-platform.md](connecting-to-the-platform.md)
 (the runtime — not the SDK — is what connects to the platform) ·
-[docs/frameworks-overview.md](frameworks-overview.md) · [COMPARISON.md](../COMPARISON.md).
+[docs/frameworks-overview.md](frameworks-overview.md).
 
 ## The one rule: the SDK talks to the LOCAL RUNTIME, never the control plane
 
@@ -122,9 +122,9 @@ headers.
 
 The eval-server is local; if it is unreachable the HTTP client treats the call as
 allowed so an infrastructure fault never breaks the agent. **Note:** failure
-handling is not yet uniform across all adapters — see [GAPS.md](../GAPS.md) for
-the open item and the intended single policy. For non-loopback binds of the
-eval-server, also see the auth follow-up in GAPS.md.
+handling is not yet uniform across all adapters — a known open item, with an
+intended single policy. For non-loopback binds of the eval-server, an auth
+follow-up is also planned.
 
 ## Licensing
 
