@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prismor Immunity Agent CLI — local session-security utility for AI coding agents.
+"""Prismor CLI — local session-security utility for AI coding agents.
 
 Commands:
   check         Quick pre-check a command or file path against policy rules
@@ -169,23 +169,23 @@ def main(argv: Optional[List[str]] = None) -> None:
         from warden.server import run_server
         if args.command == "serve":
             sys.stderr.write(
-                "Note: 'immunity serve' is a deprecated alias — use 'immunity dashboard --no-open'.\n"
+                "Note: 'prismor serve' is a deprecated alias — use 'prismor dashboard --no-open'.\n"
             )
         registered = list_registered_workspaces()
         if not registered:
             sys.stderr.write(
                 "[warden] Warning: no registered workspaces found.\n"
-                "         Run 'immunity install-hooks' in a project first to collect data.\n"
+                "         Run 'prismor install-hooks' in a project first to collect data.\n"
             )
         # dashboard opens a browser by default; serve stays headless. --no-open
         # forces headless for dashboard too.
         open_browser = args.command == "dashboard" and not getattr(args, "no_open", False)
-        run_server(host=args.host, port=args.port, open_browser=open_browser)
+        run_server(host=args.host, port=args.port, open_browser=open_browser, workspace=workspace)
         return
 
     # ── info: deprecated alias of status ────────────────────────────────
     if args.command == "info":
-        sys.stderr.write("Note: 'immunity info' is a deprecated alias — use 'immunity status'.\n")
+        sys.stderr.write("Note: 'prismor info' is a deprecated alias — use 'prismor status'.\n")
         _print_status_overview(workspace)
         return
 
@@ -197,7 +197,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             sys.stderr.write(
                 "error: enrollment token required\n"
                 "  Generate one in the Prismor dashboard (Admin → Devices → Enroll)\n"
-                "  then run:  immunity enroll <token>\n"
+                "  then run:  prismor enroll <token>\n"
             )
             raise SystemExit(1)
         try:
@@ -225,14 +225,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         from warden.enterprise import identity as _identity
         ident = _identity.load_identity()
         if not ident:
-            print("Not enrolled. Run `immunity enroll <token>` to link this machine to an org.")
+            print("Not enrolled. Run `prismor enroll <token>` to link this machine to an org.")
             return
         revoked = _identity.revoked_info()
         if revoked:
             print("Enrolled — but the control plane REJECTED this device's key")
             print(f"  reason:     {revoked.get('reason') or 'rejected (401/403)'}")
             print("  This device was likely revoked by an org admin. Local protection")
-            print("  still applies (last good policy). Re-link with: immunity enroll <token>")
+            print("  still applies (last good policy). Re-link with: prismor enroll <token>")
         else:
             print("Enrolled")
         print(f"  org:        {ident.get('org_name') or ident.get('org_id')}")
@@ -309,12 +309,12 @@ def main(argv: Optional[List[str]] = None) -> None:
             print(f"  org:        {ident.get('org_name') or ident.get('org_id')}")
             print("  → Org policy applies and redacted telemetry is reported to your org.")
             if reason in ("default_all", "opt_in"):
-                print("  → Personal repo? Run `immunity scope personal` to keep it local-only.")
+                print("  → Personal repo? Run `prismor scope personal` to keep it local-only.")
         else:
             why = {"opt_out": "you marked it personal", "personal": "not an org-claimed repo"}.get(reason, reason)
             print(f"  scope:      personal / local-only — {why}")
             print("  → Local protection is active, but NOTHING is reported to your org")
-            print("    and no org policy applies. Use `immunity scope managed` to opt in.")
+            print("    and no org policy applies. Use `prismor scope managed` to opt in.")
         pats = _scope.org_managed_patterns()
         if pats:
             print(f"  org claims: {', '.join(pats)}")
@@ -325,7 +325,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         from warden.enterprise import identity as _identity, workspace_scope as _scope
         ident = _identity.load_identity()
         if not ident:
-            print("This machine is not enrolled. Run `immunity enroll <token>` first.")
+            print("This machine is not enrolled. Run `prismor enroll <token>` first.")
             return
         remote = _scope.detect_git_remote(workspace)
         if not remote:
@@ -333,7 +333,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
         reason = getattr(args, "reason", None)
         if not reason:
-            print("A reason is required: immunity exempt request --reason \"why this repo needs it\"")
+            print("A reason is required: prismor exempt request --reason \"why this repo needs it\"")
             return
         import json as _json, urllib.request, urllib.error
         base = str(ident.get("api_base") or _identity.api_base()).rstrip("/")
@@ -490,7 +490,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         summary = result["summary"]
 
         print()
-        print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  skill scanner")
+        print(f"  {_color('PRISMOR', _BOLD)}  skill scanner")
         print(f"  {_color('─' * 50, _DIM)}")
         print()
 
@@ -555,7 +555,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
         print()
-        print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  dependency check")
+        print(f"  {_color('PRISMOR', _BOLD)}  dependency check")
         print(f"  {_color('─' * 50, _DIM)}")
         print()
 
@@ -626,7 +626,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
         print()
-        print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  security audit")
+        print(f"  {_color('PRISMOR', _BOLD)}  security audit")
         print(f"  {_color('─' * 58, _DIM)}")
         print()
 
@@ -698,7 +698,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             print(f"  {issues} issue(s): {', '.join(parts)}  |  {_color(f'{passed} passed', _GREEN)}")
 
             if fixable > 0:
-                print(f"  {_color(f'{fixable} issue(s) can be auto-fixed', _CYAN)} — run {_color('immunity audit --fix', _BOLD)}")
+                print(f"  {_color(f'{fixable} issue(s) can be auto-fixed', _CYAN)} — run {_color('prismor audit --fix', _BOLD)}")
 
         print()
 
@@ -711,7 +711,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(f"    {_color('FIXED', _GREEN)}  {action}")
             if actions:
                 print()
-                print(f"  {_color(f'{len(actions)} fix(es) applied.', _GREEN)} Run {_color('immunity audit', _BOLD)} again to verify.")
+                print(f"  {_color(f'{len(actions)} fix(es) applied.', _GREEN)} Run {_color('prismor audit', _BOLD)} again to verify.")
             else:
                 print(f"    {_color('No fixes were applied.', _DIM)}")
             print()
@@ -910,7 +910,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     reason += f"\nRecommended fix: {blocking['remediation']}"
                 sys.stdout.write(json.dumps({"permissionDecision": "deny", "permissionDecisionReason": reason}) + "\n")
             else:
-                sys.stderr.write(f"Prismor Immunity Agent blocked this action: [{blocking['severity']}] {blocking['title']}\n")
+                sys.stderr.write(f"Prismor blocked this action: [{blocking['severity']}] {blocking['title']}\n")
                 if blocking.get("evidence"):
                     sys.stderr.write(f"{blocking['evidence']}\n")
                 if blocking.get("remediation"):
@@ -984,7 +984,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(json.dumps(report, indent=2))
                 return
             print()
-            print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  sandbox status")
+            print(f"  {_color('PRISMOR', _BOLD)}  sandbox status")
             print(f"  {_color('─' * 50, _DIM)}")
             print()
             print(f"  {_color('Enabled:', _GREEN)}      {report['enabled']}")
@@ -1024,7 +1024,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     pieces = pieces[1:]
                 cmd = " ".join(pieces)
             if not cmd:
-                sys.stderr.write("error: command required (use `immunity sandbox run -- <cmd>`)\n")
+                sys.stderr.write("error: command required (use `prismor sandbox run -- <cmd>`)\n")
                 raise SystemExit(1)
             if getattr(args, "mode", None):
                 cfg["mode"] = args.mode
@@ -1082,10 +1082,10 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         if subcmd == "list" or subcmd is None:
             active = _get_agent_id()
-            print(f"\n  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  agent identities\n")
+            print(f"\n  {_color('PRISMOR', _BOLD)}  agent identities\n")
             if not agent_ids:
                 print(f"  {_color('No agents defined.', _DIM)}")
-                print(f"  Run: immunity iam init\n")
+                print(f"  Run: prismor iam init\n")
                 return
             for aid in agent_ids:
                 marker = _color(" ← active", _GREEN) if aid == active else ""
@@ -1332,10 +1332,11 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(f"Installed Hermes Agent cloaking plugin at {h_result['pluginDir']}")
                 for label in h_result["hooksInstalled"]:
                     print(f"  + {label}")
-            print(f"Secrets directory: {result.get('secretsDir', h_result.get('secretsDir', str(Path.home() / '.prismor' / 'secrets')))}")
+            _sdir = (result if cloak_agent in ("claude", "all") else h_result).get("secretsDir", str(Path.home() / ".prismor" / "secrets"))
+            print(f"Secrets directory: {_sdir}")
             print()
             print("Next step: register your first secret with")
-            print(f"  {_color('immunity cloak add <name>', _CYAN)}  (reads the value from stdin)")
+            print(f"  {_color('prismor cloak add <name>', _CYAN)}  (reads the value from stdin)")
             return
 
         if sub == "uninstall":
@@ -1480,11 +1481,11 @@ def main(argv: Optional[List[str]] = None) -> None:
                 for p in custom:
                     print(f"  {_color('•', _CYAN)} {p}")
             else:
-                print(f"  {_color('none — add with: immunity cloak pattern add <regex>', _DIM)}")
+                print(f"  {_color('none — add with: prismor cloak pattern add <regex>', _DIM)}")
             print()
             return
 
-        raise SystemExit("Usage: immunity cloak {install|uninstall|add|list|remove|status|pattern}")
+        raise SystemExit("Usage: prismor cloak {install|uninstall|add|list|remove|status|pattern}")
 
     # ── canary subcommands ─────────────────────────────────────────────
     if args.command == "canary":
@@ -1516,9 +1517,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         if sub == "list" or sub is None:
             entries = canary_mod.list_canaries()
             if not entries:
-                print("No canaries planted. Try:  immunity canary plant ~/.aws/credentials.canary --type aws")
+                print("No canaries planted. Try:  prismor canary plant ~/.aws/credentials.canary --type aws")
                 return
-            print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  canaries")
+            print(f"  {_color('PRISMOR', _BOLD)}  canaries")
             print(f"  {_color('─' * 50, _DIM)}")
             for e in entries:
                 print(f"  {e['id']}  {e['type']:7s}  {e['path']}")
@@ -1565,7 +1566,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         # No action given → print usage instead of the cryptic
         # "Unsupported command: policy" (the command IS supported; it needs an action).
         sys.stderr.write(
-            "Usage: immunity policy {init|validate|show|edit|test}\n"
+            "Usage: prismor policy {init|validate|show|edit|test}\n"
             "  init      Write a starter .prismor-warden/policy.yaml\n"
             "  validate  Check a policy file against the schema + floor\n"
             "  show      Print the effective policy for this workspace\n"
@@ -1596,7 +1597,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if not sessions:
                     print("No active scoped sessions.")
                     return
-                print("Showing all scoped sessions — pass an id for full rules: immunity scope show <session-id>")
+                print("Showing all scoped sessions — pass an id for full rules: prismor scope show <session-id>")
                 for s in sessions:
                     tools = ", ".join(s["rules"].get("allowed_tools", []))
                     print(f"  {s['session_id']}  tools: [{tools}]")
@@ -1606,7 +1607,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             if not sessions:
                 print("No active scoped sessions.")
                 return
-            print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  scoped sessions")
+            print(f"  {_color('PRISMOR', _BOLD)}  scoped sessions")
             print(f"  {_color('─' * 50, _DIM)}")
             for s in sessions:
                 tools = ", ".join(s["rules"].get("allowed_tools", []))
@@ -1631,7 +1632,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
         # No action → print usage instead of dumping every session's full box.
         sys.stderr.write(
-            "Usage: immunity scope {list|show|edit|clear} [session-id]\n"
+            "Usage: prismor scope {list|show|edit|clear} [session-id]\n"
             "  list             List active scoped sessions (compact)\n"
             "  show [session]   Show rules — compact for all, full for one session\n"
             "  edit <session>   Edit a session's scoped rules in $EDITOR\n"
@@ -1682,7 +1683,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             if not pending:
                 print("No pending candidate rules.")
                 return
-            print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  candidate rules")
+            print(f"  {_color('PRISMOR', _BOLD)}  candidate rules")
             print(f"  {_color('─' * 50, _DIM)}")
             for c in pending:
                 rule = c["rule"]
@@ -1691,7 +1692,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if c.get("sample_evidence"):
                     print(f"       Sample: {c['sample_evidence'][:100]}")
                 print()
-            print(f"Use {_color('immunity learn --apply ID', _BOLD)} to accept a rule.")
+            print(f"Use {_color('prismor learn --apply ID', _BOLD)} to accept a rule.")
             return
 
         # Run full learning analysis
@@ -1729,16 +1730,16 @@ def main(argv: Optional[List[str]] = None) -> None:
             ) as resp:
                 latest = json.loads(resp.read())["info"]["version"]
         except (urllib.error.URLError, KeyError, OSError) as exc:
-            sys.stderr.write(f"immunity update: could not reach PyPI — {exc}\n")
+            sys.stderr.write(f"prismor update: could not reach PyPI — {exc}\n")
             raise SystemExit(1)
 
         if latest == _current:
-            print(f"immunity {_current} is already the latest version.")
+            print(f"prismor {_current} is already the latest version.")
             return
 
         print(f"Update available: {_current} → {latest}")
         if check_only:
-            print("Run 'immunity update' (without --check) to install.")
+            print("Run 'prismor update' (without --check) to install.")
             return
 
         result = subprocess.run(
@@ -1757,11 +1758,11 @@ def main(argv: Optional[List[str]] = None) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        # `immunity` is the canonical entrypoint that forwards here, so anchor
+        # `prismor` is the canonical entrypoint that forwards here, so anchor
         # usage/error strings to it instead of leaking the module filename
         # (argparse otherwise shows "immunity_cli.py" in subcommand usage/errors).
         prog="immunity",
-        description="Prismor Immunity Agent — runtime security for AI coding agents.",
+        description="Prismor — runtime security for AI coding agents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--workspace", help="Workspace path (applies to all commands)")
@@ -2316,7 +2317,7 @@ def _print_dashboard(days: int = 7) -> None:
 
     # ── Header ────────────────────────────────────────────────────────────
     print()
-    print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  all workspaces")
+    print(f"  {_color('PRISMOR', _BOLD)}  all workspaces")
     print(f"  {'─' * 50}")
     print()
 
@@ -2354,7 +2355,7 @@ def _print_dashboard(days: int = 7) -> None:
 
     if not workspaces:
         print(f"  {_color('No registered workspaces found.', _DIM)}")
-        print(f"  Run {_color('immunity install-hooks --agent all --mode enforce', _CYAN)} in a project to register it.")
+        print(f"  Run {_color('prismor install-hooks --agent all --mode enforce', _CYAN)} in a project to register it.")
         print()
         return
 
@@ -2485,7 +2486,7 @@ def _print_status(session: Dict[str, Any]) -> None:
 def _print_status_overview(workspace: Path) -> None:
     """One-shot health check: mode, hooks, cloak, latest session.
 
-    Designed so an agent (or a human) can run `immunity status` once at
+    Designed so an agent (or a human) can run `prismor status` once at
     session start instead of stitching together `info` + `cloak status` +
     the prior session-only `status`. Output is intentionally compact and
     ends with the single next action that matters.
@@ -2494,7 +2495,7 @@ def _print_status_overview(workspace: Path) -> None:
     ws_display = str(workspace).replace(home, "~")
 
     print()
-    print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  status")
+    print(f"  {_color('PRISMOR', _BOLD)}  status")
     print(f"  {_color('─' * 50, _DIM)}")
     print()
     print(f"  {_color('Workspace:', _GREEN)}   {ws_display}")
@@ -2563,12 +2564,12 @@ def _print_status_overview(workspace: Path) -> None:
     # Next-step nudge — one action, picked by current state
     print()
     if not agents_with_hooks:
-        print(f"  {_color('Next:', _CYAN)} immunity install-hooks --agent claude --mode observe")
+        print(f"  {_color('Next:', _CYAN)} prismor install-hooks --agent claude --mode observe")
     elif mode == "observe":
         print(f"  {_color('Tip:', _DIM)}  observe mode logs only. Switch with:")
-        print(f"        immunity install-hooks --agent all --mode enforce")
+        print(f"        prismor install-hooks --agent all --mode enforce")
     elif sessions and sessions[0].get("findingsCount", 0) > 0:
-        print(f"  {_color('Next:', _CYAN)} immunity sessions --findings-only")
+        print(f"  {_color('Next:', _CYAN)} prismor sessions --findings-only")
     else:
         print(f"  {_color('OK:', _GREEN)}   workspace is clean")
     print()
@@ -2616,7 +2617,7 @@ allowlists:
 settings:
   # Optional Docker-backed sandbox for Claude Bash tool calls. Warden still
   # evaluates the original command first; allowed commands are rewritten to
-  # `immunity sandbox run`.
+  # `prismor sandbox run`.
   # sandbox:
   #   enabled: true
   #   mode: enforce
@@ -2670,7 +2671,7 @@ def _policy_test(workspace: Path, test_file: Optional[str] = None) -> None:
 
     result = run_cases(cases, workspace=workspace)
     print()
-    print(f"  {_color('PRISMOR IMMUNITY AGENT', _BOLD)}  policy tests ({path.name})")
+    print(f"  {_color('PRISMOR', _BOLD)}  policy tests ({path.name})")
     print(f"  {_color('─' * 50, _DIM)}")
     print()
 
@@ -2775,52 +2776,137 @@ def _policy_edit(workspace: Path) -> None:
     _atexit.register(_restore)
     tty.setcbreak(fd)
 
-    def _read_key():
-        ch = sys.stdin.read(1)
-        if ch == '\x1b':
-            ch2 = sys.stdin.read(1)
-            if ch2 == '[':
-                ch3 = sys.stdin.read(1)
-                return 'ESC[' + ch3
-            return ch
-        return ch
+    import select
 
-    sel = 0
+    def _read_key():
+        # Read at the raw fd level (unbuffered). Mixing select() with
+        # sys.stdin.read() breaks here: read() buffers the rest of an escape
+        # sequence in Python, so select() on the fd sees nothing and a lone ESC
+        # is wrongly reported. os.read goes straight to the OS buffer.
+        ch = os.read(fd, 1)
+        if ch == b'\x1b':
+            # Distinguish a bare ESC from an arrow/cursor sequence via a short
+            # poll. Handle both CSI ("\x1b[") and SS3 ("\x1bO") cursor keys.
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                return '\x1b'
+            ch2 = os.read(fd, 1)
+            if ch2 in (b'[', b'O'):
+                ch3 = os.read(fd, 1)
+                return 'ESC[' + ch3.decode('latin-1', 'ignore')
+            return '\x1b'
+        try:
+            return ch.decode('utf-8')
+        except UnicodeDecodeError:
+            return ''
+
+    import shutil
+
+    sel = 0          # index into the currently-visible (filtered) list
+    top = 0          # first visible row of the scroll viewport
+    query = ""       # active search filter
+    searching = False  # True while typing a search query
+
+    def _visible():
+        if not query:
+            return all_rules
+        q = query.lower()
+        return [r for r in all_rules if q in r["id"].lower() or q in r["title"].lower()]
+
     while True:
+        term = shutil.get_terminal_size((100, 30))
+        cols, rows = term.columns, term.lines
+        vis = _visible()
+        sel = 0 if not vis else max(0, min(sel, len(vis) - 1))
+
+        # Viewport height = terminal rows minus fixed chrome (header + footer).
+        view_h = max(3, rows - 10)
+        if sel < top:
+            top = sel
+        elif sel >= top + view_h:
+            top = sel - view_h + 1
+        top = max(0, min(top, max(0, len(vis) - view_h)))
+
         n_on = sum(1 for r in all_rules if r["on"])
         buf = "\033[H\033[J\033[?25l"  # home, clear, hide cursor
-        buf += f"\n  {_BOLD}PRISMOR IMMUNITY AGENT{_NC}  policy edit\n"
-        buf += f"  {_DIM}Workspace: {workspace}{_NC}\n"
-        buf += f"  {_DIM}{'─' * 64}{_NC}\n\n"
-        buf += f"  {n_on}/{len(all_rules)} rules enabled\n\n"
+        buf += f"\n  {_BOLD}PRISMOR{_NC}  policy edit"
+        buf += f"   {_DIM}{n_on}/{len(all_rules)} enabled"
+        if query:
+            buf += f"  ·  filter {_CYAN}“{query}”{_NC}{_DIM} → {len(vis)}"
+        buf += f"{_NC}\n"
+        buf += f"  {_DIM}{'─' * min(max(cols - 4, 20), 80)}{_NC}\n"
 
-        for i, r in enumerate(all_rules):
-            arrow = f"{_CYAN}▸ {_NC}" if i == sel else "  "
+        # top scroll indicator
+        buf += (f"  {_DIM}↑ {top} more{_NC}\n" if top > 0 else "\n")
+
+        # Title column starts after: 2 + arrow(2) + dot(1) + 2 + sev(10) + rid(28) + 1
+        title_col = 46
+        title_max = max(12, cols - title_col - 2)
+        if not vis:
+            buf += f"  {_DIM}— no rules match “{query}” —{_NC}\n"
+        for idx in range(top, min(top + view_h, len(vis))):
+            r = vis[idx]
+            arrow = f"{_CYAN}▸ {_NC}" if idx == sel else "  "
             dot = f"{_GREEN}●{_NC}" if r["on"] else f"{_DIM}○{_NC}"
             sev = r["severity"]
             sev_c = _RED if sev == "CRITICAL" else _YELLOW if sev == "HIGH" else _DIM
             sev_s = f"{sev_c}{sev:<10}{_NC}"
-            rid = f"{_BOLD}{r['id']:<28}{_NC}" if i == sel else f"{r['id']:<28}"
-            title = f"{_DIM}{r['title']}{_NC}"
-            buf += f"  {arrow}{dot}  {sev_s}{rid} {title}\n"
+            rid = f"{_BOLD}{r['id']:<28}{_NC}" if idx == sel else f"{r['id']:<28}"
+            t = r["title"]
+            if len(t) > title_max:
+                t = t[:title_max - 1] + "…"
+            buf += f"  {arrow}{dot}  {sev_s}{rid} {_DIM}{t}{_NC}\n"
 
-        buf += f"\n  {_CYAN}{_BOLD}↑↓{_NC}{_DIM} move  ·  {_NC}"
-        buf += f"{_CYAN}{_BOLD}space{_NC}{_DIM} toggle  ·  {_NC}"
-        buf += f"{_CYAN}{_BOLD}a{_NC}{_DIM} all  ·  {_NC}"
-        buf += f"{_CYAN}{_BOLD}n{_NC}{_DIM} none  ·  {_NC}"
-        buf += f"{_CYAN}{_BOLD}enter{_NC}{_DIM} save  ·  {_NC}"
-        buf += f"{_CYAN}{_BOLD}q{_NC}{_DIM} cancel{_NC}\n"
+        # bottom scroll indicator
+        remaining = len(vis) - (top + view_h)
+        buf += (f"  {_DIM}↓ {remaining} more{_NC}\n" if remaining > 0 else "\n")
+
+        if searching:
+            buf += f"  {_CYAN}{_BOLD}/{_NC}{query}{_BOLD}▏{_NC}   {_DIM}type to filter · enter apply · esc clear{_NC}\n"
+        else:
+            buf += f"  {_CYAN}{_BOLD}↑↓{_NC}{_DIM} move · {_NC}"
+            buf += f"{_CYAN}{_BOLD}space{_NC}{_DIM} toggle · {_NC}"
+            buf += f"{_CYAN}{_BOLD}/{_NC}{_DIM} search · {_NC}"
+            buf += f"{_CYAN}{_BOLD}a{_NC}{_DIM}/{_NC}{_CYAN}{_BOLD}n{_NC}{_DIM} all/none · {_NC}"
+            buf += f"{_CYAN}{_BOLD}enter{_NC}{_DIM} save · {_NC}"
+            buf += f"{_CYAN}{_BOLD}q{_NC}{_DIM} cancel{_NC}\n"
         sys.stdout.write(buf)
         sys.stdout.flush()
 
         key = _read_key()
-        if key == 'ESC[A':    sel = (sel - 1) % len(all_rules)
-        elif key == 'ESC[B':  sel = (sel + 1) % len(all_rules)
-        elif key == ' ':      all_rules[sel]["on"] = not all_rules[sel]["on"]
-        elif key in ('a','A'):
-            for r in all_rules: r["on"] = True
-        elif key in ('n','N'):
-            for r in all_rules: r["on"] = False
+
+        if searching:
+            # While searching: printable chars filter live; arrows still move.
+            if key in ('\r', '\n'):
+                searching = False
+            elif key == '\x1b':            # bare ESC clears the filter
+                searching = False; query = ""; sel = 0; top = 0
+            elif key in ('\x7f', '\b'):
+                query = query[:-1]; sel = 0; top = 0
+            elif key == 'ESC[A':
+                if vis: sel = (sel - 1) % len(vis)
+            elif key == 'ESC[B':
+                if vis: sel = (sel + 1) % len(vis)
+            elif len(key) == 1 and key.isprintable():
+                query += key; sel = 0; top = 0
+            continue
+
+        if key == 'ESC[A':
+            if vis: sel = (sel - 1) % len(vis)
+        elif key == 'ESC[B':
+            if vis: sel = (sel + 1) % len(vis)
+        elif key == 'ESC[H':            # Home
+            sel = 0
+        elif key == 'ESC[F':            # End
+            sel = max(0, len(vis) - 1)
+        elif key == ' ':
+            if vis: vis[sel]["on"] = not vis[sel]["on"]
+        elif key == '/':
+            searching = True
+        elif key in ('a', 'A'):         # all (within current filter)
+            for r in vis: r["on"] = True
+        elif key in ('n', 'N'):         # none (within current filter)
+            for r in vis: r["on"] = False
         elif key in ('\r', '\n'):
             break  # save
         elif key in ('q', 'Q', '\x03'):
@@ -2853,7 +2939,7 @@ def _policy_edit(workspace: Path) -> None:
             policy_file.write_text('version: "1.0"\n\nrules: []\n\nallowlists: []\n')
         print(f"  {_color('✓', _GREEN)} All rules enabled (using defaults)")
 
-    print(f"\n  Run {_color('immunity policy show', _CYAN)} to verify.")
+    print(f"\n  Run {_color('prismor policy show', _CYAN)} to verify.")
 
 
 # ── SARIF output ────────────────────────────────────────────────────────
@@ -2925,7 +3011,7 @@ def format_sarif(
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "Prismor Immunity Agent",
+                    "name": "Prismor",
                     "version": __version__,
                     "informationUri": "https://github.com/PrismorSec/prismor",
                     "rules": sarif_rules,
@@ -3042,7 +3128,7 @@ def _redact_evidence(evidence: str) -> str:
 
 def format_sessions(payload: Dict[str, Any]) -> str:
     sessions = payload["sessions"]
-    lines = ["Prismor Immunity Agent Sessions", "======================"]
+    lines = ["Prismor Sessions", "======================"]
     if not sessions:
         lines.append("No sessions stored.")
         return "\n".join(lines)
@@ -3070,7 +3156,7 @@ def format_sessions(payload: Dict[str, Any]) -> str:
 
 def format_analysis(result: Dict[str, Any]) -> str:
     lines = [
-        "Prismor Immunity Agent Report",
+        "Prismor Report",
         "=====================",
         f"Events: {result['summary']['totalEvents']}",
         f"Findings: {result['summary']['totalFindings']}",

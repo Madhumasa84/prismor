@@ -18,7 +18,7 @@
 # decloak.sh and idempotent across retries.
 #
 # Scanned tools: Bash (.command), Write / Edit / MultiEdit / mcp__* (full
-# tool_input). Configure detection patterns with `immunity cloak pattern add`.
+# tool_input). Configure detection patterns with `prismor cloak pattern add`.
 #
 # Stdin:  Claude Code PreToolUse JSON payload
 # Stdout: JSON permissionDecision=deny (on a fresh raw secret), else empty.

@@ -1,3 +1,15 @@
+## [1.13.0] — 2026-06-29
+
+First release published to PyPI under the new **`prismor`** package name. `immunity-agent` is now a deprecated redirect package.
+
+### Changed
+
+- **`prismor` is the canonical PyPI package** — `pip install prismor` is the supported install path going forward. The package ships the full Warden runtime, supply-chain engine, and CLI (`prismor`, with `immunity` kept as a deprecated alias).
+
+### Deprecated
+
+- **`immunity-agent` is now a thin redirect package** — `pip install immunity-agent` installs `prismor` as a dependency and surfaces a "renamed to prismor" notice on its PyPI page. It carries no code of its own; existing installs keep working via the bundled `prismor` CLI. Use `pip install -U prismor` instead.
+
 ## [1.11.0] — 2026-06-26
 
 Supply-chain block/observe output now includes safe version recommendations, and setup writes agent context files for all supported agents.
@@ -5,7 +17,7 @@ Supply-chain block/observe output now includes safe version recommendations, and
 ### Added
 
 - **Safe version recommendations in supply-chain output** — `_score_package()` now calls `recommend_safe_version()` and embeds `safe_version` and `remediation` fields in every `dependency_risk` finding. Block messages print the recommended fix version on stderr; observe mode emits all findings (not just the first) with remediation hints so agents know exactly which packages to pin.
-- **Agent context files written on onboarding** — `immunity setup` now calls `_write_agent_context()` unconditionally, writing the key immunity commands (`immunity status`, `supplychain`, `check`, `deps`) into `.cursorrules`, `.windsurfrules`, or `AGENTS.md` depending on the agents selected. Cursor, Windsurf, Codex, Copilot, Hermes, and OpenClaw users all get the reference on first install.
+- **Agent context files written on onboarding** — `prismor setup` now calls `_write_agent_context()` unconditionally, writing the key prismor commands (`prismor status`, `supplychain`, `check`, `deps`) into `.cursorrules`, `.windsurfrules`, or `AGENTS.md` depending on the agents selected. Cursor, Windsurf, Codex, Copilot, Hermes, and OpenClaw users all get the reference on first install.
 - **SKILL.md installed for all agents** — removed the `if "claude" in agents` gate; SKILL.md now lands in every workspace regardless of agent choice.
 
 ## [1.10.0] — 2026-06-24
@@ -28,12 +40,12 @@ Setup wizard install-scope control and CLI help/rules-list polish.
 
 ### Added
 
-- **Install-scope step in `immunity setup`** — a new wizard step lets you choose between installing Warden hooks for the current workspace only (`.claude/settings.json`) or globally for every project (`~/.claude/settings.json`). The chosen scope now flows through hook and cloak installation (previously hard-coded to `project`). Exposed on `run_non_interactive` via `scope=`.
+- **Install-scope step in `prismor setup`** — a new wizard step lets you choose between installing Warden hooks for the current workspace only (`.claude/settings.json`) or globally for every project (`~/.claude/settings.json`). The chosen scope now flows through hook and cloak installation (previously hard-coded to `project`). Exposed on `run_non_interactive` via `scope=`.
 
 ### Changed
 
 - **Detection-rules step is sorted and truncated** — rules are ordered CRITICAL → HIGH → MEDIUM → LOW and the list shows the top 15 by default with an `e` to expand / `c` to collapse, so long rule sets stay readable.
-- **`immunity help` shows full command names** — commands, sub-actions, and the Help/Deprecated sections now render the full `immunity <cmd>` form instead of bare names, so entries are copy-pasteable.
+- **`prismor help` shows full command names** — commands, sub-actions, and the Help/Deprecated sections now render the full `prismor <cmd>` form instead of bare names, so entries are copy-pasteable.
 
 ## [1.8.0] — 2026-06-23
 
@@ -42,15 +54,15 @@ CLI UX consolidation, Codex agent support, and supply-chain enforcement hardenin
 ### Added
 
 - **Codex (OpenAI) agent support** — `--agent codex` wires Warden hooks into Codex CLI (`.codex/hooks.json`) for real-time monitoring.
-- **`immunity status --all`** — global overview across every registered workspace (the old `immunity dashboard` text view), with `--days N` to set the activity window.
-- **Bundled Claude skill** — `immunity setup` now installs the `immunity-agent` skill (SKILL.md + docs) into `<workspace>/.claude/skills/immunity-agent/` for Claude Code, so the agent learns to drive the CLI. The skill ships inside the wheel.
+- **`prismor status --all`** — global overview across every registered workspace (the old `prismor dashboard` text view), with `--days N` to set the activity window.
+- **Bundled Claude skill** — `prismor setup` now installs the `immunity-agent` skill (SKILL.md + docs) into `<workspace>/.claude/skills/immunity-agent/` for Claude Code, so the agent learns to drive the CLI. The skill ships inside the wheel.
 
 ### Changed
 
-- **`immunity dashboard` opens the web dashboard** — it now starts the local server *and* opens a browser tab (`--no-open` for headless). `immunity serve` is kept as a deprecated alias of `dashboard --no-open`.
-- **`immunity info` → real alias of `status`** — the duplicate workspace-info renderer is gone; `info` now delegates to `status`.
-- **Complete, introspection-driven `immunity help`** — every command is listed (previously `sandbox`/`learn` were omitted), grouped, with each domain's sub-actions and each command's mode flags (`sweep --redact/--clean/…`, `audit --fix`, `status --all`) shown inline. Generated from the live parser so it can't drift.
-- **`immunity warden` (bare) no longer dumps the argparse usage wall** — it prints a one-line deprecation pointer to `immunity help`. `immunity warden <cmd>` still warns and forwards.
+- **`prismor dashboard` opens the web dashboard** — it now starts the local server *and* opens a browser tab (`--no-open` for headless). `prismor serve` is kept as a deprecated alias of `dashboard --no-open`.
+- **`prismor info` → real alias of `status`** — the duplicate workspace-info renderer is gone; `info` now delegates to `status`.
+- **Complete, introspection-driven `prismor help`** — every command is listed (previously `sandbox`/`learn` were omitted), grouped, with each domain's sub-actions and each command's mode flags (`sweep --redact/--clean/…`, `audit --fix`, `status --all`) shown inline. Generated from the live parser so it can't drift.
+- **`prismor warden` (bare) no longer dumps the argparse usage wall** — it prints a one-line deprecation pointer to `prismor help`. `prismor warden <cmd>` still warns and forwards.
 - **Install banner relabeled** — `Hooks` / `Skill` / `Guardrails` (was the conflated "Skills").
 
 ### Fixed
@@ -71,7 +83,7 @@ Enterprise audit hardening and branding rename.
 ### Changed
 
 - **Rebrand to "Prismor Immunity Agent"** — replaces "Prismor Warden" / "PRISMOR IMMUNITY" labels across the CLI, setup wizard, hooks, dashboard, and tests; `--version` string updated.
-- **Dashboard `--days` window + sparklines** — `immunity dashboard` accepts `--days N` (default 7) to filter session data; adds per-workspace and global sparkline bars showing the daily findings trend. Web dashboard gains a Period dropdown (7/14/30/90 days).
+- **Dashboard `--days` window + sparklines** — `prismor dashboard` accepts `--days N` (default 7) to filter session data; adds per-workspace and global sparkline bars showing the daily findings trend. Web dashboard gains a Period dropdown (7/14/30/90 days).
 
 ### Docs
 
@@ -102,8 +114,8 @@ Hermes Agent secret cloaking plugin. Secret prevention now works natively inside
 - **Hermes Agent cloaking plugin** (`warden/cloaking/hermes_plugin_entry.py`) — shared `register()` function consumed by both Hermes' pip entry-point discovery and filesystem install. Five hooks: `pre_tool_call` (decloak + secret guard), `post_tool_call` (audit), `transform_terminal_output` (scrub), `transform_tool_result` (scrub), `pre_gateway_dispatch` (paste guard).
 - **Hermes installer** (`warden/cloaking/hermes_installer.py`) — `install()`/`uninstall()`/`status()` for filesystem-level setup. Copies plugin files to `~/.hermes/plugins/prismor-warden-cloak/`, enables it in Hermes config, and sets `PRISMOR_SECRETS_DIR` env var.
 - **`pyproject.toml` entry point** — registers `prismor-warden-cloak` under `[project.entry-points."hermes_agent.plugins"]` for auto-discovery when immunity-agent is pip-installed.
-- **`immunity cloak install --agent hermes`** — new `--agent` flag on `cloak install`/`uninstall`/`status` supports `claude`, `hermes`, or `all`. Installs for both agents in one command.
-- **`immunity cloak status`** — now shows both Claude Code and Hermes Agent state separately.
+- **`prismor cloak install --agent hermes`** — new `--agent` flag on `cloak install`/`uninstall`/`status` supports `claude`, `hermes`, or `all`. Installs for both agents in one command.
+- **`prismor cloak status`** — now shows both Claude Code and Hermes Agent state separately.
 - **Auto-vaulting for pasted secrets** — `pre_gateway_dispatch` detects raw secrets in user prompts, vaults them under deterministic `auto_<sha256_prefix>` names, and re-sends the sanitized prompt with `@@SECRET:auto_xxx@@`. Bypass with `!!allow` prefix.
 - **Documentation:** `docs/hermes.md` with architecture diagram, setup guide, and hook reference. AGENT_INTEGRATIONS.md updated with Hermes cloaking layer.
 
@@ -138,7 +150,7 @@ host Python. Also ships the hybrid semantic prompt-injection defense from
   invocation machine-wide and poisoned the `warden` namespace so the cloned
   CLI also failed. Now wrapped in `try/except` so it can never raise.
 - **`scripts/init.sh` — `immunity` on PATH.** The git-clone path never added
-  the CLI to PATH, so the next documented command (`immunity cloak add`) was
+  the CLI to PATH, so the next documented command (`prismor cloak add`) was
   `command not found`. It now symlinks into `/usr/local/bin` (or appends to
   the shell rc).
 - **`scripts/init.sh` — non-interactive exit code.** The trailing "Check
@@ -247,13 +259,13 @@ mini-shai-hulud attack (May 11 2026) out of the box.
 
 ## [1.3.0] — 2026-05-11
 
-Web Dashboard — `immunity serve`. Introduces a local HTTP API server and
+Web Dashboard — `prismor serve`. Introduces a local HTTP API server and
 self-contained browser dashboard that aggregates session, findings, and event
 data from all registered workspaces.
 
 ### Added
 
-- **`immunity serve` command** (`warden/server.py`, `warden/dashboard.html`).
+- **`prismor serve` command** (`warden/server.py`, `warden/dashboard.html`).
   Starts a local HTTP server (default `127.0.0.1:7070`) serving a
   self-contained Prismor Warden dashboard. Accepts `--host` and `--port` flags.
 - **Dashboard UI** with severity breakdown strip (critical/high/medium/low
@@ -297,15 +309,15 @@ and correctness fixes from code review.
   dismissed findings, and detects evasion attempts where structurally similar
   commands (e.g. backtick vs `$()` substitution) bypass existing rules.
   Candidate rules can be reviewed and promoted to `policy.yaml`.
-- **`immunity scope` subcommands** — `show`, `list`, `edit`, `clear` for
+- **`prismor scope` subcommands** — `show`, `list`, `edit`, `clear` for
   inspecting and managing active scoped sessions.
-- **`immunity learn` subcommands** — `--json`, `--apply`, `--reject`,
+- **`prismor learn` subcommands** — `--json`, `--apply`, `--reject`,
   `--candidates` for reviewing and acting on mined rule proposals.
 - **Evasion detection** — shell commands that pass policy but are structurally
   similar (Jaccard ≥ 0.6 after substitution normalisation) to a recently
   blocked command in the same session are flagged as `HIGH` findings.
 - **Dismissal tracking** — in observe mode, dismissed findings are recorded
-  in the database and surfaced via `immunity learn` as false-positive candidates.
+  in the database and surfaced via `prismor learn` as false-positive candidates.
 
 ### Fixed
 
@@ -313,10 +325,10 @@ and correctness fixes from code review.
   `allowed_tools` and `deny_tools` are now clamped to the known-good
   `available_tools` list, preventing a crafted task prompt from expanding the
   scoped policy beyond what the agent actually has access to.
-- **Command injection in `immunity scope edit`**: replaced
+- **Command injection in `prismor scope edit`**: replaced
   `os.system(f'{editor} "{path}"')` with `subprocess.run([editor, path])`
   to prevent shell metacharacter exploitation via the `$EDITOR` env var.
-- **`KeyError: 'id'` in `immunity learn` output**: `format_learning_report`
+- **`KeyError: 'id'` in `prismor learn` output**: `format_learning_report`
   now uses `c.get('id', c['rule'].get('id', '?'))` so freshly-mined
   candidates (not yet persisted to the DB) display correctly.
 - **Misleading scoped-rules display text**: the rules box now correctly states
@@ -333,18 +345,18 @@ ergonomics features enterprise buyers expect. Continues from `1.0.2`.
 
 ### Added
 
-- **Canarytoken subsystem** (`immunity canary plant|list|remove|status`). Plant
+- **Canarytoken subsystem** (`prismor canary plant|list|remove|status`). Plant
   realistic fake credentials (AWS, SSH, `.env`, generic) at arbitrary paths;
   any read raises a `CRITICAL` finding and optionally POSTs a signed payload
   to a user-provided webhook. First AI-agent-specific canarytoken
   implementation we're aware of. (`warden/canary.py`)
-- **MCP schema auditor** — `immunity scan` now statically analyses MCP tool
+- **MCP schema auditor** — `prismor scan` now statically analyses MCP tool
   schemas for over-broad allowlists (`"*"`, `"/**"`), risky description
   language (`bypass`, `all files`, `sudo`), `any`-typed parameters on
   execution-capable tools, missing input schemas, and servers that combine
   execution with filesystem + network access in a single surface.
   (`warden/scanner.py::audit_mcp_schema`)
-- **Lockfile integrity audit** — `immunity deps` now detects non-registry
+- **Lockfile integrity audit** — `prismor deps` now detects non-registry
   sources (`git+`, `file:`) in `package-lock.json`, missing `integrity:`
   hashes, and lockfile-injection (direct deps in the lockfile that aren't
   declared in `package.json`). (`warden/deps.py::check_lockfile_integrity`)
@@ -360,16 +372,16 @@ ergonomics features enterprise buyers expect. Continues from `1.0.2`.
   forwards findings to webhook, syslog (UDP/TCP), and file sinks. File sink
   supports both JSON and ArcSight CEF formats for SIEM ingest. Env-var
   interpolation (`${SIEM_TOKEN}`) for secret headers. (`warden/sinks.py`)
-- **Declarative policy tests** — `immunity policy test` runs
+- **Declarative policy tests** — `prismor policy test` runs
   `.prismor-warden/policy-tests.yaml` cases (`{input, expect: block|warn|pass}`)
   and ships a bundled OWASP LLM Top 10 + Agentic Top 10 + MITRE ATLAS
   starter pack (28 cases). (`warden/policy_test.py`,
   `templates/policy-tests-owasp.yaml`)
-- **`immunity check --explain`** — shows matched rule's category, action,
+- **`prismor check --explain`** — shows matched rule's category, action,
   event types, field list, and full regex pattern.
-- **`immunity check --from-log PATH`** — replay a JSONL session log through the
+- **`prismor check --from-log PATH`** — replay a JSONL session log through the
   current policy to validate rule changes.
-- **`immunity check --suggest-allowlist`** — emits a ready-to-paste
+- **`prismor check --suggest-allowlist`** — emits a ready-to-paste
   `allowlists:` entry when a command triggers a finding the user considers
   intentional.
 
@@ -391,11 +403,11 @@ ergonomics features enterprise buyers expect. Continues from `1.0.2`.
 
 ### Infrastructure
 
-- `immunity deps` now prints a dedicated "Lockfile integrity issues"
+- `prismor deps` now prints a dedicated "Lockfile integrity issues"
   section and exits `1` when a HIGH-severity integrity issue is present.
-- `immunity canary remove` by id or path; `immunity canary status` summarises
+- `prismor canary remove` by id or path; `prismor canary status` summarises
   registered canaries by type.
-- `immunity hook-dispatch` now invokes telemetry sinks BEFORE the blocking
+- `prismor hook-dispatch` now invokes telemetry sinks BEFORE the blocking
   decision so SIEMs see every event, including blocked ones.
 
 ### Tests

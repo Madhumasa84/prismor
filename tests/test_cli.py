@@ -41,7 +41,7 @@ class TestCliExitCodes(unittest.TestCase):
     def test_help_exits_zero(self):
         r = run_cli("--help")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("Prismor Immunity Agent", r.stdout)
+        self.assertIn("Prismor", r.stdout)
 
     def test_version_exits_zero(self):
         r = run_cli("--version")
@@ -51,7 +51,7 @@ class TestCliExitCodes(unittest.TestCase):
     def test_bare_invocation_exits_zero(self):
         r = run_cli()
         self.assertEqual(r.returncode, 0)
-        self.assertIn("Prismor Immunity Agent", r.stdout)
+        self.assertIn("Prismor", r.stdout)
 
     def test_analyze_help(self):
         r = run_cli("analyze", "--help")
@@ -106,7 +106,7 @@ class TestCliAnalyze(unittest.TestCase):
     def test_analyze_text_output(self):
         r = run_cli("analyze", "--input", SAMPLE)
         self.assertEqual(r.returncode, 0)
-        self.assertIn("Prismor Immunity Agent Report", r.stdout)
+        self.assertIn("Prismor Report", r.stdout)
         self.assertIn("Findings:", r.stdout)
         self.assertIn("CRITICAL", r.stdout)
 
@@ -162,7 +162,7 @@ class TestCliAnalyzeCleanSession(unittest.TestCase):
 
 
 class TestImmunityUmbrella(unittest.TestCase):
-    """Test the unified `immunity` CLI dispatches to the right engine."""
+    """Test the unified `prismor` CLI dispatches to the right engine."""
 
     def test_help_lists_all_domains(self):
         r = run_immunity("--help")
@@ -198,24 +198,24 @@ class TestImmunityUmbrella(unittest.TestCase):
 
     def test_help_shows_subactions_and_modes(self):
         # Sub-actions of domains and a command's "internal" mode flags must be
-        # discoverable straight from `immunity --help`.
+        # discoverable straight from `prismor --help`.
         r = run_immunity("--help")
         self.assertEqual(r.returncode, 0)
         for token in ("install", "show", "plant", "--redact", "--all", "--no-open"):
             self.assertIn(token, r.stdout, f"'{token}' missing from --help")
 
     def test_warden_bare_is_quiet(self):
-        # `immunity warden` with no subcommand must NOT dump the argparse usage
-        # wall — just a short deprecation pointer to `immunity help`.
+        # `prismor warden` with no subcommand must NOT dump the argparse usage
+        # wall — just a short deprecation pointer to `prismor help`.
         r = run_immunity("warden")
         self.assertEqual(r.returncode, 0)
         self.assertIn("deprecated", r.stderr.lower())
-        self.assertIn("immunity help", r.stderr)
+        self.assertIn("prismor help", r.stderr)
         self.assertNotIn("positional arguments", r.stdout + r.stderr)
         self.assertNotIn("{info,dashboard", r.stdout + r.stderr)
 
     def test_warden_subcommand_still_forwards(self):
-        # `immunity warden status` keeps working (warns, then runs status).
+        # `prismor warden status` keeps working (warns, then runs status).
         r = run_immunity("warden", "status")
         self.assertEqual(r.returncode, 0)
         self.assertIn("deprecated", r.stderr.lower())
@@ -230,7 +230,7 @@ class TestImmunityUmbrella(unittest.TestCase):
     def test_version_flag(self):
         r = run_immunity("--version")
         self.assertEqual(r.returncode, 0)
-        self.assertTrue(r.stdout.startswith("immunity "))
+        self.assertTrue(r.stdout.startswith("prismor "))
 
     def test_unknown_command_exits_nonzero(self):
         r = run_immunity("not-a-real-command")
@@ -238,7 +238,7 @@ class TestImmunityUmbrella(unittest.TestCase):
         self.assertIn("unknown command", r.stderr)
 
     def test_domain_help_dispatches_to_warden(self):
-        # `immunity cloak --help` should reach warden.cli's cloak subparser.
+        # `prismor cloak --help` should reach warden.cli's cloak subparser.
         r = run_immunity("cloak", "--help")
         self.assertEqual(r.returncode, 0)
         for action in ("install", "uninstall", "add", "list", "remove", "status"):
@@ -246,7 +246,7 @@ class TestImmunityUmbrella(unittest.TestCase):
 
 
 class TestSkillInstall(unittest.TestCase):
-    """`immunity setup` bundles + installs the immunity-agent Claude skill."""
+    """`prismor setup` bundles + installs the immunity-agent Claude skill."""
 
     def test_install_skill_copies_manifest_and_docs(self):
         import tempfile
@@ -296,20 +296,20 @@ class TestWriteAgentContext(unittest.TestCase):
         from warden.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["cursor"])
         content = (self.ws / ".cursorrules").read_text()
-        self.assertIn("immunity status", content)
-        self.assertIn("immunity supplychain", content)
+        self.assertIn("prismor status", content)
+        self.assertIn("prismor supplychain", content)
 
     def test_windsurf_writes_windsurfrules(self):
         from warden.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["windsurf"])
         content = (self.ws / ".windsurfrules").read_text()
-        self.assertIn("immunity status", content)
+        self.assertIn("prismor status", content)
 
     def test_agents_md_written_for_codex(self):
         from warden.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["codex"])
         content = (self.ws / "AGENTS.md").read_text()
-        self.assertIn("immunity status", content)
+        self.assertIn("prismor status", content)
 
     def test_agents_md_written_for_copilot_and_hermes(self):
         from warden.setup_wizard import _write_agent_context
@@ -330,7 +330,7 @@ class TestWriteAgentContext(unittest.TestCase):
         _write_agent_context(self.ws, ["cursor"])
         content = (self.ws / ".cursorrules").read_text()
         self.assertIn("# My existing rules", content)
-        self.assertIn("immunity status", content)
+        self.assertIn("prismor status", content)
 
     def test_claude_only_skips_cursor_and_windsurf(self):
         from warden.setup_wizard import _write_agent_context
@@ -346,7 +346,7 @@ class TestWriteAgentContext(unittest.TestCase):
         self.assertTrue(skill_manifest_path().exists())
 
     def test_top_level_shortcut_dispatches(self):
-        # `immunity analyze` should reach the warden analyze command.
+        # `prismor analyze` should reach the warden analyze command.
         r = run_immunity("analyze", "--input", SAMPLE, "--json")
         self.assertEqual(r.returncode, 0)
         data = json.loads(r.stdout)
@@ -374,7 +374,7 @@ class TestWriteAgentContext(unittest.TestCase):
         self.assertIn("dry run", r.stdout)
 
     def test_old_supply_name_is_unknown(self):
-        # `immunity supply` (without -chain) should fail — confirms the rename.
+        # `prismor supply` (without -chain) should fail — confirms the rename.
         r = run_immunity("supply", "--help")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("unknown command", r.stderr)

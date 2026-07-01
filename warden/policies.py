@@ -243,7 +243,7 @@ def evaluate_event(event: Dict[str, Any], index: int, session_id: str = "") -> L
             event.get("stdout"),
             event.get("stderr"),
             # Include command so PII/model-manipulation rules can scan
-            # `immunity check` shell pre-checks and agent-output text events.
+            # `prismor check` shell pre-checks and agent-output text events.
             event.get("command") if event_type in {"shell", "text"} else None,
         ]
         if value

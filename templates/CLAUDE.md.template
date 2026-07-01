@@ -18,7 +18,7 @@ This loads:
 
 For runtime protection, install the hooks:
 ```
-immunity install-hooks --agent claude --workspace . --mode observe
+prismor install-hooks --agent claude --workspace . --mode observe
 ```
 
 ## Secrets (cloaking convention)
@@ -30,5 +30,5 @@ This project uses Prismor Warden's cloaking layer to keep real secret values out
 - When you need to use a secret in a shell command or tool call, reference it as `@@SECRET:<name>@@` (e.g. `curl -H "Authorization: Bearer @@SECRET:stripe_key@@" ...`). The Warden `PreToolUse` hook will substitute the real value at execution time.
 - **Never** print, echo, log, narrate, or copy the real value of any secret. Use the placeholder in all code, commands, prose, and explanations.
 - If a command's output would contain a secret, the wrapper scrubs it automatically — do not strip or bypass the wrapper.
-- If you are asked to register a new secret, use `immunity cloak add <name>` (value read from stdin). Do not write it inline in a shell command.
-- If a secret is missing, the `PreToolUse` hook will fail closed with a clear message — ask the user to run `immunity cloak add <name>` rather than trying to work around it.
+- If you are asked to register a new secret, use `prismor cloak add <name>` (value read from stdin). Do not write it inline in a shell command.
+- If a secret is missing, the `PreToolUse` hook will fail closed with a clear message — ask the user to run `prismor cloak add <name>` rather than trying to work around it.

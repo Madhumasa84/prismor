@@ -1,0 +1,13 @@
+#!/bin/sh
+# Wrapper that delegates to the installed `prismor` console-script
+# (`prismor = warden.immunity_cli:main`), falling back to the warden module.
+# Only exists because an old setup.py put scripts/ on PATH ahead of
+# ~/.local/bin, so it would otherwise shadow the real CLI.
+for cand in \
+  "$HOME/.local/bin/prismor" \
+  "$HOME/.local/pipx/venvs/prismor/bin/prismor" \
+  "$HOME/.local/pipx/venvs/immunity-agent/bin/prismor"; do
+  if [ -x "$cand" ]; then exec "$cand" "$@"; fi
+done
+# Last resort: invoke the module directly if a python with warden installed is found.
+exec python3 -m warden.immunity_cli "$@"

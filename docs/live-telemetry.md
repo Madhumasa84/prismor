@@ -15,7 +15,7 @@ hashes, never raw commands or secrets).
 Developer's AI agent (Claude Code)
    │  every tool call fires a hook
    ▼
-immunity hook-dispatch            ← the installed `immunity` runtime
+prismor hook-dispatch            ← the installed `prismor` runtime
    │  PolicyEngine evaluates the event → findings
    ▼
 prismor telemetry sink            ← warden/sinks.py _dispatch_prismor
@@ -30,7 +30,7 @@ Dashboard (AgentMonitoringView)   ← polls /api/telemetry/stats every 15s
 ```
 
 For this to be automatic, the **code the hook runs** must contain the cloud
-sink, and the machine must be **enrolled** (`immunity enroll <token>`).
+sink, and the machine must be **enrolled** (`prismor enroll <token>`).
 
 ## Why it wasn't happening automatically
 
@@ -54,7 +54,7 @@ Publish **immunity-agent ≥ 1.6.x** (this branch — `identity`/`telemetry`/
 `remote_policy` + the `prismor` sink) to PyPI. Developers `pipx upgrade
 immunity-agent`. Their existing hooks already call the installed
 `warden/cli.py`, so once it's the new code, **every finding uploads live with
-zero further steps**. Enrollment is one-time (`immunity enroll <token>`).
+zero further steps**. Enrollment is one-time (`prismor enroll <token>`).
 
 ### Local / pre-release (stopgap for testing)
 Point the Claude Code hooks at the dev checkout so live sessions run the new

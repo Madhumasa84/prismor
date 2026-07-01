@@ -40,14 +40,18 @@ fi
 
 # ── Detection patterns ────────────────────────────────────────────────────
 # Loaded from the shared single-source-of-truth file (builtin_patterns.txt)
-# plus any org-specific patterns the user added via `immunity cloak pattern add`.
+# plus any org-specific patterns the user added via `prismor cloak pattern add`.
 prismor_load_patterns
 [[ "${#PATTERNS[@]}" -gt 0 ]] || exit 0
+
+# Strip already-cloaked placeholders before scanning so that @@SECRET:name@@
+# syntax in the prompt never triggers a false positive match.
+scan_text="$(printf '%s' "$prompt" | sed 's/@@SECRET:[^@]*@@//g')"
 
 # Collect unique matches across all patterns.
 matches="$(
   for pat in "${PATTERNS[@]}"; do
-    printf '%s' "$prompt" | grep -oE "$pat" || true
+    printf '%s' "$scan_text" | grep -oE "$pat" || true
   done | awk 'NF && !seen[$0]++'
 )"
 

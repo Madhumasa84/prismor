@@ -23,7 +23,7 @@ Implementation: [`warden/learning.py`](../warden/learning.py).
         └─ propose_rule_refinements ► tweaks to existing rules
                  │
                  ▼
-        immunity learn  →  report of candidates
+        prismor learn  →  report of candidates
                  │
       ┌──────────┴───────────┐
       ▼                      ▼
@@ -62,15 +62,15 @@ shareable like any other rule.
 
 ```bash
 # Run the full analysis and print a report
-immunity learn
-immunity learn --min-support 5      # require 5 occurrences before proposing
-immunity learn --fp-threshold 10    # flag a rule after 10 dismissals
-immunity learn --json               # machine-readable
+prismor learn
+prismor learn --min-support 5      # require 5 occurrences before proposing
+prismor learn --fp-threshold 10    # flag a rule after 10 dismissals
+prismor learn --json               # machine-readable
 
 # Review and act on candidates
-immunity learn --candidates         # list pending candidate rules with ids
-immunity learn --apply <id>         # accept → appends to project policy.yaml
-immunity learn --reject <id>        # discard a candidate
+prismor learn --candidates         # list pending candidate rules with ids
+prismor learn --apply <id>         # accept → appends to project policy.yaml
+prismor learn --reject <id>        # discard a candidate
 ```
 
 | Flag | Default | Effect |
@@ -87,16 +87,16 @@ immunity learn --reject <id>        # discard a candidate
 ## A typical loop
 
 1. Run agents for a while in `observe` or `enforce` mode — sessions accumulate.
-2. `immunity learn` surfaces a recurring `psql … prod` command you keep stopping.
-3. `immunity learn --candidates` shows it as candidate `#4` (confidence 80%, support 6).
-4. `immunity learn --apply 4` appends the rule to your project policy.
-5. `immunity policy show` confirms it's now active; commit the policy file.
+2. `prismor learn` surfaces a recurring `psql … prod` command you keep stopping.
+3. `prismor learn --candidates` shows it as candidate `#4` (confidence 80%, support 6).
+4. `prismor learn --apply 4` appends the rule to your project policy.
+5. `prismor policy show` confirms it's now active; commit the policy file.
 
 After applying, validate and re-check:
 
 ```bash
-immunity policy validate .prismor-warden/policy.yaml
-immunity policy show
+prismor policy validate .prismor-warden/policy.yaml
+prismor policy show
 ```
 
 ---

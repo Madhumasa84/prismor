@@ -46,3 +46,5 @@ warden/hermes-plugin/
 *.swo
 .DS_Store
 assets/*
+experiments/*
+.agents/*

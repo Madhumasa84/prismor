@@ -99,7 +99,7 @@ def _mtime(path: Path) -> float:
 
 
 # path+mtime keyed memo. Per-event hook runs are separate processes so this is
-# a no-op there, but the long-lived `immunity dashboard` server calls load_iam_config
+# a no-op there, but the long-lived `prismor dashboard` server calls load_iam_config
 # on every request — this keeps it off the YAML parser in the hot path while
 # still reloading automatically when either config file changes on disk.
 _CONFIG_CACHE: Dict[Any, Dict[str, Any]] = {}

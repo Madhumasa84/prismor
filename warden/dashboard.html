@@ -3,29 +3,36 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Prismor Immunity-agent Dashboard</title>
+<title>Prismor Dashboard</title>
+<link rel="icon" type="image/png" href="https://prismor.dev/Prismor_Logo.png" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --purple: #B4A5F6; --pink: #E8BAEE; --amber: #F9E5A6;
     --sky: #A8D5F7; --mint: #A7F3D0; --red: #FCA5A5;
-    --slate: #CBD5E1; --gray-50: #f9fafb; --gray-100: #f3f4f6;
-    --gray-200: #e5e7eb; --gray-300: #d1d5db; --gray-400: #9ca3af;
-    --gray-500: #6b7280; --gray-700: #374151; --gray-800: #1f2937;
-    --gray-900: #111827; --pink-600: #db2777; --green-500: #22c55e;
+    --slate: #CBD5E1;
+    --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb;
+    --gray-300: #d1d5db; --gray-400: #9ca3af; --gray-500: #6b7280;
+    --gray-700: #374151; --gray-800: #1f2937; --gray-900: #111827;
+    --pink-600: #db2777; --green-500: #22c55e;
+    --sky-600: #0284c7; --rose-600: #e11d48;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
     background: var(--gray-50); color: var(--gray-800);
-    padding: 24px; max-width: 1280px; margin: 0 auto;
+    padding: 0; min-height: 100vh;
   }
-  .header {
+  /* ── Top bar ── */
+  .topbar {
+    background: #fff; border-bottom: 1px solid var(--gray-200);
+    padding: 0 24px;
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 24px;
+    height: 52px; position: sticky; top: 0; z-index: 100;
   }
-  .header h1 { font-size: 18px; font-weight: 600; color: var(--gray-900); }
-  .header-right { display: flex; align-items: center; gap: 12px; }
+  .topbar-left { display: flex; align-items: center; gap: 16px; }
+  .topbar h1 { font-size: 15px; font-weight: 600; color: var(--gray-900); white-space: nowrap; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
   .last-updated { font-size: 10px; color: var(--gray-400); }
   .badge {
     font-size: 10px; padding: 2px 8px; border-radius: 9999px;
@@ -37,12 +44,39 @@
   .badge-live .badge-dot { background: #22c55e; }
   .badge-demo .badge-dot { background: var(--gray-300); }
 
+  /* ── Tab nav ── */
+  .tab-nav {
+    background: #fff; border-bottom: 1px solid var(--gray-200);
+    padding: 0 24px;
+    display: flex; gap: 0;
+  }
+  .tab-btn {
+    font-family: inherit; font-size: 12px; font-weight: 500;
+    padding: 12px 18px; border: none; background: none; cursor: pointer;
+    color: var(--gray-500); border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--gray-900); }
+  .tab-btn.active { color: var(--gray-900); border-bottom-color: var(--gray-900); }
+  .tab-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 16px; border-radius: 8px;
+    background: #fee2e2; color: #b91c1c;
+    font-size: 10px; font-weight: 600; padding: 0 4px; margin-left: 6px;
+  }
+
+  /* ── Content wrapper ── */
+  .page { display: none; padding: 24px; max-width: 1280px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* ── Grids ── */
   .grid { display: grid; gap: 16px; margin-bottom: 16px; }
   .grid-4 { grid-template-columns: repeat(4, 1fr); }
   .grid-3 { grid-template-columns: repeat(3, 1fr); }
   .grid-2 { grid-template-columns: repeat(2, 1fr); }
   .grid-1-2 { grid-template-columns: 1fr 2fr; }
 
+  /* ── Cards ── */
   .card {
     background: #fff; border: 1px solid var(--gray-200);
     border-radius: 8px; padding: 20px;
@@ -171,12 +205,94 @@
   .event-row {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 0; border-bottom: 1px solid var(--gray-50);
+    cursor: pointer; border-radius: 4px; transition: background 0.1s;
   }
+  .event-row:hover { background: var(--gray-50); }
   .event-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .event-dot.blocked { background: #ec4899; }
   .event-dot.allowed { background: #4ade80; }
   .event-meta { font-size: 10px; color: var(--gray-400); }
   .event-action { font-size: 11px; color: var(--gray-700); }
+  .event-sess-id { font-size: 10px; color: var(--gray-400); font-family: inherit; }
+  .event-sess-link {
+    font-size: 10px; padding: 2px 8px; border-radius: 4px;
+    background: var(--gray-100); color: var(--gray-500); white-space: nowrap;
+    flex-shrink: 0; border: 1px solid var(--gray-200);
+    transition: background 0.1s, color 0.1s;
+  }
+  .event-row:hover .event-sess-link {
+    background: var(--gray-800); color: #fff; border-color: var(--gray-800);
+  }
+
+  /* Session drawer */
+  .sess-drawer-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.18); z-index: 200;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .sess-drawer-overlay.open { opacity: 1; pointer-events: all; }
+  .sess-drawer {
+    position: fixed; top: 0; right: -520px; width: 480px; max-width: 92vw;
+    height: 100vh; background: #fff; border-left: 1px solid var(--gray-200);
+    z-index: 201; transition: right 0.22s cubic-bezier(.4,0,.2,1);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sess-drawer.open { right: 0; }
+  .sess-drawer-header {
+    padding: 14px 18px; border-bottom: 1px solid var(--gray-200);
+    display: flex; align-items: flex-start; gap: 10px;
+    background: #fff; flex-shrink: 0;
+  }
+  .sess-drawer-title { font-size: 11px; font-weight: 600; color: var(--gray-900); }
+  .sess-drawer-sessid {
+    font-size: 10px; color: var(--gray-400); word-break: break-all;
+    margin-top: 2px; font-family: inherit;
+  }
+  .sess-drawer-close {
+    font-family: inherit; font-size: 14px; padding: 2px 6px;
+    border: none; background: none; color: var(--gray-400);
+    cursor: pointer; border-radius: 4px; flex-shrink: 0; margin-left: auto;
+  }
+  .sess-drawer-close:hover { background: var(--gray-100); color: var(--gray-700); }
+  .sess-drawer-body { flex: 1; overflow-y: auto; padding: 18px; }
+  .sess-drawer-footer {
+    padding: 14px 18px; border-top: 1px solid var(--gray-200);
+    display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+    background: #fff;
+  }
+  .drawer-toggle {
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 10px 20px; border-radius: 6px; cursor: pointer;
+    border: none; transition: background 0.15s, transform 0.1s; flex: 1;
+    min-width: 120px;
+  }
+  .drawer-toggle:active { transform: scale(0.97); }
+  .drawer-toggle.pause  { background: #fef9c3; color: #92400e; border: 1px solid #fde68a; }
+  .drawer-toggle.pause:hover  { background: #fef08a; }
+  .drawer-toggle.resume { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+  .drawer-toggle.resume:hover { background: #bbf7d0; }
+  .drawer-toggle.clear  { background: #fff; color: #b91c1c; border: 1px solid #fecaca; }
+  .drawer-toggle.clear:hover  { background: #fef2f2; }
+  .drawer-status { font-size: 11px; color: var(--gray-400); padding: 6px 0 0; width: 100%; }
+  .drawer-section { margin-bottom: 18px; }
+  .drawer-section-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--gray-400); margin-bottom: 8px;
+  }
+  .drawer-block-item {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 8px 10px; border-radius: 5px;
+    background: var(--gray-50); margin-bottom: 6px;
+    border: 1px solid var(--gray-100);
+  }
+  .drawer-block-body { flex: 1; min-width: 0; }
+  .drawer-block-title { font-size: 11px; font-weight: 500; color: var(--gray-800); }
+  .drawer-block-meta  { font-size: 10px; color: var(--gray-400); margin-top: 2px; }
+  .drawer-rule-row {
+    display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
+    font-size: 11px;
+  }
+  .drawer-rule-label { color: var(--gray-400); min-width: 80px; flex-shrink: 0; }
+  .drawer-rule-tags  { display: flex; gap: 4px; flex-wrap: wrap; }
 
   /* Users list */
   .user-row {
@@ -196,7 +312,6 @@
   .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 12px; }
   .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--gray-500); }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
   .chart-container { position: relative; }
 
   /* Findings drilldown */
@@ -215,11 +330,9 @@
   }
   .finding-cmd:empty { display: none; }
   .expand-arrow { font-size: 9px; color: var(--gray-300); }
-
-  /* Empty state */
   .empty { padding: 24px; text-align: center; font-size: 11px; color: var(--gray-400); }
 
-  /* Section header — divides the dashboard into clear visual zones */
+  /* Section header */
   .section {
     display: flex; align-items: center; gap: 10px;
     margin: 28px 0 12px 2px;
@@ -228,12 +341,10 @@
     font-size: 11px; font-weight: 600; color: var(--gray-700);
     text-transform: uppercase; letter-spacing: 0.10em;
   }
-  .section .rule {
-    flex: 1; height: 1px; background: var(--gray-200);
-  }
+  .section .rule { flex: 1; height: 1px; background: var(--gray-200); }
   .section .hint { font-size: 10px; color: var(--gray-400); }
 
-  /* Supply chain table extras */
+  /* Supply chain */
   .pkg-name { font-weight: 500; }
   .pkg-ver  { color: var(--gray-400); font-size: 10px; }
   .adv-pill {
@@ -247,8 +358,6 @@
   }
   .sugg-none { color: var(--gray-300); font-size: 10px; }
   .ts-hover { cursor: help; border-bottom: 1px dotted var(--gray-200); }
-
-  /* Trigger evidence block in finding drilldown */
   .trigger-kind {
     display: inline-block; padding: 1px 6px; border-radius: 3px;
     font-size: 9px; background: var(--gray-100); color: var(--gray-600);
@@ -257,233 +366,607 @@
   .trigger-detail {
     margin-top: 6px; padding: 6px 8px;
     background: var(--gray-900); color: #e5e7eb;
-    border-radius: 4px; font-size: 10px; word-break: break-all;
-    white-space: pre-wrap;
+    border-radius: 4px; font-size: 10px; word-break: break-all; white-space: pre-wrap;
   }
   .trigger-detail:empty { display: none; }
-
-  /* Source pill */
   .src-pill {
     display: inline-block; padding: 1px 5px; border-radius: 3px;
-    font-size: 9px; color: var(--gray-500); background: var(--gray-100);
-    margin-left: 4px;
+    font-size: 9px; color: var(--gray-500); background: var(--gray-100); margin-left: 4px;
   }
   .src-pill.supply { background: #fef3c7; color: #92400e; }
 
-  /* Named agents panel */
-  .row-disabled td { opacity: 0.55; }
-  .seg-toggle { display: inline-flex; border: 1px solid var(--gray-200); border-radius: 4px; overflow: hidden; }
-  .seg-btn {
-    padding: 2px 8px; font-size: 10px; background: transparent; border: none;
-    cursor: pointer; color: var(--gray-500); transition: background .12s, color .12s;
+  /* ── Policy Control tab ── */
+  .policy-scope-nav {
+    display: flex; gap: 2px; margin-bottom: 20px;
+    background: var(--gray-100); border-radius: 6px; padding: 3px;
   }
-  .seg-btn.active { background: var(--gray-800); color: #fff; }
-  .toggle-switch { position: relative; display: inline-block; width: 32px; height: 18px; }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider {
-    position: absolute; inset: 0; border-radius: 18px;
-    background: var(--gray-200); cursor: pointer; transition: .2s;
+  .policy-scope-btn {
+    font-family: inherit; font-size: 12px; font-weight: 500; padding: 6px 14px;
+    border: none; background: none; cursor: pointer; border-radius: 4px;
+    color: var(--gray-500); transition: all 0.15s;
   }
-  .toggle-slider:before {
-    position: absolute; content: ''; height: 12px; width: 12px;
-    left: 3px; bottom: 3px; border-radius: 50%;
-    background: white; transition: .2s;
+  .policy-scope-btn:hover { color: var(--gray-900); }
+  .policy-scope-btn.active { background: #fff; color: var(--gray-900); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .policy-scope-pane { display: none; }
+  .policy-scope-pane.active { display: block; }
+
+  /* Per-rule toggle list */
+  .rules-toolbar { display:flex; align-items:center; gap:8px; margin:12px 0; }
+  .rules-search {
+    flex:1; font-family:inherit; font-size:13px; padding:8px 12px;
+    border:1px solid var(--gray-200); border-radius:6px; color:var(--gray-900);
+    background:#fff; outline:none;
   }
-  input:checked + .toggle-slider { background: var(--green-500); }
-  input:checked + .toggle-slider:before { transform: translateX(14px); }
-  .iam-select {
-    font-size: 11px; padding: 2px 4px; border: 1px solid var(--gray-200);
-    border-radius: 3px; background: transparent; color: var(--gray-600);
-    max-width: 120px;
+  .rules-search:focus { border-color: var(--accent, #5b6cff); }
+  .rules-count { font-size:12px; color:var(--gray-500); white-space:nowrap; }
+  .rules-list {
+    border:1px solid var(--gray-200); border-radius:8px; overflow:hidden;
+    max-height:520px; overflow-y:auto; background:#fff;
+  }
+  .rule-row {
+    display:flex; align-items:center; gap:12px; padding:10px 14px;
+    border-bottom:1px solid var(--gray-100);
+  }
+  .rule-row:last-child { border-bottom:none; }
+  .rule-row.off { background: var(--gray-50, #fafafa); }
+  .rule-row.off .rule-id, .rule-row.off .rule-title { opacity:.5; }
+  .rule-main { flex:1; min-width:0; }
+  .rule-id { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; font-weight:600; color:var(--gray-900); }
+  .rule-title { font-size:12px; color:var(--gray-500); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rule-sev {
+    font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
+    border-radius:4px; white-space:nowrap;
+  }
+  .rule-sev.CRITICAL { background:#fde8e8; color:#c81e1e; }
+  .rule-sev.HIGH     { background:#fef3c7; color:#b45309; }
+  .rule-sev.MEDIUM   { background:#e0f2fe; color:#0369a1; }
+  .rule-sev.LOW      { background:var(--gray-100); color:var(--gray-500); }
+  /* toggle switch */
+  .rule-toggle { position:relative; width:38px; height:22px; flex:0 0 auto; cursor:pointer; }
+  .rule-toggle input { opacity:0; width:0; height:0; position:absolute; }
+  .rule-track {
+    position:absolute; inset:0; background:var(--gray-300,#cbd5e1); border-radius:22px;
+    transition:.15s;
+  }
+  .rule-track::before {
+    content:""; position:absolute; height:16px; width:16px; left:3px; top:3px;
+    background:#fff; border-radius:50%; transition:.15s;
+  }
+  .rule-toggle input:checked + .rule-track { background:#16a34a; }
+  .rule-toggle input:checked + .rule-track::before { transform:translateX(16px); }
+  .rules-dirty { color:#b45309; }
+
+  /* "More from Prismor" CTA */
+  .prismor-cta {
+    margin-top:20px; padding:18px 20px; border-radius:10px;
+    background:linear-gradient(135deg,#1e1b4b,#312e81); color:#e0e7ff;
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  .prismor-cta-text strong { display:block; font-size:14px; color:#fff; margin-bottom:3px; }
+  .prismor-cta-text span { font-size:12.5px; color:#c7d2fe; }
+  .prismor-cta-btn {
+    background:#fff; color:#312e81; font-weight:600; font-size:13px;
+    padding:9px 18px; border-radius:7px; text-decoration:none; white-space:nowrap;
+    transition:.15s;
+  }
+  .prismor-cta-btn:hover { background:#eef2ff; }
+
+  .policy-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .policy-meta { font-size: 11px; color: var(--gray-500); }
+  .policy-meta .path { font-family: inherit; color: var(--gray-400); font-size: 10px; }
+
+  .yaml-editor {
+    width: 100%; min-height: 320px; padding: 12px;
+    background: #111827; color: #e5e7eb;
+    border: 1px solid var(--gray-700); border-radius: 6px;
+    font-family: inherit; font-size: 11px; line-height: 1.6;
+    resize: vertical; outline: none;
+    tab-size: 2;
+  }
+  .yaml-editor:focus { border-color: #4b5563; }
+  .yaml-editor[readonly] { opacity: 0.7; cursor: not-allowed; }
+
+  .policy-actions {
+    display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap;
+  }
+  .btn-primary {
+    font-family: inherit; font-size: 12px; font-weight: 500; padding: 7px 16px;
+    background: var(--gray-900); color: #fff; border: none; border-radius: 5px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-primary:hover { background: #111; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost {
+    font-family: inherit; font-size: 12px; padding: 7px 14px;
+    background: none; color: var(--gray-600); border: 1px solid var(--gray-200);
+    border-radius: 5px; cursor: pointer;
+  }
+  .btn-ghost:hover { background: var(--gray-50); }
+  .btn-danger {
+    font-family: inherit; font-size: 12px; padding: 7px 14px;
+    background: none; color: #b91c1c; border: 1px solid #fecaca;
+    border-radius: 5px; cursor: pointer;
+  }
+  .btn-danger:hover { background: #fef2f2; }
+
+  .banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;
+    font-size: 11px;
+  }
+  .banner-enterprise {
+    background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412;
+  }
+  .banner-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+  .banner-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .banner-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+  .banner-text strong { display: block; margin-bottom: 3px; }
+
+  .policy-status {
+    font-size: 11px; padding: 4px 0; min-height: 20px;
+  }
+  .status-ok   { color: #15803d; }
+  .status-err  { color: #b91c1c; }
+  .status-saving { color: var(--gray-400); }
+
+  /* Observe / Enforce mode toggle */
+  .mode-toggle-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 6px;
+    background: var(--gray-50); border: 1px solid var(--gray-200);
+    margin-bottom: 14px;
+  }
+  .mode-toggle-label { font-size: 11px; color: var(--gray-500); }
+  .mode-toggle-btns  { display: flex; border-radius: 5px; overflow: hidden; border: 1px solid var(--gray-200); }
+  .mode-btn {
+    font-family: inherit; font-size: 11px; font-weight: 500;
+    padding: 5px 14px; border: none; cursor: pointer; background: #fff; color: var(--gray-500);
+    transition: background 0.12s, color 0.12s;
+  }
+  .mode-btn + .mode-btn { border-left: 1px solid var(--gray-200); }
+  .mode-btn.active-observe  { background: #eff6ff; color: #1d4ed8; }
+  .mode-btn.active-enforce  { background: #fef2f2; color: #b91c1c; }
+  .mode-hint { font-size: 10px; color: var(--gray-400); margin-left: 4px; }
+
+  /* ── Session Control tab ── */
+  .sess-ctrl-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 8px; align-items: start;
+    padding: 10px 0; border-bottom: 1px solid var(--gray-100);
+  }
+  .sess-ctrl-row:last-child { border-bottom: none; }
+  .sess-id-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sess-id { font-size: 11px; color: var(--gray-700); font-family: inherit; }
+  .sess-ws { font-size: 10px; color: var(--gray-400); }
+
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 500;
+  }
+  .status-active   { background: #dcfce7; color: #15803d; }
+  .status-paused   { background: #fef9c3; color: #92400e; }
+  .status-blocked  { background: #fce7f3; color: #be185d; }
+  .status-scoped   { background: #eff6ff; color: #1e40af; }
+  .status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .sess-ctrl-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+  .sess-act-btn {
+    font-family: inherit; font-size: 10px; padding: 4px 10px;
+    border: 1px solid var(--gray-200); border-radius: 4px;
+    background: #fff; color: var(--gray-700); cursor: pointer; white-space: nowrap;
+  }
+  .sess-act-btn:hover { background: var(--gray-50); }
+  .sess-act-btn.pause { color: #b45309; border-color: #fde68a; }
+  .sess-act-btn.pause:hover { background: #fffbeb; }
+  .sess-act-btn.resume { color: #15803d; border-color: #bbf7d0; }
+  .sess-act-btn.resume:hover { background: #f0fdf4; }
+  .sess-act-btn.clear { color: #b91c1c; border-color: #fecaca; }
+  .sess-act-btn.clear:hover { background: #fef2f2; }
+  .sess-act-btn.expand { color: var(--gray-500); }
+
+  .sess-detail {
+    display: none; padding: 10px 0 4px;
+    border-top: 1px solid var(--gray-100); margin-top: 8px;
+  }
+  .sess-detail.open { display: block; }
+
+  .scoped-tag {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; margin: 2px;
+  }
+  .tag-allow { background: #dcfce7; color: #15803d; }
+  .tag-deny  { background: #fce7f3; color: #be185d; }
+  .tag-net   { background: #eff6ff; color: #1e40af; }
+
+  .blocked-list { margin-top: 10px; }
+  .blocked-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 6px 8px; border-radius: 4px;
+    background: var(--gray-50); margin-bottom: 4px;
+    font-size: 11px; color: var(--gray-700);
+  }
+  .blocked-sev { flex-shrink: 0; }
+
+  .scope-edit-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .scope-edit-label { font-size: 10px; color: var(--gray-500); min-width: 60px; }
+  .scope-edit-input {
+    font-family: inherit; font-size: 11px; padding: 4px 8px;
+    border: 1px solid var(--gray-200); border-radius: 4px; background: var(--gray-50);
+    color: var(--gray-700); outline: none; flex: 1; min-width: 200px;
+  }
+  .scope-edit-input:focus { border-color: var(--purple); }
+
+  /* global days picker moved to policy */
+  .period-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+    font-size: 10px; color: var(--gray-400);
   }
 
   @media (max-width: 768px) {
     .grid-4, .grid-3, .grid-2, .grid-1-2 { grid-template-columns: 1fr; }
-    body { padding: 12px; }
+    .page { padding: 12px; }
+  }
+
+  /* ── Loading screen ── */
+  #loadingScreen {
+    position: fixed; inset: 0; z-index: 999;
+    background: #f9fafb;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.4s ease;
+  }
+  #loadingScreen.fade-out { opacity: 0; pointer-events: none; }
+  #loadingCard {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    padding: 48px 56px; background: #fff;
+    border: 1px solid var(--gray-200); border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.06);
+    min-width: 280px;
+  }
+  #loadingLogo {
+    width: 52px; height: 52px; object-fit: contain;
+    animation: loadingPulse 1.8s ease-in-out infinite;
+  }
+  @keyframes loadingPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.65; transform: scale(0.94); }
+  }
+  #loadingTitle {
+    font-size: 15px; font-weight: 600; color: var(--gray-900); letter-spacing: -0.01em;
+  }
+  #loadingBar {
+    width: 180px; height: 3px; background: var(--gray-100); border-radius: 999px; overflow: hidden;
+  }
+  #loadingFill {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, #B4A5F6, #E8BAEE);
+    transition: width 0.3s ease;
+  }
+  #loadingLabel {
+    font-size: 11px; color: var(--gray-400);
+  }
+
+  /* Scoped rules inline editor */
+  .scope-edit-section { margin-bottom: 20px; }
+  .scope-edit-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .scope-edit-btn {
+    font-family: inherit; font-size: 10px; padding: 3px 10px;
+    border: 1px solid var(--gray-200); border-radius: 4px;
+    background: #fff; color: var(--gray-600); cursor: pointer;
+  }
+  .scope-edit-btn:hover { background: var(--gray-50); }
+  .scope-edit-btn.active { background: var(--gray-900); color: #fff; border-color: var(--gray-900); }
+
+  .tag-removable {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 6px 2px 8px; border-radius: 4px; font-size: 11px; margin: 2px;
+    cursor: default;
+  }
+  .tag-removable .tag-x {
+    font-size: 10px; line-height: 1; cursor: pointer; opacity: 0.55;
+    padding: 0 1px; border-radius: 2px;
+  }
+  .tag-removable .tag-x:hover { opacity: 1; background: rgba(0,0,0,.1); }
+
+  .tool-add-row {
+    display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap;
+  }
+  .tool-add-select {
+    font-family: inherit; font-size: 11px; padding: 4px 8px;
+    border: 1px solid var(--gray-200); border-radius: 4px;
+    background: var(--gray-50); color: var(--gray-700); cursor: pointer; outline: none;
+  }
+  .tool-add-select:focus { border-color: var(--purple); }
+  .tool-add-do {
+    font-family: inherit; font-size: 11px; padding: 4px 10px;
+    border: 1px solid var(--gray-200); border-radius: 4px;
+    background: #fff; color: var(--gray-700); cursor: pointer;
+  }
+  .tool-add-do:hover { background: var(--gray-50); }
+
+  .net-toggle-btn {
+    font-family: inherit; font-size: 11px; padding: 4px 12px;
+    border-radius: 4px; cursor: pointer; transition: background 0.12s;
+    border: 1px solid;
+  }
+  .net-toggle-btn.allowed { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+  .net-toggle-btn.denied  { background: #fce7f3; color: #be185d; border-color: #f9a8d4; }
+
+  .scope-save-row {
+    display: flex; gap: 8px; align-items: center; margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid var(--gray-100);
   }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>Prismor Immunity-agent Dashboard</h1>
-  <div class="header-right">
-    <label style="font-size:10px;color:var(--gray-400)">Period</label>
-    <select id="globalDays" class="fsel">
-      <option value="7" selected>Last 7 days</option>
-      <option value="14">Last 14 days</option>
-      <option value="30">Last 30 days</option>
-      <option value="90">Last 90 days</option>
-    </select>
+<!-- ═══ TOP BAR ═══════════════════════════════════════════════════ -->
+<div class="topbar">
+  <div class="topbar-left">
+    <h1>Prismor</h1>
+  </div>
+  <div class="topbar-right">
     <span id="lastUpdated" class="last-updated"></span>
     <span id="statusBadge" class="badge badge-demo"><span class="badge-dot"></span> loading</span>
   </div>
 </div>
 
-<!-- ═══ AGENT ACTIVITY ═══════════════════════════════════════════ -->
-<div class="section">
-  <h2>Agent Activity</h2><div class="rule"></div><span id="hintActivity" class="hint">last 7 days</span>
+<!-- ═══ TAB NAV ═══════════════════════════════════════════════════ -->
+<div class="tab-nav">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="sessions">Session Control</button>
+  <button class="tab-btn" data-tab="policy">Policy Control</button>
 </div>
 
-<div class="grid grid-3">
-  <div class="card">
-    <div class="card-title">Active Sessions</div>
-    <div id="kpiSessions" class="kpi-value">-</div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: OVERVIEW                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-overview" class="page active">
+  <div class="period-row">
+    Period:
+    <select id="globalDays" class="fsel">
+      <option value="1" selected>Last 1 day</option>
+      <option value="7">Last 7 days</option>
+      <option value="14">Last 14 days</option>
+      <option value="30">Last 30 days</option>
+      <option value="90">Last 90 days</option>
+    </select>
   </div>
-  <div class="card">
-    <div class="card-title">Tool Calls Inspected</div>
-    <div id="kpiToolCalls" class="kpi-value">-</div>
-    <div id="kpiToolsDelta" class="kpi-delta"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Dangerous Cmds Prevented</div>
-    <div id="kpiDangerous" class="kpi-value accent">-</div>
-    <div id="kpiDangerousDelta" class="kpi-delta"></div>
-  </div>
-</div>
 
-<div class="grid grid-4">
-  <div class="card sev-card critical"><div class="sev-label">Critical</div><div id="sevCritical" class="sev-count">-</div></div>
-  <div class="card sev-card high">    <div class="sev-label">High</div>    <div id="sevHigh"     class="sev-count">-</div></div>
-  <div class="card sev-card medium">  <div class="sev-label">Medium</div>  <div id="sevMedium"   class="sev-count">-</div></div>
-  <div class="card sev-card low">     <div class="sev-label">Low</div>     <div id="sevLow"      class="sev-count">-</div></div>
-</div>
+  <div class="section">
+    <h2>Agent Activity</h2><div class="rule"></div><span id="hintActivity" class="hint">last 7 days</span>
+  </div>
 
-<div class="grid grid-1-2">
-  <div class="card">
-    <div class="card-title">Threats by Category</div>
-    <div class="chart-container" style="height:190px"><canvas id="donutChart"></canvas></div>
-    <div id="donutLegend" class="legend-grid"></div>
+  <div class="grid grid-3">
+    <div class="card">
+      <div class="card-title">Active Sessions</div>
+      <div id="kpiSessions" class="kpi-value">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tool Calls Inspected</div>
+      <div id="kpiToolCalls" class="kpi-value">-</div>
+      <div id="kpiToolsDelta" class="kpi-delta"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Dangerous Cmds Prevented</div>
+      <div id="kpiDangerous" class="kpi-value accent">-</div>
+      <div id="kpiDangerousDelta" class="kpi-delta"></div>
+    </div>
   </div>
-  <div class="card">
-    <div class="card-title">Block Rate &mdash; 30 days</div>
-    <div class="chart-container" style="height:240px"><canvas id="lineChart"></canvas></div>
-  </div>
-</div>
 
-<div class="grid grid-2">
-  <div class="card">
-    <div class="card-title">Blocked Commands by Agent</div>
-    <div class="chart-container" style="height:200px"><canvas id="agentBar"></canvas></div>
+  <div class="grid grid-4">
+    <div class="card sev-card critical"><div class="sev-label">Critical</div><div id="sevCritical" class="sev-count">-</div></div>
+    <div class="card sev-card high">    <div class="sev-label">High</div>    <div id="sevHigh"     class="sev-count">-</div></div>
+    <div class="card sev-card medium">  <div class="sev-label">Medium</div>  <div id="sevMedium"   class="sev-count">-</div></div>
+    <div class="card sev-card low">     <div class="sev-label">Low</div>     <div id="sevLow"      class="sev-count">-</div></div>
   </div>
-  <div class="card">
-    <div class="card-title">Tool Call Breakdown</div>
-    <div class="chart-container" style="height:200px"><canvas id="toolBar"></canvas></div>
-  </div>
-</div>
 
-<div class="grid" style="grid-template-columns:1fr">
-  <div class="card">
-    <div class="card-title">Top MCP Servers &amp; Skills</div>
-    <div class="chart-container" style="height:220px"><canvas id="mcpBar"></canvas></div>
+  <div class="grid grid-1-2">
+    <div class="card">
+      <div class="card-title">Threats by Category</div>
+      <div class="chart-container" style="height:190px"><canvas id="donutChart"></canvas></div>
+      <div id="donutLegend" class="legend-grid"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Block Rate &mdash; 30 days</div>
+      <div class="chart-container" style="height:240px"><canvas id="lineChart"></canvas></div>
+    </div>
   </div>
-</div>
 
-<!-- ═══ SUPPLY CHAIN ═════════════════════════════════════════════ -->
-<div class="section">
-  <h2>Supply Chain</h2><div class="rule"></div><span id="hintSupply" class="hint">last 7 days</span>
-</div>
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-title">Blocked Commands by Agent</div>
+      <div class="chart-container" style="height:200px"><canvas id="agentBar"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tool Call Breakdown</div>
+      <div class="chart-container" style="height:200px"><canvas id="toolBar"></canvas></div>
+    </div>
+  </div>
 
-<div class="grid grid-4">
-  <div class="card">
-    <div class="card-title">Allowed</div>
-    <div id="scAllowed" class="kpi-value" style="color:var(--green-500)">-</div>
+  <div class="grid" style="grid-template-columns:1fr">
+    <div class="card">
+      <div class="card-title">Top MCP Servers &amp; Skills</div>
+      <div class="chart-container" style="height:220px"><canvas id="mcpBar"></canvas></div>
+    </div>
   </div>
-  <div class="card">
-    <div class="card-title">Warned</div>
-    <div id="scWarned" class="kpi-value" style="color:#d97706">-</div>
-  </div>
-  <div class="card">
-    <div class="card-title">Blocked</div>
-    <div id="scBlocked" class="kpi-value accent">-</div>
-  </div>
-  <div class="card">
-    <div class="card-title">Total Checked</div>
-    <div id="scChecked" class="kpi-value">-</div>
-  </div>
-</div>
 
-<div class="grid grid-1-2">
-  <div class="card">
-    <div class="card-title">Ecosystems</div>
-    <div class="chart-container" style="height:200px"><canvas id="scEcoBar"></canvas></div>
+  <div class="section">
+    <h2>Supply Chain</h2><div class="rule"></div><span id="hintSupply" class="hint">last 7 days</span>
   </div>
-  <div class="card">
-    <div class="card-title">Recent Blocks &amp; Warnings</div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Package</th>
-          <th>Eco</th>
-          <th class="right">Score</th>
-          <th>Advisory</th>
-          <th>Suggested</th>
-          <th>When</th>
-        </tr></thead>
-        <tbody id="scBlocksBody"></tbody>
-      </table>
+
+  <div class="grid grid-4">
+    <div class="card"><div class="card-title">Allowed</div><div id="scAllowed" class="kpi-value" style="color:var(--green-500)">-</div></div>
+    <div class="card"><div class="card-title">Warned</div><div id="scWarned" class="kpi-value" style="color:#d97706">-</div></div>
+    <div class="card"><div class="card-title">Blocked</div><div id="scBlocked" class="kpi-value accent">-</div></div>
+    <div class="card"><div class="card-title">Total Checked</div><div id="scChecked" class="kpi-value">-</div></div>
+  </div>
+
+  <div class="grid grid-1-2">
+    <div class="card">
+      <div class="card-title">Ecosystems</div>
+      <div class="chart-container" style="height:200px"><canvas id="scEcoBar"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Blocks &amp; Warnings</div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Package</th><th>Eco</th><th class="right">Score</th>
+            <th>Advisory</th><th>Suggested</th><th>When</th>
+          </tr></thead>
+          <tbody id="scBlocksBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr">
+    <div class="card">
+      <div class="card-title">Install Activity by Session</div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Session</th><th>Eco</th><th>Install Command</th>
+            <th class="right">Allowed</th><th class="right">Warned</th>
+            <th class="right">Blocked</th><th>When</th>
+          </tr></thead>
+          <tbody id="scSessionsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Findings &amp; Events</h2><div class="rule"></div>
+  </div>
+
+  <div class="grid grid-1-2">
+    <div class="card">
+      <div class="card-title">Top Sessions by Blocks</div>
+      <div id="usersContainer"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Top Threat Patterns</div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Pattern</th><th>Category</th><th class="right">Count</th><th>Last Seen</th><th>Severity</th>
+          </tr></thead>
+          <tbody id="patternsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr">
+    <div class="card">
+      <div class="card-title">Findings Drilldown</div>
+      <div class="bar">
+        <label>Agent</label>
+        <select id="fAgent" class="fsel"><option value="">All</option></select>
+        <label>Severity</label>
+        <select id="fSev" class="fsel">
+          <option value="">All</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <label>Category</label>
+        <select id="fCat" class="fsel"><option value="">All</option></select>
+        <input id="fSearch" class="finput" type="text" placeholder="search title or evidence…" />
+        <div class="bar-right">
+          <span id="findCount" class="result-count"></span>
+          <label>Per page</label>
+          <select id="findLimit" class="fsel">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Finding</th><th>Agent</th><th>Category</th><th>Severity</th><th>When</th><th style="width:16px"></th>
+          </tr></thead>
+          <tbody id="findBody"></tbody>
+        </table>
+      </div>
+      <div id="findPager" class="pager"></div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr">
+    <div class="card">
+      <div class="card-title">Event Feed</div>
+      <div class="bar">
+        <button class="fbtn active" data-verdict="">All</button>
+        <button class="fbtn" data-verdict="blocked">Blocked</button>
+        <button class="fbtn" data-verdict="allowed">Allowed</button>
+        <div class="bar-sep"></div>
+        <label>Agent</label>
+        <select id="evtAgent" class="fsel"><option value="">All</option></select>
+        <div class="bar-right">
+          <span id="evtCount" class="result-count"></span>
+          <label>Per page</label>
+          <select id="evtLimit" class="fsel">
+            <option value="20">20</option>
+            <option value="30" selected>30</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+      </div>
+      <div id="evtContainer"></div>
+      <div id="evtPager" class="pager"></div>
     </div>
   </div>
 </div>
 
-<div class="grid" style="grid-template-columns:1fr">
-  <div class="card">
-    <div class="card-title">Install Activity by Session</div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Session</th>
-          <th>Eco</th>
-          <th>Install Command</th>
-          <th class="right">Allowed</th>
-          <th class="right">Warned</th>
-          <th class="right">Blocked</th>
-          <th>When</th>
-        </tr></thead>
-        <tbody id="scSessionsBody"></tbody>
-      </table>
-    </div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: SESSION CONTROL                                          -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-sessions" class="page">
+  <div class="section" style="margin-top:0">
+    <h2>Live Sessions</h2><div class="rule"></div>
+    <span class="hint">pause Prismor, clear scope, or unblock a stuck agent</span>
   </div>
-</div>
 
-<!-- ═══ NAMED AGENTS ═══════════════════════════════════════════════ -->
-<div class="section">
-  <h2>Named Agents</h2><div class="rule"></div>
-  <span id="hintAgents" class="hint">per-instance control</span>
-</div>
+  <div id="enrollBannerSess"></div>
 
-<div class="grid" style="grid-template-columns:1fr">
-  <div class="card">
-    <div class="card-title">Agent Control Panel</div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Name</th>
-          <th>Framework</th>
-          <th>Last Seen</th>
-          <th class="right">Calls</th>
-          <th class="right">Blocked</th>
-          <th>Mode</th>
-          <th>Enabled</th>
-          <th>IAM Profile</th>
-        </tr></thead>
-        <tbody id="agentsBody"></tbody>
-      </table>
+  <div class="card" style="margin-bottom:16px">
+    <div class="bar" style="margin-bottom:16px">
+      <span id="scSessCount" class="result-count"></span>
+      <div class="bar-right">
+        <button class="fbtn" id="scSessRefresh">↺ Refresh</button>
+        <label>Per page</label>
+        <select id="scSessLimit" class="fsel">
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
     </div>
-    <div id="agentsEmpty" style="display:none;color:var(--dim);padding:1rem 0;font-size:.85rem">
-      No named agents seen yet. Pass <code>name="my-agent"</code> to an adapter or <code>agent_name</code> to the eval-server.
+    <div id="sessCtrlBody">
+      <div class="empty">Loading sessions…</div>
     </div>
+    <div id="scSessPager" class="pager"></div>
   </div>
-</div>
 
-<!-- ═══ SESSIONS, FINDINGS, EVENTS ═══════════════════════════════ -->
-<div class="section">
-  <h2>Sessions, Findings &amp; Events</h2><div class="rule"></div>
-</div>
+  <div class="section">
+    <h2>All Sessions</h2><div class="rule"></div>
+    <span class="hint">full session log — click session row above for controls</span>
+  </div>
 
-<div class="grid" style="grid-template-columns:1fr">
   <div class="card">
-    <div class="card-title">Sessions</div>
     <div class="bar">
       <span id="sessCount" class="result-count"></span>
       <div class="bar-right">
@@ -492,7 +975,6 @@
           <option value="10">10</option>
           <option value="20" selected>20</option>
           <option value="50">50</option>
-          <option value="100">100</option>
         </select>
       </div>
     </div>
@@ -515,91 +997,199 @@
   </div>
 </div>
 
-<!-- Row 5: Top Users + Threat Patterns -->
-<div class="grid grid-1-2">
-  <div class="card">
-    <div class="card-title">Top Sessions by Blocks</div>
-    <div id="usersContainer"></div>
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: POLICY CONTROL                                           -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-policy" class="page">
+  <div class="section" style="margin-top:0">
+    <h2>Policy Control</h2><div class="rule"></div>
+    <span class="hint">human-only — changes take effect within 30 s on running agents</span>
   </div>
-  <div class="card">
-    <div class="card-title">Top Threat Patterns</div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Pattern</th><th>Category</th><th class="right">Count</th><th>Last Seen</th><th>Severity</th>
-        </tr></thead>
-        <tbody id="patternsBody"></tbody>
-      </table>
+
+  <div id="enrollBanner"></div>
+  <div id="workspaceBanner"></div>
+
+  <div class="policy-scope-nav">
+    <button class="policy-scope-btn active" data-pscope="rules">Rules</button>
+    <button class="policy-scope-btn" data-pscope="global">Global</button>
+    <button class="policy-scope-btn" data-pscope="project">Project</button>
+    <button class="policy-scope-btn" data-pscope="enterprise">Enterprise</button>
+    <button class="policy-scope-btn" data-pscope="effective">Effective (merged)</button>
+  </div>
+
+  <!-- Per-rule toggle list (project-scoped) -->
+  <div id="pscope-rules" class="policy-scope-pane active">
+    <div class="banner banner-info">
+      <span class="banner-icon">🛡️</span>
+      <div class="banner-text">
+        <strong>Detection rules</strong>
+        Toggle individual rules for <strong>this project</strong>. Disabling a rule stops it
+        blocking <em>and</em> flagging. Saved to <code>.prismor-warden/policy.yaml</code>;
+        live agents pick it up within 30&nbsp;s.
+      </div>
+    </div>
+    <div class="rules-toolbar">
+      <input id="rulesSearch" class="rules-search" type="text" spellcheck="false"
+             placeholder="Search rules by name, category, or description…" />
+      <span id="rulesCount" class="rules-count">—</span>
+      <button class="btn-ghost" id="rulesAll">Enable all</button>
+      <button class="btn-ghost" id="rulesNone">Disable all</button>
+    </div>
+    <div id="rulesList" class="rules-list"><div class="empty">Loading…</div></div>
+    <div class="policy-actions">
+      <button class="btn-primary" id="rulesSave">Save rules</button>
+      <button class="btn-ghost" id="rulesDiscard">Discard changes</button>
+      <span id="rulesSaveStatus" class="policy-status"></span>
+    </div>
+  </div>
+
+  <!-- Global policy -->
+  <div id="pscope-global" class="policy-scope-pane">
+    <div class="banner banner-info">
+      <span class="banner-icon">🌐</span>
+      <div class="banner-text">
+        <strong>Global policy</strong>
+        Applies to every project on this machine unless overridden at the project level.
+        Path: <code id="globalPolicyPath">~/.prismor/policy.yaml</code>
+      </div>
+    </div>
+    <div class="policy-header">
+      <div class="policy-meta">
+        <span id="globalPolicyStatus">Loading…</span>
+        <span class="path" id="globalPolicyMtime"></span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-ghost" id="globalPolicyReset">Reset to default</button>
+      </div>
+    </div>
+    <div class="mode-toggle-row">
+      <span class="mode-toggle-label">Enforcement mode</span>
+      <div class="mode-toggle-btns">
+        <button class="mode-btn" id="globalModeObserve" onclick="setMode('global','observe')">Observe</button>
+        <button class="mode-btn" id="globalModeEnforce" onclick="setMode('global','enforce')">Enforce</button>
+      </div>
+      <span class="mode-hint" id="globalModeHint">observe = log only &nbsp;·&nbsp; enforce = block</span>
+    </div>
+    <textarea id="globalPolicyEditor" class="yaml-editor" spellcheck="false"
+      placeholder="# ~/.prismor/policy.yaml&#10;# Leave empty to use built-in defaults.&#10;version: &quot;1.0&quot;&#10;settings:&#10;  default_mode: observe"></textarea>
+    <div class="policy-actions">
+      <button class="btn-primary" id="globalPolicySave">Save global policy</button>
+      <button class="btn-ghost" id="globalPolicyDiscard">Discard changes</button>
+      <span id="globalPolicySaveStatus" class="policy-status"></span>
+    </div>
+  </div>
+
+  <!-- Project policy -->
+  <div id="pscope-project" class="policy-scope-pane">
+    <div class="banner banner-info">
+      <span class="banner-icon">📁</span>
+      <div class="banner-text">
+        <strong>Project policy</strong>
+        Overrides global settings for this project only. Stored in
+        <code id="projectPolicyPath">.prismor-warden/policy.yaml</code> alongside your code.
+        Merge precedence: enterprise &gt; project &gt; global.
+      </div>
+    </div>
+    <div class="policy-header">
+      <div class="policy-meta">
+        <span id="projectPolicyStatus">Loading…</span>
+        <span class="path" id="projectPolicyMtime"></span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-ghost" id="projectPolicyReset">Reset to default</button>
+      </div>
+    </div>
+    <div class="mode-toggle-row">
+      <span class="mode-toggle-label">Enforcement mode</span>
+      <div class="mode-toggle-btns">
+        <button class="mode-btn" id="projectModeObserve" onclick="setMode('project','observe')">Observe</button>
+        <button class="mode-btn" id="projectModeEnforce" onclick="setMode('project','enforce')">Enforce</button>
+      </div>
+      <span class="mode-hint" id="projectModeHint">observe = log only &nbsp;·&nbsp; enforce = block</span>
+    </div>
+    <textarea id="projectPolicyEditor" class="yaml-editor" spellcheck="false"
+      placeholder="# .prismor-warden/policy.yaml&#10;# Per-project overrides — only what you want to change.&#10;version: &quot;1.0&quot;&#10;settings:&#10;  default_mode: observe"></textarea>
+    <div class="policy-actions">
+      <button class="btn-primary" id="projectPolicySave">Save project policy</button>
+      <button class="btn-ghost" id="projectPolicyDiscard">Discard changes</button>
+      <span id="projectPolicySaveStatus" class="policy-status"></span>
+    </div>
+  </div>
+
+  <!-- Enterprise policy (read-only) -->
+  <div id="pscope-enterprise" class="policy-scope-pane">
+    <div class="banner banner-enterprise" id="enterpriseBanner">
+      <span class="banner-icon">🔒</span>
+      <div class="banner-text" id="enterpriseBannerText">
+        <strong>Not enrolled</strong>
+        Enroll this device in a Prismor org to receive centrally-managed policies.
+        Run: <code>prismor enroll &lt;token&gt;</code>
+      </div>
+    </div>
+    <textarea id="enterprisePolicyEditor" class="yaml-editor" readonly spellcheck="false"
+      placeholder="# No enterprise policy — device is not enrolled."></textarea>
+    <div class="policy-actions">
+      <span style="font-size:11px;color:var(--gray-400)">Read-only — managed by your org admin in the Prismor web dashboard.</span>
+    </div>
+  </div>
+
+  <!-- Effective (merged) — read-only -->
+  <div id="pscope-effective" class="policy-scope-pane">
+    <div class="banner banner-info">
+      <span class="banner-icon">🔀</span>
+      <div class="banner-text">
+        <strong>Effective policy</strong>
+        What actually runs on this machine right now — global + project + enterprise merged together.
+        Enterprise settings take precedence; core protections can never be disabled.
+      </div>
+    </div>
+    <div class="policy-header">
+      <div class="policy-meta">
+        <span id="effectivePolicyStatus"></span>
+      </div>
+    </div>
+    <textarea id="effectivePolicyEditor" class="yaml-editor" readonly spellcheck="false"
+      placeholder="# Loading effective policy…"></textarea>
+    <div class="policy-actions">
+      <span style="font-size:11px;color:var(--gray-400)">Read-only — edit Global or Project to change this.</span>
     </div>
   </div>
 </div>
 
-<!-- Row 6: Findings Drilldown (paginated) -->
-<div class="grid" style="grid-template-columns:1fr">
-  <div class="card">
-    <div class="card-title">Findings Drilldown</div>
-    <div class="bar">
-      <label>Agent</label>
-      <select id="fAgent" class="fsel"><option value="">All</option></select>
-      <label>Severity</label>
-      <select id="fSev" class="fsel">
-        <option value="">All</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
-      </select>
-      <label>Category</label>
-      <select id="fCat" class="fsel"><option value="">All</option></select>
-      <input id="fSearch" class="finput" type="text" placeholder="search title or evidence…" />
-      <div class="bar-right">
-        <span id="findCount" class="result-count"></span>
-        <label>Per page</label>
-        <select id="findLimit" class="fsel">
-          <option value="10">10</option>
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </div>
-    </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>Finding</th><th>Agent</th><th>Category</th><th>Severity</th><th>When</th><th style="width:16px"></th>
-        </tr></thead>
-        <tbody id="findBody"></tbody>
-      </table>
-    </div>
-    <div id="findPager" class="pager"></div>
+<!-- ═══ MORE FROM PRISMOR (CTA) ══════════════════════════════════════════ -->
+<div class="prismor-cta">
+  <div class="prismor-cta-text">
+    <strong>Want team dashboards, signed remote policy &amp; audit history?</strong>
+    <span>This is the local agent. Prismor Cloud adds org-wide fleet visibility, centrally-managed policy, and long-term audit trails.</span>
+  </div>
+  <a class="prismor-cta-btn" href="https://prismor.dev?utm_source=immunity_dashboard&utm_medium=cta" target="_blank" rel="noopener">Explore Prismor Cloud →</a>
+</div>
+
+<!-- ═══ LOADING SCREEN ═══════════════════════════════════════════════════ -->
+<div id="loadingScreen">
+  <div id="loadingCard">
+    <img src="https://prismor.dev/Prismor_Logo.png" id="loadingLogo" alt="Prismor" />
+    <div id="loadingTitle">Prismor</div>
+    <div id="loadingBar"><div id="loadingFill"></div></div>
+    <div id="loadingLabel">Loading dashboard…</div>
   </div>
 </div>
 
-<!-- Row 7: Events Feed (paginated) -->
-<div class="grid" style="grid-template-columns:1fr">
-  <div class="card">
-    <div class="card-title">Event Feed</div>
-    <div class="bar">
-      <button class="fbtn active" data-verdict="">All</button>
-      <button class="fbtn" data-verdict="blocked">Blocked</button>
-      <button class="fbtn" data-verdict="allowed">Allowed</button>
-      <div class="bar-sep"></div>
-      <label>Agent</label>
-      <select id="evtAgent" class="fsel"><option value="">All</option></select>
-      <div class="bar-right">
-        <span id="evtCount" class="result-count"></span>
-        <label>Per page</label>
-        <select id="evtLimit" class="fsel">
-          <option value="20">20</option>
-          <option value="30" selected>30</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </div>
+<!-- ═══ SESSION DETAIL DRAWER ════════════════════════════════════════════ -->
+<div class="sess-drawer-overlay" id="sessDrawerOverlay" onclick="closeSessDrawer()"></div>
+<div class="sess-drawer" id="sessDrawer">
+  <div class="sess-drawer-header">
+    <div style="flex:1;min-width:0">
+      <div class="sess-drawer-title">Session Control</div>
+      <div class="sess-drawer-sessid" id="sessDrawerSessId"></div>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center" id="sessDrawerPills"></div>
     </div>
-    <div id="evtContainer"></div>
-    <div id="evtPager" class="pager"></div>
+    <button class="sess-drawer-close" onclick="closeSessDrawer()">✕</button>
   </div>
+  <div class="sess-drawer-body" id="sessDrawerBody">
+    <div class="empty">Loading…</div>
+  </div>
+  <div class="sess-drawer-footer" id="sessDrawerFooter"></div>
 </div>
 
 <script>
@@ -609,664 +1199,1307 @@ const CAT_LABELS = {
   tool_call_abuse: 'Tool Call Abuse', secret_exfil: 'Secret Exfil',
   malicious_mcp: 'Malicious MCP', dangerous_command: 'Dangerous Cmd',
 };
+const DEFAULT_GLOBAL_YAML = `# Global policy — applies to every project on this machine.
+# Only set what you want to differ from built-in defaults.
+version: "1.0"
+settings:
+  default_mode: observe
+`;
+const DEFAULT_PROJECT_YAML = `# Project policy — per-project overrides.
+# Merge precedence: enterprise > project > global > built-in defaults.
+version: "1.0"
+settings:
+  default_mode: observe
+`;
 
-// XSS-safe text injection
+// ── Per-tab caches (populated at boot, used for instant renders) ───────────
+let _sessCtrlCache = null;   // {items, total, pages, page}
+let _policyCache   = null;   // raw /api/policy response
+let _wsCache       = null;   // raw /api/workspaces response
+
+// ── Tab navigation ─────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const tabId = 'page-' + btn.dataset.tab;
+    document.getElementById(tabId)?.classList.add('active');
+
+    if (btn.dataset.tab === 'sessions') {
+      // Render from cache instantly, refresh in background
+      if (_sessCtrlCache) {
+        renderSessionControl(_sessCtrlCache.items, _serverWorkspace);
+        document.getElementById('scSessCount').textContent = fmtNum(_sessCtrlCache.total) + ' sessions';
+        buildPager('scSessPager', _sessCtrlData, () => loadSessionControl());
+        if (_wsCache) renderEnrollBanners((_wsCache).enrollment);
+        renderSessions(_sessCtrlCache.items);
+      }
+      loadSessionControl();   // silent background refresh
+    }
+    if (btn.dataset.tab === 'policy') {
+      // Render from cache instantly, refresh in background
+      if (_policyCache) renderPolicyTab(_policyCache);
+      loadPolicy();           // silent background refresh
+      loadRules();            // per-rule toggle list
+    }
+  });
+});
+
+// ── Session detail drawer ──────────────────────────────────────────────────
+const ALL_TOOLS = ['Bash','Edit','MultiEdit','Read','WebFetch','WebSearch','Write'];
+let _drawerSessId  = null;
+let _drawerWs      = null;
+let _drawerScoped  = null;   // live copy being edited
+let _drawerEditing = false;
+
+function navigateToSession(sessionId, workspace) {
+  openSessDrawer(sessionId, workspace || _serverWorkspace || '');
+}
+
+function openSessDrawer(sessionId, workspace) {
+  _drawerSessId = sessionId;
+  _drawerWs     = workspace || _serverWorkspace || '';
+  document.getElementById('sessDrawerSessId').textContent = sessionId;
+  document.getElementById('sessDrawerPills').innerHTML = '';
+  document.getElementById('sessDrawerBody').innerHTML = '<div class="empty">Loading…</div>';
+  document.getElementById('sessDrawerFooter').innerHTML = '';
+  document.getElementById('sessDrawerOverlay').classList.add('open');
+  document.getElementById('sessDrawer').classList.add('open');
+  fetchAndRenderDrawer();
+}
+
+function closeSessDrawer() {
+  document.getElementById('sessDrawerOverlay').classList.remove('open');
+  document.getElementById('sessDrawer').classList.remove('open');
+  _drawerSessId = null;
+}
+
+async function fetchAndRenderDrawer() {
+  const sessId = _drawerSessId;
+  const ws     = _drawerWs;
+  try {
+    const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+    const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessId)}/control${params}`);
+    if (sessId !== _drawerSessId) return; // drawer was closed / changed
+    renderDrawerContent(sessId, ws, data);
+  } catch(e) {
+    if (sessId !== _drawerSessId) return;
+    document.getElementById('sessDrawerBody').innerHTML =
+      '<div style="color:#b91c1c;font-size:11px">Failed to load session: ' + safe(e.message) + '</div>';
+  }
+}
+
+function renderDrawerContent(sessId, ws, data) {
+  const scoped = data.scoped || null;
+  const blocks = data.recent_blocked || [];
+  const paused = scoped && scoped.paused;
+
+  // Cache scoped for edit operations
+  _drawerScoped = scoped ? JSON.parse(JSON.stringify(scoped)) : null;
+  _drawerEditing = false;
+
+  // Status pills
+  const pillEl = document.getElementById('sessDrawerPills');
+  if (paused) {
+    pillEl.innerHTML = '<span class="status-pill status-paused"><span class="status-dot"></span>Immunity Paused</span>';
+  } else if (scoped) {
+    pillEl.innerHTML = '<span class="status-pill status-scoped"><span class="status-dot"></span>Scoped</span>' +
+      (blocks.length ? '<span class="status-pill status-blocked" style="margin-left:4px"><span class="status-dot"></span>' + blocks.length + ' blocks</span>' : '');
+  } else {
+    pillEl.innerHTML = '<span class="status-pill status-active"><span class="status-dot"></span>Active</span>' +
+      (blocks.length ? '<span class="status-pill status-blocked" style="margin-left:4px"><span class="status-dot"></span>' + blocks.length + ' blocks</span>' : '');
+  }
+
+  // Body
+  const bodyEl = document.getElementById('sessDrawerBody');
+  bodyEl.innerHTML = '';
+
+  // ── Scoped rules section ────────────────────────────────────────────────
+  const sec = document.createElement('div');
+  sec.className = 'scope-edit-section';
+  sec.id = 'scopeEditSection';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'scope-edit-header';
+  hdr.innerHTML = '<span class="drawer-section-title" style="margin-bottom:0">Scoped rules for this session</span>';
+  if (scoped && !paused) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'scope-edit-btn';
+    editBtn.id = 'scopeEditToggle';
+    editBtn.textContent = 'Edit rules';
+    editBtn.onclick = () => toggleScopeEdit();
+    hdr.appendChild(editBtn);
+  }
+  sec.appendChild(hdr);
+
+  const rulesDiv = document.createElement('div');
+  rulesDiv.id = 'scopeRulesView';
+  if (!scoped) {
+    rulesDiv.innerHTML = '<div style="font-size:11px;color:var(--gray-400)">No scope set — full default policy applies.</div>';
+  } else {
+    renderScopeView(rulesDiv, scoped);
+  }
+  sec.appendChild(rulesDiv);
+  bodyEl.appendChild(sec);
+
+  // ── Blocks section ──────────────────────────────────────────────────────
+  const blkSec = document.createElement('div');
+  blkSec.className = 'drawer-section';
+  blkSec.innerHTML = '<div class="drawer-section-title">Recent blocks in this session</div>';
+  if (!blocks.length) {
+    blkSec.innerHTML += '<div style="font-size:11px;color:var(--gray-400)">No blocks recorded for this session.</div>';
+  } else {
+    blkSec.innerHTML += blocks.map(b =>
+      '<div class="drawer-block-item">' +
+        '<span class="blocked-sev"><span class="sev-badge ' + sevClass(b.severity) + '">' + safe(b.severity) + '</span></span>' +
+        '<div class="drawer-block-body">' +
+          '<div class="drawer-block-title">' + safe(b.title) + '</div>' +
+          '<div class="drawer-block-meta">' + safe(CAT_LABELS[b.category] || b.category) + ' · ' + safe(b.ts || '') + '</div>' +
+          (b.evidence ? '<div style="margin-top:4px;font-size:10px;color:var(--gray-500)">' + safe(b.evidence) + '</div>' : '') +
+        '</div>' +
+      '</div>'
+    ).join('');
+  }
+  bodyEl.appendChild(blkSec);
+
+  // Footer
+  const footerEl = document.getElementById('sessDrawerFooter');
+  if (paused) {
+    footerEl.innerHTML =
+      '<button class="drawer-toggle resume" onclick="drawerAction(\'resume\')">▶ Resume Prismor</button>' +
+      '<button class="drawer-toggle clear"  onclick="drawerAction(\'clear\')">Clear scope</button>' +
+      '<div class="drawer-status" id="drawerActionStatus"></div>';
+  } else {
+    footerEl.innerHTML =
+      '<button class="drawer-toggle pause" onclick="drawerAction(\'pause\')">⏸ Pause Prismor</button>' +
+      '<button class="drawer-toggle clear" onclick="drawerAction(\'clear\')">Clear scope</button>' +
+      '<div class="drawer-status" id="drawerActionStatus"></div>';
+  }
+}
+
+function renderScopeView(container, scoped) {
+  const allowed = scoped.allowed_tools || [];
+  const denied  = scoped.deny_tools   || [];
+  const paths   = scoped.allowed_paths || [];
+  const netOk   = !scoped.deny_network;
+  let html = '';
+  if (scoped.paused) {
+    html += '<div style="margin-bottom:8px"><span class="scoped-tag" style="background:#fef9c3;color:#92400e;padding:3px 10px;border-radius:4px;font-size:11px">⏸ Immunity is paused</span></div>';
+  }
+  if (allowed.length) html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Allowed tools</span><div class="drawer-rule-tags">' + allowed.map(t => '<span class="scoped-tag tag-allow">' + safe(t) + '</span>').join('') + '</div></div>';
+  if (denied.length)  html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Denied tools</span><div class="drawer-rule-tags">'  + denied.map(t  => '<span class="scoped-tag tag-deny">'  + safe(t) + '</span>').join('') + '</div></div>';
+  if (paths.length && !(paths.length === 1 && paths[0] === '**'))
+    html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Paths</span><div class="drawer-rule-tags">' + paths.map(p => '<span class="scoped-tag tag-net">' + safe(p) + '</span>').join('') + '</div></div>';
+  html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Network</span><span class="scoped-tag ' + (netOk ? 'tag-net' : 'tag-deny') + '">' + (netOk ? 'allowed' : 'denied') + '</span></div>';
+  container.innerHTML = html;
+}
+
+function renderScopeEditor(container, scoped) {
+  const allowed = [...(scoped.allowed_tools || [])];
+  const denied  = [...(scoped.deny_tools   || [])];
+  const netOk   = !scoped.deny_network;
+
+  function tagX(list, t, cls) {
+    return '<span class="tag-removable ' + cls + '" data-tool="' + safeAttr(t) + '" data-list="' + list + '">' +
+      safe(t) + '<span class="tag-x" onclick="scopeRemoveTool(\'' + list + '\',\'' + safeAttr(t) + '\')">✕</span></span>';
+  }
+
+  // Available tools not yet in either list
+  const usedInAllowed = new Set(allowed);
+  const usedInDenied  = new Set(denied);
+  const addOpts = (list) => ALL_TOOLS
+    .filter(t => list === 'allow' ? !usedInAllowed.has(t) : !usedInDenied.has(t))
+    .map(t => '<option value="' + safeAttr(t) + '">' + safe(t) + '</option>').join('');
+
+  container.innerHTML =
+    // Allowed
+    '<div class="drawer-rule-row" style="align-items:flex-start">' +
+      '<span class="drawer-rule-label" style="padding-top:4px">Allowed tools</span>' +
+      '<div>' +
+        '<div class="drawer-rule-tags" id="editTagsAllow">' +
+          (allowed.length ? allowed.map(t => tagX('allow', t, 'tag-allow')).join('') : '<span style="font-size:11px;color:var(--gray-300)">none</span>') +
+        '</div>' +
+        '<div class="tool-add-row">' +
+          '<select class="tool-add-select" id="addToolAllow"><option value="">+ add tool…</option>' + addOpts('allow') + '</select>' +
+          '<button class="tool-add-do" onclick="scopeAddTool(\'allow\')">Allow</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    // Denied
+    '<div class="drawer-rule-row" style="align-items:flex-start;margin-top:10px">' +
+      '<span class="drawer-rule-label" style="padding-top:4px">Denied tools</span>' +
+      '<div>' +
+        '<div class="drawer-rule-tags" id="editTagsDeny">' +
+          (denied.length ? denied.map(t => tagX('deny', t, 'tag-deny')).join('') : '<span style="font-size:11px;color:var(--gray-300)">none</span>') +
+        '</div>' +
+        '<div class="tool-add-row">' +
+          '<select class="tool-add-select" id="addToolDeny"><option value="">+ add tool…</option>' + addOpts('deny') + '</select>' +
+          '<button class="tool-add-do" onclick="scopeAddTool(\'deny\')">Deny</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    // Network
+    '<div class="drawer-rule-row" style="margin-top:10px">' +
+      '<span class="drawer-rule-label">Network</span>' +
+      '<button class="net-toggle-btn ' + (netOk ? 'allowed' : 'denied') + '" id="netToggleBtn" onclick="scopeToggleNet()">' +
+        (netOk ? '✓ Allowed' : '✕ Denied') +
+      '</button>' +
+    '</div>' +
+    // Save/Cancel
+    '<div class="scope-save-row">' +
+      '<button class="btn-primary" onclick="scopeSave()">Save changes</button>' +
+      '<button class="btn-ghost"   onclick="toggleScopeEdit()">Cancel</button>' +
+      '<span id="scopeSaveStatus" style="font-size:11px;color:var(--gray-400);margin-left:4px"></span>' +
+    '</div>';
+}
+
+function toggleScopeEdit() {
+  _drawerEditing = !_drawerEditing;
+  const container = document.getElementById('scopeRulesView');
+  const btn = document.getElementById('scopeEditToggle');
+  if (!container || !_drawerScoped) return;
+  if (_drawerEditing) {
+    if (btn) { btn.textContent = 'Cancel'; btn.classList.add('active'); }
+    renderScopeEditor(container, _drawerScoped);
+  } else {
+    if (btn) { btn.textContent = 'Edit rules'; btn.classList.remove('active'); }
+    renderScopeView(container, _drawerScoped);
+  }
+}
+
+function scopeRemoveTool(list, tool) {
+  if (!_drawerScoped) return;
+  if (list === 'allow') {
+    _drawerScoped.allowed_tools = (_drawerScoped.allowed_tools || []).filter(t => t !== tool);
+  } else {
+    _drawerScoped.deny_tools = (_drawerScoped.deny_tools || []).filter(t => t !== tool);
+  }
+  renderScopeEditor(document.getElementById('scopeRulesView'), _drawerScoped);
+}
+
+function scopeAddTool(list) {
+  if (!_drawerScoped) return;
+  const selId = list === 'allow' ? 'addToolAllow' : 'addToolDeny';
+  const sel = document.getElementById(selId);
+  const tool = sel?.value;
+  if (!tool) return;
+  if (list === 'allow') {
+    if (!(_drawerScoped.allowed_tools || []).includes(tool))
+      _drawerScoped.allowed_tools = [...(_drawerScoped.allowed_tools || []), tool];
+    // Remove from deny if it was there
+    _drawerScoped.deny_tools = (_drawerScoped.deny_tools || []).filter(t => t !== tool);
+  } else {
+    if (!(_drawerScoped.deny_tools || []).includes(tool))
+      _drawerScoped.deny_tools = [...(_drawerScoped.deny_tools || []), tool];
+    // Remove from allow if it was there
+    _drawerScoped.allowed_tools = (_drawerScoped.allowed_tools || []).filter(t => t !== tool);
+  }
+  renderScopeEditor(document.getElementById('scopeRulesView'), _drawerScoped);
+}
+
+function scopeToggleNet() {
+  if (!_drawerScoped) return;
+  _drawerScoped.deny_network = !_drawerScoped.deny_network;
+  const btn = document.getElementById('netToggleBtn');
+  if (!btn) return;
+  const allowed = !_drawerScoped.deny_network;
+  btn.className = 'net-toggle-btn ' + (allowed ? 'allowed' : 'denied');
+  btn.textContent = allowed ? '✓ Allowed' : '✕ Denied';
+}
+
+async function scopeSave() {
+  const sessId = _drawerSessId;
+  const ws     = _drawerWs;
+  const statusEl = document.getElementById('scopeSaveStatus');
+  if (statusEl) statusEl.textContent = 'Saving…';
+  try {
+    const result = await apiFetch('/api/sessions/' + encodeURIComponent(sessId) + '/control', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update',
+        workspace: ws,
+        allowed_tools: _drawerScoped.allowed_tools || [],
+        deny_tools:    _drawerScoped.deny_tools    || [],
+        deny_network:  !!_drawerScoped.deny_network,
+        allowed_paths: _drawerScoped.allowed_paths || ['**'],
+      }),
+    });
+    if (sessId !== _drawerSessId) return;
+    renderDrawerContent(sessId, ws, { scoped: result.scoped || _drawerScoped, recent_blocked: [] });
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#b91c1c'; }
+  }
+}
+
+async function drawerAction(action) {
+  const sessId = _drawerSessId;
+  const ws     = _drawerWs;
+
+  // Disable all footer buttons immediately to prevent double-clicks
+  document.querySelectorAll('#sessDrawerFooter button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+
+  try {
+    const result = await apiFetch('/api/sessions/' + encodeURIComponent(sessId) + '/control', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, workspace: ws }),
+    });
+    if (sessId !== _drawerSessId) return; // drawer changed while in flight
+    // PATCH already returns the new scoped state — render directly, no second round-trip
+    if (action === 'clear') {
+      renderDrawerContent(sessId, ws, { scoped: null, recent_blocked: [] });
+    } else {
+      renderDrawerContent(sessId, ws, { scoped: result.scoped || null, recent_blocked: [] });
+    }
+  } catch(e) {
+    document.querySelectorAll('#sessDrawerFooter button').forEach(b => { b.disabled = false; b.style.opacity = ''; });
+    const statusEl = document.getElementById('drawerActionStatus');
+    if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#b91c1c'; }
+  }
+}
+
+// ── Policy scope tabs ──────────────────────────────────────────────────────
+document.querySelectorAll('.policy-scope-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.policy-scope-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.policy-scope-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pscope-' + btn.dataset.pscope)?.classList.add('active');
+  });
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
 function safe(s) {
   const el = document.createElement('span');
   el.textContent = String(s || '');
   return el.outerHTML;
 }
-
-// XSS-safe attribute injection (for title="…")
 function safeAttr(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
-
-// Render a relative timestamp with absolute-UTC tooltip on hover.
 function tsCell(rel, abs, color) {
   const c = color || 'var(--gray-400)';
   if (!rel) return '<span style="color:' + c + '">—</span>';
   if (!abs) return '<span style="color:' + c + '">' + safe(rel) + '</span>';
   return '<span class="ts-hover" style="color:' + c + '" title="' + safeAttr(abs) + '">' + safe(rel) + '</span>';
 }
-
 function fmtNum(n) {
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,'') + 'k';
   return n.toLocaleString();
 }
-
 function shortId(s, n) {
   const x = String(s || '');
-  if (x.length <= (n || 20)) return x;
-  return x.slice(0, (n || 20)) + '…';
+  if (x.length <= (n||20)) return x;
+  return x.slice(0,(n||20)) + '…';
 }
-
 function sevClass(s) { return 'sev-' + (s || 'low'); }
-
 function riskClass(n) {
   if (n >= 80) return 'risk-80';
   if (n >= 60) return 'risk-60';
   if (n >= 30) return 'risk-30';
   return 'risk-0';
 }
+async function apiFetch(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+function fmtMtime(mt) {
+  if (!mt) return '';
+  const d = new Date(mt * 1000);
+  return ' · saved ' + d.toLocaleString();
+}
 
-// ── Pager builder ────────────────────────────────────────────────────────────
+// ── Pager ─────────────────────────────────────────────────────────────────
 function buildPager(containerId, state, loadFn) {
   const container = document.getElementById(containerId);
   if (!container) return;
   if (state.pages <= 1 && state.total === 0) { container.innerHTML = ''; return; }
-
   const { page, pages, total, limit } = state;
-  const from = total === 0 ? 0 : (page - 1) * limit + 1;
-  const to   = Math.min(page * limit, total);
-
-  // Build page number list with ellipsis
+  const from = total === 0 ? 0 : (page-1)*limit+1;
+  const to = Math.min(page*limit, total);
   const nums = [];
   for (let i = 1; i <= pages; i++) {
-    if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) {
-      nums.push(i);
-    } else if (nums[nums.length - 1] !== '…') {
-      nums.push('…');
-    }
+    if (i === 1 || i === pages || (i >= page-2 && i <= page+2)) nums.push(i);
+    else if (nums[nums.length-1] !== '…') nums.push('…');
   }
-
   container.innerHTML =
-    '<button class="pg-btn" id="' + containerId + 'Prev"' + (page <= 1 ? ' disabled' : '') + '>← Prev</button>' +
-    '<div class="pg-nums">' + nums.map(n =>
-      n === '…'
-        ? '<span class="pg-num ellipsis">…</span>'
-        : '<button class="pg-num' + (n === page ? ' cur' : '') + '" data-p="' + n + '">' + n + '</button>'
-    ).join('') + '</div>' +
-    '<button class="pg-btn" id="' + containerId + 'Next"' + (page >= pages ? ' disabled' : '') + '>Next →</button>' +
-    '<span class="pg-info">' + from + '–' + to + ' of ' + fmtNum(total) + '</span>';
-
-  container.querySelector('#' + containerId + 'Prev')
-    ?.addEventListener('click', () => { state.page--; loadFn(); });
-  container.querySelector('#' + containerId + 'Next')
-    ?.addEventListener('click', () => { state.page++; loadFn(); });
-  container.querySelectorAll('.pg-num:not(.cur):not(.ellipsis)')
-    .forEach(btn => btn.addEventListener('click', () => {
-      state.page = parseInt(btn.dataset.p, 10);
-      loadFn();
-    }));
+    '<button class="pg-btn" id="'+containerId+'Prev"'+(page<=1?' disabled':'')+'>← Prev</button>' +
+    '<div class="pg-nums">'+nums.map(n=>n==='…'
+      ?'<span class="pg-num ellipsis">…</span>'
+      :'<button class="pg-num'+(n===page?' cur':'')+'" data-p="'+n+'">'+n+'</button>'
+    ).join('')+'</div>' +
+    '<button class="pg-btn" id="'+containerId+'Next"'+(page>=pages?' disabled':'')+'>Next →</button>' +
+    '<span class="pg-info">'+from+'–'+to+' of '+fmtNum(total)+'</span>';
+  container.querySelector('#'+containerId+'Prev')?.addEventListener('click',()=>{state.page--;loadFn();});
+  container.querySelector('#'+containerId+'Next')?.addEventListener('click',()=>{state.page++;loadFn();});
+  container.querySelectorAll('.pg-num:not(.cur):not(.ellipsis)').forEach(btn=>btn.addEventListener('click',()=>{
+    state.page=parseInt(btn.dataset.p,10);loadFn();
+  }));
 }
 
-// ── Chart instances ──────────────────────────────────────────────────────────
+// ── Charts ────────────────────────────────────────────────────────────────
 let donutChart, lineChart, agentBarChart, toolBarChart, mcpBarChart, scEcoBarChart;
-
 function initCharts() {
   Chart.defaults.font.family = 'ui-monospace, SFMono-Regular, Menlo, monospace';
   Chart.defaults.font.size = 10;
   Chart.defaults.color = '#9ca3af';
-
   donutChart = new Chart(document.getElementById('donutChart'), {
-    type: 'doughnut',
-    data: { labels: [], datasets: [{ data: [], backgroundColor: COLORS, borderWidth: 0 }] },
-    options: { cutout: '60%', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+    type:'doughnut',
+    data:{labels:[],datasets:[{data:[],backgroundColor:COLORS,borderWidth:0}]},
+    options:{cutout:'60%',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}},
   });
-
   lineChart = new Chart(document.getElementById('lineChart'), {
-    type: 'line',
-    data: { labels: [], datasets: [
-      { label: 'Passed',      data: [], borderColor: '#CBD5E1', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
-      { label: 'Intercepted', data: [], borderColor: '#E8BAEE', borderWidth: 2,   pointRadius: 0, tension: 0.3 },
+    type:'line',
+    data:{labels:[],datasets:[
+      {label:'Passed',data:[],borderColor:'#CBD5E1',borderWidth:1.5,pointRadius:0,tension:0.3},
+      {label:'Intercepted',data:[],borderColor:'#E8BAEE',borderWidth:2,pointRadius:0,tension:0.3},
     ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { grid: { display: false }, ticks: { callback: v => String(v).slice(5) } },
-        y: { grid: { color: '#f3f4f6' } },
-      },
-      plugins: { legend: { position: 'top', align: 'end', labels: { boxWidth: 10, padding: 8 } } },
-    },
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{display:false},ticks:{callback:v=>String(v).slice(5)}},y:{grid:{color:'#f3f4f6'}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
   });
-
-  agentBarChart = new Chart(document.getElementById('agentBar'), {
-    type: 'bar',
-    data: { labels: [], datasets: [{ label: 'Blocked', data: [], backgroundColor: '#F9E5A6', borderRadius: 4, barThickness: 14 }] },
-    options: {
-      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { color: '#f3f4f6' } }, y: { grid: { display: false } } },
-      plugins: { legend: { display: false } },
-    },
+  agentBarChart = new Chart(document.getElementById('agentBar'),{
+    type:'bar',
+    data:{labels:[],datasets:[{label:'Blocked',data:[],backgroundColor:'#F9E5A6',borderRadius:4,barThickness:14}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{color:'#f3f4f6'}},y:{grid:{display:false}}},
+      plugins:{legend:{display:false}}},
   });
-
-  toolBarChart = new Chart(document.getElementById('toolBar'), {
-    type: 'bar',
-    data: { labels: [], datasets: [{ label: 'Calls', data: [], backgroundColor: '#A8D5F7', borderRadius: 4, barThickness: 30 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { display: false } }, y: { grid: { color: '#f3f4f6' } } },
-      plugins: { legend: { display: false } },
-    },
+  toolBarChart = new Chart(document.getElementById('toolBar'),{
+    type:'bar',
+    data:{labels:[],datasets:[{label:'Calls',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:30}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
+      plugins:{legend:{display:false}}},
   });
-
-  mcpBarChart = new Chart(document.getElementById('mcpBar'), {
-    type: 'bar',
-    data: { labels: [], datasets: [
-      { label: 'Total Calls', data: [], backgroundColor: '#A8D5F7', borderRadius: 4, barThickness: 18 },
-      { label: 'Blocked',     data: [], backgroundColor: '#E8BAEE', borderRadius: 4, barThickness: 18 },
+  mcpBarChart = new Chart(document.getElementById('mcpBar'),{
+    type:'bar',
+    data:{labels:[],datasets:[
+      {label:'Total Calls',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:18},
+      {label:'Blocked',data:[],backgroundColor:'#E8BAEE',borderRadius:4,barThickness:18},
     ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { display: false } }, y: { grid: { color: '#f3f4f6' } } },
-      plugins: { legend: { position: 'top', align: 'end', labels: { boxWidth: 10, padding: 8 } } },
-    },
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
   });
-
-  scEcoBarChart = new Chart(document.getElementById('scEcoBar'), {
-    type: 'bar',
-    data: { labels: [], datasets: [
-      { label: 'Total',   data: [], backgroundColor: '#A8D5F7', borderRadius: 4, barThickness: 18 },
-      { label: 'Blocked', data: [], backgroundColor: '#FCA5A5', borderRadius: 4, barThickness: 18 },
+  scEcoBarChart = new Chart(document.getElementById('scEcoBar'),{
+    type:'bar',
+    data:{labels:[],datasets:[
+      {label:'Total',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:18},
+      {label:'Blocked',data:[],backgroundColor:'#FCA5A5',borderRadius:4,barThickness:18},
     ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: { x: { grid: { display: false } }, y: { grid: { color: '#f3f4f6' } } },
-      plugins: { legend: { position: 'top', align: 'end', labels: { boxWidth: 10, padding: 8 } } },
-    },
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
   });
 }
 
-// ── Sessions ─────────────────────────────────────────────────────────────────
-const sessState = { page: 1, limit: 20, sort: 'updatedAt', dir: 'desc', total: 0, pages: 1 };
-
+// ── Sessions (overview table) ─────────────────────────────────────────────
+const sessState = {page:1,limit:20,sort:'updatedAt',dir:'desc',total:0,pages:1};
 async function loadSessions() {
-  const { page, limit, sort, dir } = sessState;
+  const {page,limit,sort,dir} = sessState;
   try {
-    const res = await fetch(`/api/sessions?page=${page}&limit=${limit}&sort=${sort}&dir=${dir}`);
-    const data = await res.json();
-    sessState.page = data.page; sessState.pages = data.pages; sessState.total = data.total;
+    const data = await apiFetch(`/api/sessions?page=${page}&limit=${limit}&sort=${sort}&dir=${dir}`);
+    sessState.page=data.page; sessState.pages=data.pages; sessState.total=data.total;
     renderSessions(data.items);
-    buildPager('sessPager', sessState, loadSessions);
-    document.getElementById('sessCount').textContent = fmtNum(data.total) + ' sessions';
+    buildPager('sessPager',sessState,loadSessions);
+    document.getElementById('sessCount').textContent=fmtNum(data.total)+' sessions';
     updateSessHeaders();
-  } catch (e) { console.error('[warden] sessions fetch failed:', e); }
+  } catch(e){console.error('[warden] sessions:',e);}
 }
-
 function renderSessions(rows) {
-  const tbody = document.getElementById('sessBody');
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No sessions yet</td></tr>'; return; }
-  tbody.innerHTML = rows.map(s => {
-    const rc = riskClass(s.riskScore);
-    const srcCls = s.source === 'supply_chain' ? 'supply' : '';
-    const srcLabel = s.source === 'supply_chain' ? 'supply-chain' : 'agent';
-    return '<tr>' +
-      '<td class="mono" title="' + safeAttr(s.sessionId) + '">' + safe(shortId(s.sessionId, 24)) + '</td>' +
-      '<td><span class="agent-pill">' + safe(s.agent) + '</span><span class="src-pill ' + srcCls + '">' + safe(srcLabel) + '</span></td>' +
-      '<td style="color:var(--gray-500)">' + safe(s.workspace) + '</td>' +
-      '<td><div class="risk-wrap"><div class="risk-bar"><div class="risk-fill ' + rc + '" style="width:' + s.riskScore + '%"></div></div><span class="risk-num">' + s.riskScore + '</span></div></td>' +
-      '<td class="right"' + (s.findingsCount > 0 ? ' style="color:var(--pink-600);font-weight:600"' : '') + '>' + s.findingsCount + '</td>' +
-      '<td>' + tsCell(s.updatedAt, s.updatedAtAbs) + '</td>' +
+  const tbody=document.getElementById('sessBody');
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No sessions yet</td></tr>';return;}
+  tbody.innerHTML=rows.map(s=>{
+    const rc=riskClass(s.riskScore);
+    const srcCls=s.source==='supply_chain'?'supply':'';
+    const srcLabel=s.source==='supply_chain'?'supply-chain':'agent';
+    return '<tr>'+
+      '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,24))+'</td>'+
+      '<td><span class="agent-pill">'+safe(s.agent)+'</span><span class="src-pill '+srcCls+'">'+safe(srcLabel)+'</span></td>'+
+      '<td style="color:var(--gray-500)">'+safe(s.workspace)+'</td>'+
+      '<td><div class="risk-wrap"><div class="risk-bar"><div class="risk-fill '+rc+'" style="width:'+s.riskScore+'%"></div></div><span class="risk-num">'+s.riskScore+'</span></div></td>'+
+      '<td class="right"'+(s.findingsCount>0?' style="color:var(--pink-600);font-weight:600"':'')+'>'+s.findingsCount+'</td>'+
+      '<td>'+tsCell(s.updatedAt,s.updatedAtAbs)+'</td>'+
     '</tr>';
   }).join('');
 }
+function updateSessHeaders(){
+  document.querySelectorAll('#sessThead th[data-col]').forEach(th=>{
+    th.classList.toggle('active-sort',th.dataset.col===sessState.sort);
+    const ind=th.querySelector('.sort-ind');
+    if(ind)ind.textContent=th.dataset.col===sessState.sort?(sessState.dir==='asc'?'↑':'↓'):'↕';
+  });
+}
+document.getElementById('sessThead').addEventListener('click',e=>{
+  const th=e.target.closest('th[data-col]'); if(!th)return;
+  const col=th.dataset.col;
+  sessState.dir=(sessState.sort===col&&sessState.dir==='desc')?'asc':'desc';
+  sessState.sort=col; sessState.page=1; loadSessions();
+});
+document.getElementById('sessLimit').addEventListener('change',e=>{
+  sessState.limit=parseInt(e.target.value,10); sessState.page=1; loadSessions();
+});
 
-function updateSessHeaders() {
-  document.querySelectorAll('#sessThead th[data-col]').forEach(th => {
-    th.classList.toggle('active-sort', th.dataset.col === sessState.sort);
-    const ind = th.querySelector('.sort-ind');
-    if (ind) ind.textContent = th.dataset.col === sessState.sort ? (sessState.dir === 'asc' ? '↑' : '↓') : '↕';
+// ── Findings ──────────────────────────────────────────────────────────────
+const findState={page:1,limit:25,agent:'',severity:'',category:'',q:'',total:0,pages:1};
+async function loadFindings(){
+  const {page,limit,agent,severity,category,q}=findState;
+  const params=new URLSearchParams({page,limit,agent,severity,category,q});
+  try{
+    const data=await apiFetch('/api/findings?'+params);
+    findState.page=data.page; findState.pages=data.pages; findState.total=data.total;
+    if(data.agents){
+      const sel=document.getElementById('fAgent'); const cur=sel.value;
+      sel.innerHTML='<option value="">All</option>'+data.agents.map(a=>'<option value="'+a+'"'+(a===cur?' selected':'')+'>'+a+'</option>').join('');
+    }
+    if(data.categories){
+      const sel=document.getElementById('fCat'); const cur=sel.value;
+      sel.innerHTML='<option value="">All</option>'+data.categories.map(c=>'<option value="'+c+'"'+(c===cur?' selected':'')+'>'+( CAT_LABELS[c]||c)+'</option>').join('');
+    }
+    renderFindings(data.items);
+    buildPager('findPager',findState,loadFindings);
+    document.getElementById('findCount').textContent=fmtNum(data.total)+' findings';
+  }catch(e){console.error('[warden] findings:',e);}
+}
+function renderFindings(rows){
+  const tbody=document.getElementById('findBody');
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No findings match the current filters</td></tr>';return;}
+  tbody.innerHTML=rows.map((f,i)=>{
+    const eid='fev-'+i;
+    const trig=f.trigger||{};
+    const triggerBlock=trig.detail
+      ?'<div style="margin-top:8px"><span class="trigger-kind">'+safe(trig.kind||'event')+'</span><div class="trigger-detail">'+safe(trig.detail)+'</div></div>'
+      :'';
+    return '<tr class="finding-row" onclick="toggleEvidence(\''+eid+'\')">'+
+      '<td>'+safe(f.title)+'</td>'+
+      '<td><span class="agent-pill">'+safe(f.agent)+'</span></td>'+
+      '<td style="color:var(--gray-500)">'+safe(CAT_LABELS[f.category]||f.category)+'</td>'+
+      '<td><span class="sev-badge '+sevClass(f.severity)+'">'+safe(f.severity)+'</span></td>'+
+      '<td>'+tsCell(f.ts,f.tsAbs)+'</td>'+
+      '<td class="expand-arrow">▸</td>'+
+    '</tr>'+
+    '<tr id="'+eid+'" class="finding-ev-row">'+
+      '<td class="finding-ev-cell" colspan="6">'+
+        '<div>'+safe(f.evidence||'No evidence recorded.')+'</div>'+
+        triggerBlock+
+        '<div style="margin-top:8px;font-size:10px;color:var(--gray-400)">session: <span title="'+safeAttr(f.sessionId)+'">'+safe(shortId(f.sessionId,32))+'</span></div>'+
+      '</td>'+
+    '</tr>';
+  }).join('');
+}
+function toggleEvidence(id){
+  const row=document.getElementById(id); if(!row)return;
+  row.classList.toggle('open');
+  const prev=row.previousElementSibling;
+  if(prev){const arrow=prev.querySelector('.expand-arrow');if(arrow)arrow.textContent=row.classList.contains('open')?'▾':'▸';}
+}
+['fAgent','fSev','fCat'].forEach(id=>document.getElementById(id).addEventListener('change',e=>{
+  findState[id==='fAgent'?'agent':id==='fSev'?'severity':'category']=e.target.value;
+  findState.page=1; loadFindings();
+}));
+let _findSearchTimer;
+document.getElementById('fSearch').addEventListener('input',e=>{
+  clearTimeout(_findSearchTimer);
+  _findSearchTimer=setTimeout(()=>{findState.q=e.target.value;findState.page=1;loadFindings();},300);
+});
+document.getElementById('findLimit').addEventListener('change',e=>{
+  findState.limit=parseInt(e.target.value,10);findState.page=1;loadFindings();
+});
+
+// ── Events ────────────────────────────────────────────────────────────────
+const evtState={page:1,limit:30,verdict:'',agent:'',total:0,pages:1};
+async function loadEvents(){
+  const {page,limit,verdict,agent}=evtState;
+  const params=new URLSearchParams({page,limit,verdict,agent});
+  try{
+    const data=await apiFetch('/api/events?'+params);
+    evtState.page=data.page; evtState.pages=data.pages; evtState.total=data.total;
+    if(data.agents){
+      const sel=document.getElementById('evtAgent'); const cur=sel.value;
+      sel.innerHTML='<option value="">All</option>'+data.agents.map(a=>'<option value="'+a+'"'+(a===cur?' selected':'')+'>'+a+'</option>').join('');
+    }
+    renderEvents(data.items);
+    buildPager('evtPager',evtState,loadEvents);
+    document.getElementById('evtCount').textContent=fmtNum(data.total)+' events';
+  }catch(e){console.error('[warden] events:',e);}
+}
+function renderEvents(rows){
+  const container=document.getElementById('evtContainer');
+  if(!rows.length){container.innerHTML='<div class="empty">No events match the current filters</div>';return;}
+  container.innerHTML=rows.map((ev,i)=>{
+    const sid = ev.sessionId || '';
+    const ws  = ev.workspace || '';
+    return '<div class="event-row" onclick="onEventClick(\''+safeAttr(sid)+'\',\''+safeAttr(ws)+'\')" title="Open session controls">'+
+      '<span class="event-dot '+(ev.verdict||'allowed')+'"></span>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div class="event-meta">'+
+          (ev.tsAbs?'<span class="ts-hover" title="'+safeAttr(ev.tsAbs)+'">'+safe(ev.ts)+'</span>':safe(ev.ts))+
+          ' &middot; <strong style="color:var(--gray-600)">'+safe(ev.agent)+'</strong>'+
+          (sid ? ' &middot; <span class="event-sess-id" title="'+safeAttr(sid)+'">'+safe(shortId(sid,18))+'</span>' : '')+
+        '</div>'+
+        '<div class="event-action">'+safe(ev.action)+'</div>'+
+      '</div>'+
+      '<span class="sev-badge '+sevClass(ev.severity)+'" style="flex-shrink:0">'+safe(ev.severity)+'</span>'+
+      '<span class="event-sess-link">Session →</span>'+
+    '</div>';
+  }).join('');
+}
+
+function onEventClick(sessionId, workspace) {
+  if (!sessionId) {
+    const t = document.createElement('div');
+    t.textContent = 'No session ID recorded for this event.';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:#f9fafb;font-size:11px;padding:8px 16px;border-radius:6px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
+    return;
+  }
+  openSessDrawer(sessionId, workspace);
+}
+document.querySelectorAll('.fbtn[data-verdict]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.fbtn[data-verdict]').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    evtState.verdict=btn.dataset.verdict; evtState.page=1; loadEvents();
+  });
+});
+document.getElementById('evtAgent').addEventListener('change',e=>{evtState.agent=e.target.value;evtState.page=1;loadEvents();});
+document.getElementById('evtLimit').addEventListener('change',e=>{evtState.limit=parseInt(e.target.value,10);evtState.page=1;loadEvents();});
+
+// ── Stats ─────────────────────────────────────────────────────────────────
+async function loadStats(){
+  try{
+    const days=document.getElementById('globalDays').value;
+    const data=await apiFetch('/api/stats?days='+days);
+    const badge=document.getElementById('statusBadge');
+    const hasData=data.kpis&&data.kpis.toolCallsInspected24h>0;
+    badge.className='badge '+(hasData?'badge-live':'badge-demo');
+    badge.innerHTML='<span class="badge-dot"></span> '+(hasData?'live':'no data');
+    document.getElementById('lastUpdated').textContent='updated '+new Date().toLocaleTimeString();
+    if(data.window){
+      const fmt=d=>new Date(d).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+      const r=fmt(data.window.from)+' – '+fmt(data.window.to);
+      document.getElementById('hintActivity').textContent=r;
+      document.getElementById('hintSupply').textContent=r;
+    }
+    const k=data.kpis||{};
+    document.getElementById('kpiSessions').textContent=fmtNum(k.activeSessions||0);
+    document.getElementById('kpiToolCalls').textContent=fmtNum(k.toolCallsInspected24h||0);
+    document.getElementById('kpiDangerous').textContent=fmtNum(k.dangerousCommandsPrevented24h||0);
+    const d=k.deltas||{};
+    if(d.tools!==undefined){const cls=d.tools>0?'up':'down';document.getElementById('kpiToolsDelta').innerHTML='<span class="'+cls+'">'+(d.tools>0?'+':'')+d.tools+'%</span> vs yesterday';}
+    if(d.dangerous!==undefined){const cls=d.dangerous>0?'up':'down';document.getElementById('kpiDangerousDelta').innerHTML='<span class="'+cls+'">'+(d.dangerous>0?'+':'')+d.dangerous+'%</span> vs yesterday';}
+    const sv=data.severityBreakdown||{};
+    document.getElementById('sevCritical').textContent=fmtNum(sv.critical||0);
+    document.getElementById('sevHigh').textContent=fmtNum(sv.high||0);
+    document.getElementById('sevMedium').textContent=fmtNum(sv.medium||0);
+    document.getElementById('sevLow').textContent=fmtNum(sv.low||0);
+    const threats=data.threatsByCategory||{};
+    const catKeys=Object.keys(CAT_LABELS);
+    donutChart.data.labels=catKeys.map(k=>CAT_LABELS[k]);
+    donutChart.data.datasets[0].data=catKeys.map(k=>threats[k]||0);
+    donutChart.update();
+    document.getElementById('donutLegend').innerHTML=catKeys.map((k,i)=>'<div class="legend-item"><span class="legend-dot" style="background:'+COLORS[i]+'"></span>'+CAT_LABELS[k]+'</div>').join('');
+    const ts=data.blockRateTimeseries||[];
+    lineChart.data.labels=ts.map(t=>t.date);
+    lineChart.data.datasets[0].data=ts.map(t=>t.passed);
+    lineChart.data.datasets[1].data=ts.map(t=>t.intercepted);
+    lineChart.update();
+    const ab=data.agentBlockedCommands||[];
+    agentBarChart.data.labels=ab.map(a=>a.agent); agentBarChart.data.datasets[0].data=ab.map(a=>a.blocked); agentBarChart.update();
+    const tb=data.toolCallBreakdown||[];
+    toolBarChart.data.labels=tb.map(t=>t.tool); toolBarChart.data.datasets[0].data=tb.map(t=>t.count); toolBarChart.update();
+    const mcp=data.topMcpAndSkills||[];
+    mcpBarChart.data.labels=mcp.map(m=>m.name); mcpBarChart.data.datasets[0].data=mcp.map(m=>m.calls); mcpBarChart.data.datasets[1].data=mcp.map(m=>m.blocked); mcpBarChart.update();
+    const sessions=data.topSessionsByBlocks||[];
+    const maxBlocked=sessions.length>0?sessions[0].blocked:1;
+    document.getElementById('usersContainer').innerHTML=sessions.map((u,i)=>{
+      const srcCls=u.source==='supply_chain'?'supply':'';
+      const srcLabel=u.source==='supply_chain'?'supply-chain':'agent';
+      return '<div class="user-row">'+
+        '<span class="user-rank">'+(i+1)+'</span>'+
+        '<div class="user-info">'+
+          '<div class="user-top">'+
+            '<span class="user-id" title="'+safeAttr(u.sessionId)+'">'+safe(shortId(u.sessionId,22))+'<span class="src-pill '+srcCls+'">'+safe(u.agent)+' · '+safe(srcLabel)+'</span></span>'+
+            '<span class="user-count">'+u.blocked+'</span>'+
+          '</div>'+
+          '<div class="user-bar"><div class="user-bar-fill" style="width:'+(u.blocked/maxBlocked*100)+'%"></div></div>'+
+        '</div>'+
+        '<span class="user-seen">'+tsCell(u.lastSeen,u.lastSeenAbs,'var(--gray-400)')+'</span>'+
+      '</div>';
+    }).join('');
+    const patterns=data.topPatterns||[];
+    document.getElementById('patternsBody').innerHTML=patterns.map(p=>
+      '<tr>'+
+        '<td>'+safe(p.pattern||'')+'</td>'+
+        '<td style="color:#9ca3af">'+safe(CAT_LABELS[p.category]||p.category)+'</td>'+
+        '<td class="right" style="font-weight:500">'+(p.count||0)+'</td>'+
+        '<td>'+tsCell(p.lastSeen,p.lastSeenAbs,'#9ca3af')+'</td>'+
+        '<td><span class="sev-badge '+sevClass(p.severity)+'">'+safe(p.severity||'low')+'</span></td>'+
+      '</tr>'
+    ).join('');
+  }catch(e){console.error('[warden] stats:',e);}
+}
+
+// ── Supply chain ──────────────────────────────────────────────────────────
+async function loadSupplyChain(){
+  try{
+    const days=document.getElementById('globalDays').value;
+    const data=await apiFetch('/api/supply-chain?days='+days);
+    const k=data.kpis||{};
+    document.getElementById('scAllowed').textContent=fmtNum(k.allowedPackages24h||0);
+    document.getElementById('scWarned').textContent=fmtNum(k.warnedPackages24h||0);
+    document.getElementById('scBlocked').textContent=fmtNum(k.blockedPackages24h||0);
+    document.getElementById('scChecked').textContent=fmtNum(k.checkedPackages24h||0);
+    const eco=data.ecosystemBreakdown||[];
+    scEcoBarChart.data.labels=eco.map(e=>e.ecosystem);
+    scEcoBarChart.data.datasets[0].data=eco.map(e=>e.total);
+    scEcoBarChart.data.datasets[1].data=eco.map(e=>e.blocked);
+    scEcoBarChart.update();
+    const blocks=data.recentBlocks||[];
+    const tbody=document.getElementById('scBlocksBody');
+    if(!blocks.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No blocks yet</td></tr>';}
+    else{tbody.innerHTML=blocks.map(b=>{
+      const badge=b.verdict==='block'?'<span class="sev-badge sev-critical">block</span>':'<span class="sev-badge sev-medium">warn</span>';
+      const ver=b.version?'<span class="pkg-ver">@'+safe(b.version)+'</span>':'';
+      const adv=(b.advisoryIds||[]).slice(0,2).map(a=>'<span class="adv-pill" title="'+safeAttr(a)+'">'+safe(a)+'</span>').join('');
+      const more=(b.advisoryIds||[]).length>2?'<span style="font-size:10px;color:var(--gray-400)">+'+(b.advisoryIds.length-2)+'</span>':'';
+      const sugg=b.recommended?'<span class="sugg-pill">'+safe(b.package+'@'+b.recommended)+'</span>':'<span class="sugg-none">—</span>';
+      return '<tr title="'+safeAttr(b.installCmd||'')+'">'+
+        '<td>'+badge+' <span class="pkg-name">'+safe(b.package)+'</span>'+ver+'</td>'+
+        '<td style="color:var(--gray-500)">'+safe(b.ecosystem)+'</td>'+
+        '<td class="right" style="font-weight:600;color:var(--pink-600)">'+(b.score||0)+'</td>'+
+        '<td>'+(adv||'<span class="sugg-none">—</span>')+' '+more+'</td>'+
+        '<td>'+sugg+'</td>'+
+        '<td>'+tsCell(b.ts,b.tsAbs)+'</td>'+
+      '</tr>';
+    }).join('');}
+    const sessions=data.installsBySession||[];
+    const sbody=document.getElementById('scSessionsBody');
+    if(!sessions.length){sbody.innerHTML='<tr><td colspan="7" class="empty">No install activity in the last 24 hours</td></tr>';}
+    else{sbody.innerHTML=sessions.map(s=>
+      '<tr>'+
+        '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,20))+'</td>'+
+        '<td style="color:var(--gray-500)">'+safe(s.ecosystem)+'</td>'+
+        '<td style="color:var(--gray-600);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+safeAttr(s.installCmd)+'">'+safe(s.installCmd)+'</td>'+
+        '<td class="right" style="color:var(--green-500);font-weight:500">'+(s.allowed||0)+'</td>'+
+        '<td class="right" style="color:#d97706;font-weight:500">'+(s.warned||0)+'</td>'+
+        '<td class="right" style="color:var(--pink-600);font-weight:600">'+(s.blocked||0)+'</td>'+
+        '<td>'+tsCell(s.lastSeen,s.lastSeenAbs)+'</td>'+
+      '</tr>'
+    ).join('');}
+  }catch(e){console.error('[warden] supply-chain:',e);}
+}
+document.getElementById('globalDays').addEventListener('change',()=>{loadStats();loadSupplyChain();});
+
+// ══════════════════════════════════════════════════════════════════════════
+// SESSION CONTROL TAB
+// ══════════════════════════════════════════════════════════════════════════
+let _serverWorkspace = null;
+let _sessCtrlData = { items:[], total:0, pages:1, page:1, limit:20 };
+let _expandedSess = null;
+
+async function loadWorkspaces() {
+  try {
+    const data = await apiFetch('/api/workspaces');
+    _wsCache = data;
+    _serverWorkspace = data.primary;
+    renderEnrollBanners(data.enrollment);
+    return data;
+  } catch(e) { console.error('[warden] workspaces:', e); return {}; }
+}
+
+function renderEnrollBanners(enrollment) {
+  const banners = ['enrollBanner', 'enrollBannerSess'];
+  banners.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (enrollment && enrollment.enrolled) {
+      el.innerHTML =
+        '<div class="banner banner-enterprise" style="margin-bottom:16px">' +
+        '<span class="banner-icon">🏢</span>' +
+        '<div class="banner-text"><strong>Enterprise enrolled</strong>' +
+        'This device is enrolled in org <code>' + safeAttr(enrollment.org_id || '') + '</code>. ' +
+        'The Enterprise policy tab is read-only — changes must be made by your org admin in the Prismor web dashboard. ' +
+        'Global and project policies can still be edited here.' +
+        '</div></div>';
+    } else {
+      el.innerHTML = '';
+    }
   });
 }
 
-document.getElementById('sessThead').addEventListener('click', e => {
-  const th = e.target.closest('th[data-col]');
-  if (!th) return;
-  const col = th.dataset.col;
-  sessState.dir = (sessState.sort === col && sessState.dir === 'desc') ? 'asc' : 'desc';
-  sessState.sort = col;
-  sessState.page = 1;
-  loadSessions();
-});
-
-document.getElementById('sessLimit').addEventListener('change', e => {
-  sessState.limit = parseInt(e.target.value, 10);
-  sessState.page = 1;
-  loadSessions();
-});
-
-// ── Findings ─────────────────────────────────────────────────────────────────
-const findState = { page: 1, limit: 25, agent: '', severity: '', category: '', q: '', total: 0, pages: 1 };
-let _findAgents = [], _findCats = [];
-
-async function loadFindings() {
-  const { page, limit, agent, severity, category, q } = findState;
-  const params = new URLSearchParams({ page, limit, agent, severity, category, q });
+async function loadSessionControl() {
+  if (!_wsCache) await loadWorkspaces();
+  const ws = _serverWorkspace;
+  const { page, limit } = _sessCtrlData;
   try {
-    const res = await fetch('/api/findings?' + params);
-    const data = await res.json();
-    findState.page = data.page; findState.pages = data.pages; findState.total = data.total;
-
-    // Populate filter dropdowns (preserve selections)
-    if (data.agents) {
-      _findAgents = data.agents;
-      const sel = document.getElementById('fAgent');
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">All</option>' + data.agents.map(a =>
-        '<option value="' + a + '"' + (a === cur ? ' selected' : '') + '>' + a + '</option>'
-      ).join('');
-    }
-    if (data.categories) {
-      _findCats = data.categories;
-      const sel = document.getElementById('fCat');
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">All</option>' + data.categories.map(c =>
-        '<option value="' + c + '"' + (c === cur ? ' selected' : '') + '>' + (CAT_LABELS[c] || c) + '</option>'
-      ).join('');
-    }
-
-    renderFindings(data.items);
-    buildPager('findPager', findState, loadFindings);
-    document.getElementById('findCount').textContent = fmtNum(data.total) + ' findings';
-  } catch (e) { console.error('[warden] findings fetch failed:', e); }
+    const data = await apiFetch(`/api/sessions?page=${page}&limit=${limit}&sort=updatedAt&dir=desc`);
+    _sessCtrlData.items = data.items || [];
+    _sessCtrlData.total = data.total || 0;
+    _sessCtrlData.pages = data.pages || 1;
+    _sessCtrlData.page = data.page || 1;
+    _sessCtrlCache = { items: data.items || [], total: data.total || 0, pages: data.pages || 1, page: data.page || 1 };
+    renderSessionControl(data.items || [], ws);
+    document.getElementById('scSessCount').textContent = fmtNum(data.total || 0) + ' sessions';
+    buildPager('scSessPager', _sessCtrlData, () => loadSessionControl());
+  } catch(e) { console.error('[warden] session-ctrl:', e); }
+  loadSessions();
 }
 
-function renderFindings(rows) {
-  const tbody = document.getElementById('findBody');
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No findings match the current filters</td></tr>'; return; }
-  tbody.innerHTML = rows.map((f, i) => {
-    const eid = 'fev-' + i;
-    const trig = f.trigger || {};
-    const triggerBlock = trig.detail
-      ? '<div style="margin-top:8px"><span class="trigger-kind">' + safe(trig.kind || 'event') + '</span>' +
-        '<span style="font-size:10px;color:var(--gray-400)">— exact action that triggered this finding</span>' +
-        '<div class="trigger-detail">' + safe(trig.detail) + '</div></div>'
-      : '';
-    return '<tr class="finding-row" onclick="toggleEvidence(\'' + eid + '\')">' +
-      '<td>' + safe(f.title) + '</td>' +
-      '<td><span class="agent-pill">' + safe(f.agent) + '</span></td>' +
-      '<td style="color:var(--gray-500)">' + safe(CAT_LABELS[f.category] || f.category) + '</td>' +
-      '<td><span class="sev-badge ' + sevClass(f.severity) + '">' + safe(f.severity) + '</span></td>' +
-      '<td>' + tsCell(f.ts, f.tsAbs) + '</td>' +
-      '<td class="expand-arrow">▸</td>' +
-    '</tr>' +
-    '<tr id="' + eid + '" class="finding-ev-row">' +
-      '<td class="finding-ev-cell" colspan="6">' +
-        '<div>' + safe(f.evidence || 'No evidence recorded.') + '</div>' +
-        triggerBlock +
-        '<div style="margin-top:8px;font-size:10px;color:var(--gray-400)">' +
-          'session: <span title="' + safeAttr(f.sessionId) + '">' + safe(shortId(f.sessionId, 32)) + '</span>' +
+function statusPill(item, scoped) {
+  const paused = scoped && scoped.paused;
+  const hasScoped = !!scoped;
+  const hasBlocks = item.findingsCount > 0;
+  if (paused) return '<span class="status-pill status-paused"><span class="status-dot"></span>Paused</span>';
+  if (hasScoped) return '<span class="status-pill status-scoped"><span class="status-dot"></span>Scoped</span>';
+  if (hasBlocks) return '<span class="status-pill status-blocked"><span class="status-dot"></span>' + item.findingsCount + ' blocks</span>';
+  return '<span class="status-pill status-active"><span class="status-dot"></span>Active</span>';
+}
+
+function renderSessionControl(items, workspace) {
+  const body = document.getElementById('sessCtrlBody');
+  if (!items.length) {
+    body.innerHTML = '<div class="empty">No sessions recorded yet. Start an agent in a Warden-enabled workspace.</div>';
+    return;
+  }
+  body.innerHTML = items.map((s, i) => {
+    const sessId = s.sessionId;
+    const detailId = 'scdet-' + i;
+    const ws = workspace || s.workspace || '';
+    return '<div class="sess-ctrl-row">' +
+      '<div>' +
+        '<div class="sess-id-wrap">' +
+          '<span class="sess-id" title="' + safeAttr(sessId) + '">' + safe(shortId(sessId, 32)) + '</span>' +
+          '<span id="pill-' + i + '">' + statusPill(s, null) + '</span>' +
+          '<span class="agent-pill">' + safe(s.agent||'?') + '</span>' +
         '</div>' +
-      '</td>' +
-    '</tr>';
+        '<div class="sess-ws">' + safe(s.workspace||ws) + ' · last active ' + (s.updatedAt||'—') + '</div>' +
+        '<div id="' + detailId + '" class="sess-detail"></div>' +
+      '</div>' +
+      '<div class="sess-ctrl-btns">' +
+        '<button class="sess-act-btn expand" onclick="toggleSessDetail(\'' + detailId + '\',\'' + safeAttr(sessId) + '\',\'' + safeAttr(ws) + '\',' + i + ')">Details ▸</button>' +
+        '<button class="sess-act-btn pause" onclick="sessAction(\'' + safeAttr(sessId) + '\',\'pause\',\'' + safeAttr(ws) + '\',' + i + ')">Pause</button>' +
+        '<button class="sess-act-btn resume" onclick="sessAction(\'' + safeAttr(sessId) + '\',\'resume\',\'' + safeAttr(ws) + '\',' + i + ')">Resume</button>' +
+        '<button class="sess-act-btn clear" onclick="sessAction(\'' + safeAttr(sessId) + '\',\'clear\',\'' + safeAttr(ws) + '\',' + i + ')">Clear scope</button>' +
+      '</div>' +
+    '</div>';
   }).join('');
 }
 
-function toggleEvidence(id) {
-  const row = document.getElementById(id);
-  if (!row) return;
-  row.classList.toggle('open');
-  const prev = row.previousElementSibling;
-  if (prev) {
-    const arrow = prev.querySelector('.expand-arrow');
-    if (arrow) arrow.textContent = row.classList.contains('open') ? '▾' : '▸';
+async function toggleSessDetail(detailId, sessId, ws, idx) {
+  const detail = document.getElementById(detailId);
+  if (!detail) return;
+  const isOpen = detail.classList.contains('open');
+  if (isOpen) { detail.classList.remove('open'); detail.innerHTML = ''; return; }
+  detail.innerHTML = '<div style="font-size:11px;color:var(--gray-400)">Loading…</div>';
+  detail.classList.add('open');
+  try {
+    const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+    const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessId)}/control${params}`);
+    renderSessDetail(detail, data, idx);
+    // Update pill
+    const pill = document.getElementById('pill-' + idx);
+    if (pill) pill.innerHTML = statusPill({findingsCount: (data.recent_blocked||[]).length}, data.scoped);
+  } catch(e) {
+    detail.innerHTML = '<div style="font-size:11px;color:#b91c1c">Failed to load: ' + safe(e.message) + '</div>';
   }
 }
 
-['fAgent','fSev','fCat'].forEach(id => document.getElementById(id).addEventListener('change', e => {
-  findState[id === 'fAgent' ? 'agent' : id === 'fSev' ? 'severity' : 'category'] = e.target.value;
-  findState.page = 1;
-  loadFindings();
-}));
+function renderSessDetail(el, data, idx) {
+  const scoped = data.scoped;
+  const blocks = data.recent_blocked || [];
 
-let _findSearchTimer;
-document.getElementById('fSearch').addEventListener('input', e => {
-  clearTimeout(_findSearchTimer);
-  _findSearchTimer = setTimeout(() => { findState.q = e.target.value; findState.page = 1; loadFindings(); }, 300);
-});
+  let scopedHtml = '';
+  if (scoped) {
+    const allowed = (scoped.allowed_tools || []).map(t => '<span class="scoped-tag tag-allow">' + safe(t) + '</span>').join('');
+    const denied = (scoped.deny_tools || []).map(t => '<span class="scoped-tag tag-deny">' + safe(t) + '</span>').join('');
+    const net = scoped.deny_network ? '<span class="scoped-tag tag-deny">network denied</span>' : '<span class="scoped-tag tag-net">network allowed</span>';
+    const paused = scoped.paused ? '<span class="scoped-tag" style="background:#fef9c3;color:#92400e">⏸ prismor paused</span>' : '';
+    scopedHtml = '<div style="margin-bottom:8px">' +
+      '<div style="font-size:10px;color:var(--gray-400);margin-bottom:4px">Scoped rules</div>' +
+      paused +
+      (allowed ? '<div style="margin-bottom:2px"><span style="font-size:10px;color:var(--gray-500)">allow: </span>' + allowed + '</div>' : '') +
+      (denied ? '<div style="margin-bottom:2px"><span style="font-size:10px;color:var(--gray-500)">deny: </span>' + denied + '</div>' : '') +
+      net +
+    '</div>';
+  } else {
+    scopedHtml = '<div style="font-size:11px;color:var(--gray-400);margin-bottom:8px">No session scope — default policy applies.</div>';
+  }
 
-document.getElementById('findLimit').addEventListener('change', e => {
-  findState.limit = parseInt(e.target.value, 10);
-  findState.page = 1;
-  loadFindings();
-});
+  let blocksHtml = '';
+  if (blocks.length) {
+    blocksHtml = '<div class="blocked-list">' +
+      '<div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">Recent blocks in this session</div>' +
+      blocks.map(b =>
+        '<div class="blocked-item">' +
+          '<span class="blocked-sev"><span class="sev-badge ' + sevClass(b.severity) + '">' + safe(b.severity) + '</span></span>' +
+          '<div><div style="font-weight:500">' + safe(b.title) + '</div>' +
+          '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">' + safe(b.category) + ' · ' + safe(b.ts||'') + '</div></div>' +
+        '</div>'
+      ).join('') +
+    '</div>';
+  }
 
-// ── Events ───────────────────────────────────────────────────────────────────
-const evtState = { page: 1, limit: 30, verdict: '', agent: '', total: 0, pages: 1 };
-
-async function loadEvents() {
-  const { page, limit, verdict, agent } = evtState;
-  const params = new URLSearchParams({ page, limit, verdict, agent });
-  try {
-    const res = await fetch('/api/events?' + params);
-    const data = await res.json();
-    evtState.page = data.page; evtState.pages = data.pages; evtState.total = data.total;
-
-    if (data.agents) {
-      const sel = document.getElementById('evtAgent');
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">All</option>' + data.agents.map(a =>
-        '<option value="' + a + '"' + (a === cur ? ' selected' : '') + '>' + a + '</option>'
-      ).join('');
-    }
-
-    renderEvents(data.items);
-    buildPager('evtPager', evtState, loadEvents);
-    document.getElementById('evtCount').textContent = fmtNum(data.total) + ' events';
-  } catch (e) { console.error('[warden] events fetch failed:', e); }
+  el.innerHTML = scopedHtml + blocksHtml;
 }
 
-function renderEvents(rows) {
-  const container = document.getElementById('evtContainer');
-  if (!rows.length) { container.innerHTML = '<div class="empty">No events match the current filters</div>'; return; }
-  container.innerHTML = rows.map(ev =>
-    '<div class="event-row">' +
-      '<span class="event-dot ' + (ev.verdict || 'allowed') + '"></span>' +
-      '<div style="flex:1;min-width:0">' +
-        '<div class="event-meta">' +
-          (ev.tsAbs
-            ? '<span class="ts-hover" title="' + safeAttr(ev.tsAbs) + '">' + safe(ev.ts) + '</span>'
-            : safe(ev.ts)) +
-          ' &middot; ' + safe(ev.agent) +
-        '</div>' +
-        '<div class="event-action">' + safe(ev.action) + '</div>' +
-      '</div>' +
-      '<span class="sev-badge ' + sevClass(ev.severity) + '">' + safe(ev.severity) + '</span>' +
-    '</div>'
-  ).join('');
-}
-
-document.querySelectorAll('.fbtn[data-verdict]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.fbtn[data-verdict]').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    evtState.verdict = btn.dataset.verdict;
-    evtState.page = 1;
-    loadEvents();
-  });
-});
-
-document.getElementById('evtAgent').addEventListener('change', e => {
-  evtState.agent = e.target.value;
-  evtState.page = 1;
-  loadEvents();
-});
-
-document.getElementById('evtLimit').addEventListener('change', e => {
-  evtState.limit = parseInt(e.target.value, 10);
-  evtState.page = 1;
-  loadEvents();
-});
-
-// ── Stats (charts + KPIs) ────────────────────────────────────────────────────
-async function loadStats() {
+async function sessAction(sessId, action, workspace, idx) {
   try {
-    const days = document.getElementById('globalDays').value;
-    const res = await fetch('/api/stats?days=' + days);
-    if (!res.ok) return;
-    const data = await res.json();
-
-    // Badge
-    const badge = document.getElementById('statusBadge');
-    const hasData = data.kpis && data.kpis.toolCallsInspected24h > 0;
-    badge.className = 'badge ' + (hasData ? 'badge-live' : 'badge-demo');
-    badge.innerHTML = '<span class="badge-dot"></span> ' + (hasData ? 'live' : 'no data');
-    document.getElementById('lastUpdated').textContent = 'updated ' + new Date().toLocaleTimeString();
-
-    // Date range hint
-    if (data.window) {
-      const fmt = d => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const rangeLabel = fmt(data.window.from) + ' – ' + fmt(data.window.to);
-      document.getElementById('hintActivity').textContent = rangeLabel;
-      document.getElementById('hintSupply').textContent = rangeLabel;
-    }
-
-    // KPIs
-    const k = data.kpis || {};
-    document.getElementById('kpiSessions').textContent = fmtNum(k.activeSessions || 0);
-    document.getElementById('kpiToolCalls').textContent = fmtNum(k.toolCallsInspected24h || 0);
-    document.getElementById('kpiDangerous').textContent = fmtNum(k.dangerousCommandsPrevented24h || 0);
-
-    const d = k.deltas || {};
-    if (d.tools !== undefined) {
-      const cls = d.tools > 0 ? 'up' : 'down';
-      document.getElementById('kpiToolsDelta').innerHTML =
-        '<span class="' + cls + '">' + (d.tools > 0 ? '+' : '') + d.tools + '%</span> vs yesterday';
-    }
-    if (d.dangerous !== undefined) {
-      const cls = d.dangerous > 0 ? 'up' : 'down';
-      document.getElementById('kpiDangerousDelta').innerHTML =
-        '<span class="' + cls + '">' + (d.dangerous > 0 ? '+' : '') + d.dangerous + '%</span> vs yesterday';
-    }
-
-    // Severity strip
-    const sv = data.severityBreakdown || {};
-    document.getElementById('sevCritical').textContent = fmtNum(sv.critical || 0);
-    document.getElementById('sevHigh').textContent     = fmtNum(sv.high     || 0);
-    document.getElementById('sevMedium').textContent   = fmtNum(sv.medium   || 0);
-    document.getElementById('sevLow').textContent      = fmtNum(sv.low      || 0);
-
-    // Donut
-    const threats = data.threatsByCategory || {};
-    const catKeys = Object.keys(CAT_LABELS);
-    donutChart.data.labels = catKeys.map(k => CAT_LABELS[k]);
-    donutChart.data.datasets[0].data = catKeys.map(k => threats[k] || 0);
-    donutChart.update();
-    document.getElementById('donutLegend').innerHTML = catKeys.map((k, i) =>
-      '<div class="legend-item"><span class="legend-dot" style="background:' + COLORS[i] + '"></span>' + CAT_LABELS[k] + '</div>'
-    ).join('');
-
-    // Line
-    const ts = data.blockRateTimeseries || [];
-    lineChart.data.labels = ts.map(t => t.date);
-    lineChart.data.datasets[0].data = ts.map(t => t.passed);
-    lineChart.data.datasets[1].data = ts.map(t => t.intercepted);
-    lineChart.update();
-
-    // Agent bar
-    const ab = data.agentBlockedCommands || [];
-    agentBarChart.data.labels = ab.map(a => a.agent);
-    agentBarChart.data.datasets[0].data = ab.map(a => a.blocked);
-    agentBarChart.update();
-
-    // Tool bar
-    const tb = data.toolCallBreakdown || [];
-    toolBarChart.data.labels = tb.map(t => t.tool);
-    toolBarChart.data.datasets[0].data = tb.map(t => t.count);
-    toolBarChart.update();
-
-    // MCP bar
-    const mcp = data.topMcpAndSkills || [];
-    mcpBarChart.data.labels = mcp.map(m => m.name);
-    mcpBarChart.data.datasets[0].data = mcp.map(m => m.calls);
-    mcpBarChart.data.datasets[1].data = mcp.map(m => m.blocked);
-    mcpBarChart.update();
-
-    // Top sessions by blocks (was misleadingly labelled "users")
-    const sessions = data.topSessionsByBlocks || [];
-    const maxBlocked = sessions.length > 0 ? sessions[0].blocked : 1;
-    document.getElementById('usersContainer').innerHTML = sessions.map((u, i) => {
-      const srcCls = u.source === 'supply_chain' ? 'supply' : '';
-      const srcLabel = u.source === 'supply_chain' ? 'supply-chain' : 'agent';
-      return '<div class="user-row">' +
-        '<span class="user-rank">' + (i + 1) + '</span>' +
-        '<div class="user-info">' +
-          '<div class="user-top">' +
-            '<span class="user-id" title="' + safeAttr(u.sessionId) + '">' +
-              safe(shortId(u.sessionId, 22)) +
-              '<span class="src-pill ' + srcCls + '">' + safe(u.agent) + ' · ' + safe(srcLabel) + '</span>' +
-            '</span>' +
-            '<span class="user-count">' + u.blocked + '</span>' +
-          '</div>' +
-          '<div class="user-bar"><div class="user-bar-fill" style="width:' + (u.blocked / maxBlocked * 100) + '%"></div></div>' +
-        '</div>' +
-        '<span class="user-seen">' + tsCell(u.lastSeen, u.lastSeenAbs, 'var(--gray-400)') + '</span>' +
-      '</div>';
-    }).join('');
-
-    // Threat patterns
-    const patterns = data.topPatterns || [];
-    document.getElementById('patternsBody').innerHTML = patterns.map(p =>
-      '<tr>' +
-        '<td>' + safe(p.pattern || '') + '</td>' +
-        '<td style="color:#9ca3af">' + safe(CAT_LABELS[p.category] || p.category) + '</td>' +
-        '<td class="right" style="font-weight:500">' + (p.count || 0) + '</td>' +
-        '<td>' + tsCell(p.lastSeen, p.lastSeenAbs, '#9ca3af') + '</td>' +
-        '<td><span class="sev-badge ' + sevClass(p.severity) + '">' + safe(p.severity || 'low') + '</span></td>' +
-      '</tr>'
-    ).join('');
-  } catch (e) { console.error('[warden] stats fetch failed:', e); }
-}
-
-// ── Supply Chain ─────────────────────────────────────────────────────────────
-async function loadSupplyChain() {
-  try {
-    const days = document.getElementById('globalDays').value;
-    const res = await fetch('/api/supply-chain?days=' + days);
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const k = data.kpis || {};
-    document.getElementById('scAllowed').textContent = fmtNum(k.allowedPackages24h || 0);
-    document.getElementById('scWarned').textContent  = fmtNum(k.warnedPackages24h  || 0);
-    document.getElementById('scBlocked').textContent = fmtNum(k.blockedPackages24h || 0);
-    document.getElementById('scChecked').textContent = fmtNum(k.checkedPackages24h || 0);
-
-    const eco = data.ecosystemBreakdown || [];
-    scEcoBarChart.data.labels = eco.map(e => e.ecosystem);
-    scEcoBarChart.data.datasets[0].data = eco.map(e => e.total);
-    scEcoBarChart.data.datasets[1].data = eco.map(e => e.blocked);
-    scEcoBarChart.update();
-
-    const blocks = data.recentBlocks || [];
-    const tbody = document.getElementById('scBlocksBody');
-    if (!blocks.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">No blocks yet — immunity CLI not run, or all packages clean</td></tr>';
-    } else {
-      tbody.innerHTML = blocks.map(b => {
-        const badge = b.verdict === 'block'
-          ? '<span class="sev-badge sev-critical">block</span>'
-          : '<span class="sev-badge sev-medium">warn</span>';
-        const ver = b.version ? '<span class="pkg-ver">@' + safe(b.version) + '</span>' : '';
-        const adv = (b.advisoryIds || []).slice(0, 2).map(a =>
-          '<span class="adv-pill" title="' + safeAttr(a) + '">' + safe(a) + '</span>'
-        ).join('');
-        const more = (b.advisoryIds || []).length > 2
-          ? '<span style="font-size:10px;color:var(--gray-400)">+' + ((b.advisoryIds || []).length - 2) + '</span>'
-          : '';
-        const sugg = b.recommended
-          ? '<span class="sugg-pill">' + safe(b.package + '@' + b.recommended) + '</span>'
-          : '<span class="sugg-none">—</span>';
-        return '<tr title="' + safeAttr(b.installCmd || '') + '">' +
-          '<td>' + badge + ' <span class="pkg-name">' + safe(b.package) + '</span>' + ver + '</td>' +
-          '<td style="color:var(--gray-500)">' + safe(b.ecosystem) + '</td>' +
-          '<td class="right" style="font-weight:600;color:var(--pink-600)">' + (b.score || 0) + '</td>' +
-          '<td>' + (adv || '<span class="sugg-none">—</span>') + ' ' + more + '</td>' +
-          '<td>' + sugg + '</td>' +
-          '<td>' + tsCell(b.ts, b.tsAbs) + '</td>' +
-        '</tr>';
-      }).join('');
-    }
-
-    const sessions = data.installsBySession || [];
-    const sbody = document.getElementById('scSessionsBody');
-    if (!sessions.length) {
-      sbody.innerHTML = '<tr><td colspan="7" class="empty">No install activity in the last 24 hours</td></tr>';
-    } else {
-      sbody.innerHTML = sessions.map(s =>
-        '<tr>' +
-          '<td class="mono" title="' + safeAttr(s.sessionId) + '">' + safe(shortId(s.sessionId, 20)) + '</td>' +
-          '<td style="color:var(--gray-500)">' + safe(s.ecosystem) + '</td>' +
-          '<td style="color:var(--gray-600);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + safeAttr(s.installCmd) + '">' + safe(s.installCmd) + '</td>' +
-          '<td class="right" style="color:var(--green-500);font-weight:500">' + (s.allowed || 0) + '</td>' +
-          '<td class="right" style="color:#d97706;font-weight:500">' + (s.warned || 0) + '</td>' +
-          '<td class="right" style="color:var(--pink-600);font-weight:600">' + (s.blocked || 0) + '</td>' +
-          '<td>' + tsCell(s.lastSeen, s.lastSeenAbs) + '</td>' +
-        '</tr>'
-      ).join('');
-    }
-  } catch (e) { console.error('[warden] supply-chain fetch failed:', e); }
-}
-
-// ── Named Agents ─────────────────────────────────────────────────────────────
-let _agentIamProfiles = [];
-
-async function loadAgents() {
-  try {
-    const res = await fetch('/api/agents');
-    if (!res.ok) return;
-    const data = await res.json();
-    _agentIamProfiles = data.iam_profiles || [];
-    const agents = data.agents || [];
-    const tbody = document.getElementById('agentsBody');
-    const empty = document.getElementById('agentsEmpty');
-    if (!agents.length) {
-      tbody.innerHTML = '';
-      empty.style.display = '';
-      return;
-    }
-    empty.style.display = 'none';
-    tbody.innerHTML = agents.map(a => {
-      const modeToggle =
-        '<span class="seg-toggle" data-agent="' + safeAttr(a.name) + '" data-field="mode">' +
-        '<button class="seg-btn' + (a.mode === 'observe' ? ' active' : '') + '" onclick="setAgent(\'' + safeAttr(a.name) + '\',{mode:\'observe\'})" title="observe only">observe</button>' +
-        '<button class="seg-btn' + (!a.mode || a.mode === 'enforce' ? ' active' : '') + '" onclick="setAgent(\'' + safeAttr(a.name) + '\',{mode:\'enforce\'})" title="enforce policy">enforce</button>' +
-        '</span>';
-      const enableToggle =
-        '<label class="toggle-switch" title="' + (a.enabled ? 'Click to pause (kill-switch)' : 'Click to enable') + '">' +
-        '<input type="checkbox"' + (a.enabled ? ' checked' : '') + ' onchange="setAgent(\'' + safeAttr(a.name) + '\',{enabled:this.checked})">' +
-        '<span class="toggle-slider"></span>' +
-        '</label>';
-      const iamOpts = '<option value="">— none —</option>' +
-        _agentIamProfiles.map(p =>
-          '<option value="' + safeAttr(p) + '"' + (a.iam_profile === p ? ' selected' : '') + '>' + safe(p) + '</option>'
-        ).join('');
-      const iamSelect = '<select class="iam-select" onchange="setAgent(\'' + safeAttr(a.name) + '\',{iam_profile:this.value})">' + iamOpts + '</select>';
-      const pct = a.total_calls > 0 ? Math.round(a.blocked_calls / a.total_calls * 100) : 0;
-      const blockedStyle = pct > 30 ? 'color:var(--pink-600);font-weight:600' : '';
-      return '<tr class="' + (!a.enabled ? 'row-disabled' : '') + '">' +
-        '<td class="mono" style="font-weight:500">' + safe(a.name) + (!a.enabled ? ' <span class="sev-badge sev-critical" style="font-size:9px">paused</span>' : '') + '</td>' +
-        '<td style="color:var(--gray-400)">' + safe(a.framework || '—') + '</td>' +
-        '<td>' + tsCell(a.last_seen, a.last_seen) + '</td>' +
-        '<td class="right">' + fmtNum(a.total_calls) + '</td>' +
-        '<td class="right" style="' + blockedStyle + '">' + fmtNum(a.blocked_calls) + (a.total_calls > 0 ? ' <span style="color:var(--dim);font-size:10px">(' + pct + '%)</span>' : '') + '</td>' +
-        '<td>' + modeToggle + '</td>' +
-        '<td>' + enableToggle + '</td>' +
-        '<td>' + iamSelect + '</td>' +
-      '</tr>';
-    }).join('');
-  } catch (e) { console.error('[warden] agents fetch failed:', e); }
-}
-
-async function setAgent(name, fields) {
-  try {
-    const res = await fetch('/api/agents/' + encodeURIComponent(name), {
-      method: 'POST',
+    const ws = workspace || _serverWorkspace || '';
+    const body = { action, workspace: ws };
+    const result = await apiFetch('/api/sessions/' + encodeURIComponent(sessId) + '/control', {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fields),
+      body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.warn('[warden] setAgent error:', err);
-      return;
+    // Refresh detail panel if open
+    const detailId = 'scdet-' + idx;
+    const detail = document.getElementById(detailId);
+    if (detail && detail.classList.contains('open')) {
+      const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+      const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessId)}/control${params}`);
+      renderSessDetail(detail, data, idx);
+      const pill = document.getElementById('pill-' + idx);
+      if (pill) pill.innerHTML = statusPill({findingsCount:(data.recent_blocked||[]).length}, data.scoped);
     }
-    await loadAgents();
-  } catch (e) { console.error('[warden] setAgent failed:', e); }
+  } catch(e) {
+    alert('Failed: ' + e.message);
+  }
 }
 
-// ── Period filter ────────────────────────────────────────────────────────────
-document.getElementById('globalDays').addEventListener('change', () => {
-  loadStats();
-  loadSupplyChain();
+document.getElementById('scSessRefresh').addEventListener('click', () => loadSessionControl());
+document.getElementById('scSessLimit').addEventListener('change', e => {
+  _sessCtrlData.limit = parseInt(e.target.value, 10);
+  _sessCtrlData.page = 1;
+  loadSessionControl();
 });
 
-// ── Boot + poll ──────────────────────────────────────────────────────────────
-initCharts();
-Promise.all([loadStats(), loadSessions(), loadFindings(), loadEvents(), loadSupplyChain(), loadAgents()]);
+// ══════════════════════════════════════════════════════════════════════════
+// POLICY CONTROL TAB
+// ══════════════════════════════════════════════════════════════════════════
+let _policyData = null;
+let _globalPolicyOriginal = '';
+let _projectPolicyOriginal = '';
 
+async function loadPolicy() {
+  try {
+    const ws = _serverWorkspace || '';
+    const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+    const data = await apiFetch('/api/policy' + params);
+    _policyData = data;
+    _policyCache = data;
+    renderPolicyTab(data);
+  } catch(e) { console.error('[warden] policy:', e); }
+}
+
+function _detectMode(yaml) {
+  const m = (yaml || '').match(/default_mode\s*:\s*(\w+)/);
+  return m ? m[1] : 'observe';
+}
+
+function _syncModeToggle(scope, yaml) {
+  const mode = _detectMode(yaml);
+  const obs = document.getElementById(scope + 'ModeObserve');
+  const enf = document.getElementById(scope + 'ModeEnforce');
+  const hint = document.getElementById(scope + 'ModeHint');
+  if (!obs) return;
+  obs.className = 'mode-btn' + (mode === 'observe' ? ' active-observe' : '');
+  enf.className = 'mode-btn' + (mode === 'enforce' ? ' active-enforce' : '');
+  if (hint) hint.textContent = mode === 'enforce'
+    ? 'enforce — threats are blocked in real time'
+    : 'observe — threats are logged but not blocked';
+}
+
+function setMode(scope, mode) {
+  const editorId = scope + 'PolicyEditor';
+  const editor = document.getElementById(editorId);
+  if (!editor) return;
+  let yaml = editor.value || '';
+  if (/default_mode\s*:/.test(yaml)) {
+    yaml = yaml.replace(/default_mode\s*:\s*\w+/, 'default_mode: ' + mode);
+  } else if (/^settings\s*:/m.test(yaml)) {
+    yaml = yaml.replace(/^(settings\s*:)/m, '$1\n  default_mode: ' + mode);
+  } else {
+    yaml = yaml.trimEnd() + '\nsettings:\n  default_mode: ' + mode + '\n';
+  }
+  editor.value = yaml;
+  _syncModeToggle(scope, yaml);
+}
+
+function renderPolicyTab(data) {
+  // Global
+  const g = data.global || {};
+  _globalPolicyOriginal = g.yaml || '';
+  document.getElementById('globalPolicyEditor').value = g.yaml || DEFAULT_GLOBAL_YAML;
+  document.getElementById('globalPolicyPath').textContent = g.path || '~/.prismor/policy.yaml';
+  document.getElementById('globalPolicyStatus').textContent = g.exists ? 'Custom global policy' : 'No custom global policy (using built-in defaults)';
+  document.getElementById('globalPolicyMtime').textContent = g.mtime ? fmtMtime(g.mtime) : '';
+  _syncModeToggle('global', g.yaml || DEFAULT_GLOBAL_YAML);
+
+  // Project
+  const p = data.project || {};
+  _projectPolicyOriginal = p.yaml || '';
+  document.getElementById('projectPolicyEditor').value = p.yaml || DEFAULT_PROJECT_YAML;
+  document.getElementById('projectPolicyPath').textContent = p.path || '.prismor-warden/policy.yaml';
+  document.getElementById('projectPolicyStatus').textContent = p.exists ? 'Custom project policy' : 'No project policy yet';
+  document.getElementById('projectPolicyMtime').textContent = p.mtime ? fmtMtime(p.mtime) : '';
+  _syncModeToggle('project', p.yaml || DEFAULT_PROJECT_YAML);
+
+  // Enterprise
+  const e = data.enterprise || {};
+  const enrolled = data.enterprise_enrolled;
+  const enBanner = document.getElementById('enterpriseBanner');
+  const enText = document.getElementById('enterpriseBannerText');
+  if (enrolled) {
+    enBanner.className = 'banner banner-enterprise';
+    enText.innerHTML = '<strong>Enterprise enrolled</strong>' +
+      'Org: <code>' + safeAttr((data.enrollment||{}).org_id||'') + '</code> · Device: <code>' + safeAttr((data.enrollment||{}).device_id||'') + '</code>. ' +
+      'This policy is pushed by your org admin. To change it, go to <a href="https://prismor.dev/admin" target="_blank" style="color:inherit">prismor.dev/admin</a>.';
+  } else {
+    enBanner.className = 'banner banner-warn';
+    enText.innerHTML = '<strong>Not enrolled</strong>' +
+      'Enroll this device to receive centrally-managed org policies: <code>prismor enroll &lt;token&gt;</code>';
+  }
+  document.getElementById('enterprisePolicyEditor').value = e.yaml || (
+    enrolled
+      ? '# Enrolled in org ' + ((data.enrollment||{}).org_id||'') + ' — no policy has been pushed to this device yet.\n# Your org admin can push a policy from prismor.dev/admin.'
+      : '# No enterprise policy — device is not enrolled.\n# Run: prismor enroll <token>'
+  );
+
+  // Effective (simple stacked view)
+  const layers = [
+    g.yaml && ('# ── Global policy ──\n' + g.yaml),
+    p.yaml && ('# ── Project policy (overrides global) ──\n' + p.yaml),
+    e.yaml && ('# ── Enterprise policy (highest precedence) ──\n' + e.yaml),
+  ].filter(Boolean);
+  document.getElementById('effectivePolicyEditor').value = layers.length
+    ? layers.join('\n\n')
+    : '# No custom policies — built-in Warden defaults apply.\n# Run: prismor policy init   to create a project policy.';
+
+  const effectiveStatus = [];
+  if (g.exists) effectiveStatus.push('global');
+  if (p.exists) effectiveStatus.push('project');
+  if (e.exists) effectiveStatus.push('enterprise');
+  document.getElementById('effectivePolicyStatus').textContent = effectiveStatus.length
+    ? 'Active layers: ' + effectiveStatus.join(' + ')
+    : 'No custom policies — all built-in defaults';
+
+  // Workspace banner
+  const wsBanner = document.getElementById('workspaceBanner');
+  if (data.workspace) {
+    wsBanner.innerHTML = '<div class="banner banner-info" style="margin-bottom:16px">' +
+      '<span class="banner-icon">📁</span>' +
+      '<div class="banner-text">Project workspace: <code>' + safeAttr(data.workspace) + '</code></div></div>';
+  } else {
+    wsBanner.innerHTML = '<div class="banner banner-warn" style="margin-bottom:16px">' +
+      '<span class="banner-icon">⚠️</span>' +
+      '<div class="banner-text"><strong>No project workspace detected</strong>' +
+      ' — project policy editing unavailable. Launch the dashboard from inside a project directory.</div></div>';
+  }
+}
+
+function setPolicySaveStatus(elId, msg, cls) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'policy-status ' + cls;
+  if (cls === 'status-ok' || cls === 'status-err') {
+    setTimeout(() => { el.textContent = ''; el.className = 'policy-status'; }, 3500);
+  }
+}
+
+// ── Per-rule toggle list ────────────────────────────────────────────────────
+let _rulesCatalog = [];   // [{id,severity,category,title,action,enabled}]
+let _rulesState   = {};   // id -> desired enabled state
+
+async function loadRules() {
+  const ws = _serverWorkspace;
+  const params = ws ? ('?workspace=' + encodeURIComponent(ws)) : '';
+  try {
+    const data = await apiFetch('/api/policy/rules' + params);
+    _rulesCatalog = data.rules || [];
+    _rulesState = {};
+    _rulesCatalog.forEach(r => { _rulesState[r.id] = r.enabled; });
+    renderRules();
+  } catch (e) {
+    document.getElementById('rulesList').innerHTML = '<div class="empty">Failed to load rules.</div>';
+  }
+}
+
+function _rulesDirty() {
+  return _rulesCatalog.some(r => _rulesState[r.id] !== r.enabled);
+}
+
+function renderRules() {
+  const q = (document.getElementById('rulesSearch').value || '').toLowerCase();
+  const list = document.getElementById('rulesList');
+  const vis = _rulesCatalog.filter(r =>
+    !q || r.id.toLowerCase().includes(q)
+       || (r.title || '').toLowerCase().includes(q)
+       || (r.category || '').toLowerCase().includes(q));
+  const onCount = _rulesCatalog.filter(r => _rulesState[r.id]).length;
+  document.getElementById('rulesCount').innerHTML =
+    onCount + '/' + _rulesCatalog.length + ' on'
+    + (_rulesDirty() ? ' <span class="rules-dirty">• unsaved</span>' : '');
+  if (!vis.length) { list.innerHTML = '<div class="empty">No rules match.</div>'; return; }
+  list.innerHTML = vis.map(r => {
+    const on = _rulesState[r.id];
+    return '<div class="rule-row ' + (on ? '' : 'off') + '">'
+      + '<span class="rule-sev ' + safeAttr(r.severity) + '">' + safe(r.severity) + '</span>'
+      + '<div class="rule-main"><div class="rule-id">' + safe(r.id) + '</div>'
+      + '<div class="rule-title">' + safe(r.title) + '</div></div>'
+      + '<label class="rule-toggle"><input type="checkbox" data-rid="' + safeAttr(r.id) + '"'
+      + (on ? ' checked' : '') + '><span class="rule-track"></span></label>'
+      + '</div>';
+  }).join('');
+  list.querySelectorAll('input[data-rid]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      _rulesState[cb.dataset.rid] = cb.checked;
+      renderRules();
+    });
+  });
+}
+
+document.getElementById('rulesSearch').addEventListener('input', renderRules);
+document.getElementById('rulesAll').addEventListener('click', () => {
+  _rulesCatalog.forEach(r => { _rulesState[r.id] = true; }); renderRules();
+});
+document.getElementById('rulesNone').addEventListener('click', () => {
+  _rulesCatalog.forEach(r => { _rulesState[r.id] = false; }); renderRules();
+});
+document.getElementById('rulesDiscard').addEventListener('click', () => {
+  _rulesCatalog.forEach(r => { _rulesState[r.id] = r.enabled; }); renderRules();
+});
+document.querySelector('.policy-scope-btn[data-pscope="rules"]')?.addEventListener('click', loadRules);
+document.getElementById('rulesSave').addEventListener('click', async () => {
+  const ws = _serverWorkspace;
+  if (!ws) { setPolicySaveStatus('rulesSaveStatus', 'No project workspace detected', 'status-err'); return; }
+  const disabled = _rulesCatalog.filter(r => !_rulesState[r.id]).map(r => r.id);
+  setPolicySaveStatus('rulesSaveStatus', 'Saving…', 'status-saving');
+  try {
+    const result = await apiFetch('/api/policy/rules', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws, disabled }),
+    });
+    if (result.ok) {
+      _rulesCatalog.forEach(r => { r.enabled = _rulesState[r.id]; });
+      setPolicySaveStatus('rulesSaveStatus', '✓ Saved · ' + disabled.length + ' disabled', 'status-ok');
+      renderRules();
+    } else {
+      setPolicySaveStatus('rulesSaveStatus', '✗ ' + (result.error || 'Save failed'), 'status-err');
+    }
+  } catch (e) {
+    setPolicySaveStatus('rulesSaveStatus', '✗ ' + e, 'status-err');
+  }
+});
+
+// Global policy save / discard / reset
+document.getElementById('globalPolicySave').addEventListener('click', async () => {
+  const yaml = document.getElementById('globalPolicyEditor').value;
+  setPolicySaveStatus('globalPolicySaveStatus', 'Saving…', 'status-saving');
+  try {
+    const result = await apiFetch('/api/policy/global', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml }),
+    });
+    if (result.ok) {
+      _globalPolicyOriginal = yaml;
+      setPolicySaveStatus('globalPolicySaveStatus', '✓ Saved to ' + (result.path||''), 'status-ok');
+    } else {
+      setPolicySaveStatus('globalPolicySaveStatus', '✗ ' + (result.error||'Save failed'), 'status-err');
+    }
+  } catch(e) { setPolicySaveStatus('globalPolicySaveStatus', '✗ ' + e.message, 'status-err'); }
+});
+document.getElementById('globalPolicyDiscard').addEventListener('click', () => {
+  document.getElementById('globalPolicyEditor').value = _globalPolicyOriginal || DEFAULT_GLOBAL_YAML;
+  setPolicySaveStatus('globalPolicySaveStatus', 'Discarded changes', 'status-ok');
+});
+document.getElementById('globalPolicyReset').addEventListener('click', () => {
+  if (!confirm('Reset global policy to empty (use built-in defaults)?')) return;
+  document.getElementById('globalPolicyEditor').value = '';
+});
+
+// Project policy save / discard / reset
+document.getElementById('projectPolicySave').addEventListener('click', async () => {
+  const yaml = document.getElementById('projectPolicyEditor').value;
+  const ws = (_policyData||{}).workspace || _serverWorkspace || '';
+  setPolicySaveStatus('projectPolicySaveStatus', 'Saving…', 'status-saving');
+  try {
+    const result = await apiFetch('/api/policy/project', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml, workspace: ws }),
+    });
+    if (result.ok) {
+      _projectPolicyOriginal = yaml;
+      setPolicySaveStatus('projectPolicySaveStatus', '✓ Saved to ' + (result.path||''), 'status-ok');
+    } else {
+      setPolicySaveStatus('projectPolicySaveStatus', '✗ ' + (result.error||'Save failed'), 'status-err');
+    }
+  } catch(e) { setPolicySaveStatus('projectPolicySaveStatus', '✗ ' + e.message, 'status-err'); }
+});
+document.getElementById('projectPolicyDiscard').addEventListener('click', () => {
+  document.getElementById('projectPolicyEditor').value = _projectPolicyOriginal || DEFAULT_PROJECT_YAML;
+  setPolicySaveStatus('projectPolicySaveStatus', 'Discarded changes', 'status-ok');
+});
+document.getElementById('projectPolicyReset').addEventListener('click', () => {
+  if (!confirm('Reset project policy? The file will be left empty.')) return;
+  document.getElementById('projectPolicyEditor').value = '';
+});
+
+// Keep mode toggle in sync when user edits YAML directly
+document.getElementById('globalPolicyEditor').addEventListener('input', e => _syncModeToggle('global', e.target.value));
+document.getElementById('projectPolicyEditor').addEventListener('input', e => _syncModeToggle('project', e.target.value));
+
+// ── Boot + poll ───────────────────────────────────────────────────────────
+initCharts();
+
+// Loading screen progress
+const _loadFill = document.getElementById('loadingFill');
+const _loadLabel = document.getElementById('loadingLabel');
+let _loadDone = 0;
+const _loadTotal = 6;
+function _loadTick(label) {
+  _loadDone++;
+  if (_loadFill) _loadFill.style.width = Math.min(100, Math.round(_loadDone / _loadTotal * 100)) + '%';
+  if (_loadLabel) _loadLabel.textContent = label;
+}
+function _dismissLoader() {
+  const el = document.getElementById('loadingScreen');
+  if (!el) return;
+  el.classList.add('fade-out');
+  setTimeout(() => el.remove(), 420);
+}
+
+// Pre-fetch everything in parallel; tick progress as each resolves
+Promise.all([
+  loadStats().then(()         => _loadTick('Stats loaded')),
+  loadSessions().then(()      => _loadTick('Sessions loaded')),
+  loadFindings().then(()      => _loadTick('Findings loaded')),
+  loadEvents().then(()        => _loadTick('Events loaded')),
+  loadSupplyChain().then(()   => _loadTick('Supply chain loaded')),
+  loadWorkspaces()
+    .then(() => Promise.all([loadSessionControl(), loadPolicy()]))
+    .then(()                  => _loadTick('Policy & controls loaded')),
+]).then(_dismissLoader).catch(_dismissLoader);
 setInterval(() => {
   loadStats();
   loadSessions();
   loadSupplyChain();
-  loadAgents();
-  // Reload findings/events only if on page 1 with no active filters (avoid disrupting investigation)
-  if (findState.page === 1 && !findState.agent && !findState.severity && !findState.category && !findState.q) {
-    loadFindings();
-  }
-  if (evtState.page === 1 && !evtState.verdict && !evtState.agent) {
-    loadEvents();
-  }
+  loadSessionControl();
+  loadPolicy();
+  if (findState.page===1 && !findState.agent && !findState.severity && !findState.category && !findState.q) loadFindings();
+  if (evtState.page===1 && !evtState.verdict && !evtState.agent) loadEvents();
 }, 30000);
 </script>
 </body>

@@ -1,1 +1,1 @@
-"""Immunity supply chain enforcement — intercepts package installs before execution."""
+"""Prismor supply chain enforcement — intercepts package installs before execution."""

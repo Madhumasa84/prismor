@@ -1,9 +1,9 @@
 """Package manager config hardener.
 
-`immunity supplychain harden [--dry-run]` scans the project root for package manager
+`prismor supplychain harden [--dry-run]` scans the project root for package manager
 manifests, detects existing configs, and applies security hardening that
 shrinks the install-script attack surface and tightens version pinning to
-complement immunity's runtime age-gate checks.
+complement prismor's runtime age-gate checks.
 
 Supported targets:
   .npmrc               npm / pnpm / bun
@@ -128,7 +128,7 @@ def _harden_npmrc(root: Path, dry_run: bool) -> Optional[HardeningResult]:
             applied.append(HardeningChange(key=key, value=value, reason=reason))
 
     if new_lines and not dry_run:
-        block = "# immunity harden\n" + "\n".join(new_lines)
+        block = "# prismor harden\n" + "\n".join(new_lines)
         path.write_text(_append_block(existing, block))
 
     notes: List[str] = []
@@ -170,7 +170,7 @@ def _harden_yarnrc_classic(root: Path, dry_run: bool) -> Optional[HardeningResul
             reason="blocks Yarn Classic lifecycle scripts",
         ))
         if not dry_run:
-            block = "# immunity harden\n--ignore-scripts true"
+            block = "# prismor harden\n--ignore-scripts true"
             path.write_text(_append_block(existing, block))
 
     return HardeningResult(
@@ -200,7 +200,7 @@ def _harden_yarnrc_yml(root: Path, dry_run: bool) -> Optional[HardeningResult]:
             reason="disables Yarn Berry lifecycle scripts (Berry's equivalent of npm ignore-scripts)",
         ))
         if not dry_run:
-            block = "# immunity harden\nenableScripts: false"
+            block = "# prismor harden\nenableScripts: false"
             path.write_text(_append_block(existing, block))
 
     return HardeningResult(
@@ -245,7 +245,7 @@ def _harden_pip(root: Path, dry_run: bool) -> Optional[HardeningResult]:
             applied.append(HardeningChange(key=key, value=value, reason=reason))
 
     if new_lines and not dry_run:
-        block = "[global]\n# immunity harden\n" + "\n".join(new_lines)
+        block = "[global]\n# prismor harden\n" + "\n".join(new_lines)
         path.write_text(_append_block(existing, block))
 
     notes = [
@@ -296,7 +296,7 @@ def _harden_cargo(root: Path, dry_run: bool) -> Optional[HardeningResult]:
         if not dry_run:
             if not config_path.parent.exists():
                 config_path.parent.mkdir(parents=True, exist_ok=True)
-            block = "# immunity harden\n" + _CARGO_NET_BLOCK.rstrip()
+            block = "# prismor harden\n" + _CARGO_NET_BLOCK.rstrip()
             config_path.write_text(_append_block(existing, block))
 
     return HardeningResult(

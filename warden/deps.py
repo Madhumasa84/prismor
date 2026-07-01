@@ -5,8 +5,8 @@ and cross-references them against the threat feed's dependency_vulnerability
 advisories.
 
 Usage (from CLI):
-    immunity deps              # scan current workspace
-    immunity deps --json       # machine-readable output
+    prismor deps              # scan current workspace
+    prismor deps --json       # machine-readable output
 """
 from __future__ import annotations
 

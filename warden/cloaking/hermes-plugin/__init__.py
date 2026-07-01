@@ -1,6 +1,6 @@
 """Prismor Warden cloaking plugin for Hermes Agent (filesystem install).
 
-When installed via ``immunity cloak install --agent hermes``, this
+When installed via ``prismor cloak install --agent hermes``, this
 directory is copied to ``~/.hermes/plugins/prismor-warden-cloak/``.
 Hermes' filesystem scanner picks up ``plugin.yaml`` and calls
 ``register()`` from this module.
@@ -214,7 +214,7 @@ def on_pre_tool_call(
                     "action": "block",
                     "message": (
                         f"Secret @@SECRET:{name}@@ is not registered. "
-                        f"Register it with: immunity cloak add {name}"
+                        f"Register it with: prismor cloak add {name}"
                     ),
                 }
 
@@ -246,7 +246,7 @@ def on_pre_tool_call(
             "message": (
                 f"Raw secret detected in tool call. "
                 f"Use @@SECRET:{placeholder_name}@@ instead. "
-                f"Run: immunity cloak add {placeholder_name}"
+                f"Run: prismor cloak add {placeholder_name}"
             ),
         }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""immunity — unified CLI for the Prismor security toolkit.
+"""prismor — unified CLI for the Prismor security toolkit.
 
-Every command in the toolkit is reachable as ``immunity <command> [args...]``.
-Run ``immunity --help`` for the full map. The umbrella dispatches to the
+Every command in the toolkit is reachable as ``prismor <command> [args...]``.
+Run ``prismor --help`` for the full map. The umbrella dispatches to the
 existing engines:
 
   - warden.cli:main         runtime / session security, hooks, policy, sweep,
@@ -11,6 +11,7 @@ existing engines:
 """
 from __future__ import annotations
 
+import os
 import sys
 from functools import lru_cache
 from typing import List, Optional, Set
@@ -43,7 +44,7 @@ def _warden_commands() -> Set[str]:
 
     Introspected from warden.cli's argparse parser so the umbrella stays a true
     superset automatically — every warden subcommand is reachable as
-    ``immunity <command>`` with no hand-maintained list to drift out of sync.
+    ``prismor <command>`` with no hand-maintained list to drift out of sync.
     """
     import argparse
     try:
@@ -57,63 +58,80 @@ def _warden_commands() -> Set[str]:
     return set()
 
 
+def _deprecation_notice() -> None:
+    """Nudge users off the old `immunity` command and the `immunity-agent`
+    package name. Fires once per invocation, only when the binary was called as
+    `immunity`. Suppressable with PRISMOR_NO_DEPRECATION=1 for scripts/CI."""
+    if os.environ.get("PRISMOR_NO_DEPRECATION"):
+        return
+    if os.path.basename(sys.argv[0] or "") != "immunity":
+        return
+    sys.stderr.write(
+        "\033[33mnote:\033[0m the 'immunity' command is now 'prismor'. "
+        "'immunity' still works for now but will be removed.\n"
+        "      Switch with: pip install -U prismor   (then use 'prismor ...')\n"
+    )
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+
+    _deprecation_notice()
 
     if not argv or argv[0] in ("-h", "--help", "help"):
         _print_usage()
         return
 
     if argv[0] in ("-V", "--version"):
-        print(f"immunity {__version__}")
+        print(f"prismor {__version__}")
         return
 
     cmd, rest = argv[0], argv[1:]
 
-    # `immunity supplychain ...` — supply-chain enforcement engine.
+    # `prismor supplychain ...` — supply-chain enforcement engine.
     if cmd == _SUPPLY_DOMAIN:
         from supplychain.cli import run_supply
         run_supply(rest)
         return
 
-    # `immunity warden <command> ...` — DEPRECATED alias. Every warden command is
-    # now a direct immunity command, so the `warden` namespace is redundant.
+    # `prismor warden <command> ...` — DEPRECATED alias. Every warden command is
+    # now a direct prismor command, so the `warden` namespace is redundant.
     if cmd == "warden":
-        # Bare `immunity warden` with no subcommand: don't dump warden's noisy
+        # Bare `prismor warden` with no subcommand: don't dump warden's noisy
         # argparse usage — point at the unified help instead.
         if not rest:
             sys.stderr.write(
                 "'warden' is deprecated — every warden command is now a direct "
-                "immunity command.\n"
-                "Run 'immunity help' to see all commands.\n"
+                "prismor command.\n"
+                "Run 'prismor help' to see all commands.\n"
             )
             return
         # With a subcommand: warn once, then forward so old scripts keep working.
         sys.stderr.write(
-            "Warning: 'immunity warden ...' is deprecated — every warden command "
-            "is now a direct immunity command.\n"
-            f"Use 'immunity {rest[0]}' instead.\n\n"
+            "Warning: 'prismor warden ...' is deprecated — every warden command "
+            "is now a direct prismor command.\n"
+            f"Use 'prismor {rest[0]}' instead.\n\n"
         )
         from warden.cli import main as warden_main
         warden_main(rest)
         return
 
     # Any genuine warden top-level command (domains, shortcuts, and any future
-    # warden subcommand) forwards straight through: `immunity <cmd> ...`.
+    # warden subcommand) forwards straight through: `prismor <cmd> ...`.
     if cmd in _warden_commands():
         from warden.cli import main as warden_main
         warden_main([cmd, *rest])
         return
 
     sys.stderr.write(
-        f"immunity: unknown command '{cmd}'.\n"
-        f"  Run 'immunity --help' to see all commands.\n"
+        f"prismor: unknown command '{cmd}'.\n"
+        f"  Run 'prismor --help' to see all commands.\n"
     )
     sys.exit(2)
 
 
-# Ordered grouping for `immunity help`. Every group lists the commands it
+# Ordered grouping for `prismor help`. Every group lists the commands it
 # owns; any introspected command NOT named here lands in the "More" catch-all,
 # so a new warden.cli subcommand can never silently vanish from help.
 _HELP_GROUPS = [
@@ -177,20 +195,20 @@ def _print_usage() -> None:
         if name not in table:
             return
         help_text, nested, flags = table[name]
-        full_cmd = f"immunity {name}"
+        full_cmd = f"prismor {name}"
         col = pad + 9
         print(f"    {full_cmd.ljust(col)}{d(help_text)}")
         if nested:
-            sub = " · ".join(f"immunity {name} {s}" for s in nested)
+            sub = " · ".join(f"prismor {name} {s}" for s in nested)
             print(f"    {' ' * col}{d('· ' + sub)}")
         elif flags:
             print(f"    {' ' * col}{d('modes:  ' + '  '.join(flags))}")
 
     print()
-    print(f"  {b('immunity')} — runtime security for AI coding agents")
+    print(f"  {b('prismor')} — runtime security for AI coding agents")
     print()
-    print(f"  Usage: {b('immunity')} <command> [options...]")
-    print(f"         {b('immunity')} <command> --help   {d('flags + sub-actions for one command')}")
+    print(f"  Usage: {b('prismor')} <command> [options...]")
+    print(f"         {b('prismor')} <command> --help   {d('flags + sub-actions for one command')}")
 
     grouped = set(_HELP_HIDDEN)
     for title, names in _HELP_GROUPS:
@@ -214,14 +232,14 @@ def _print_usage() -> None:
     col = pad + 9
     print()
     print(f"  {b('Help & version')}")
-    print(f"    {'immunity --help'.ljust(col)}{d('This message')}")
-    print(f"    {'immunity <cmd> --help'.ljust(col)}{d('Flags + sub-actions for one command')}")
-    print(f"    {'immunity --version'.ljust(col)}{d('Show version')}")
+    print(f"    {'prismor --help'.ljust(col)}{d('This message')}")
+    print(f"    {'prismor <cmd> --help'.ljust(col)}{d('Flags + sub-actions for one command')}")
+    print(f"    {'prismor --version'.ljust(col)}{d('Show version')}")
     print()
     print(f"  {b('Deprecated')}  {d('(kept working; will be removed in a future release)')}")
-    print(f"    {'immunity warden <cmd>'.ljust(col)}{d('the standalone warden CLI — use immunity directly')}")
-    print(f"    {'immunity info'.ljust(col)}{d('use `immunity status`')}")
-    print(f"    {'immunity serve'.ljust(col)}{d('use `immunity dashboard --no-open`')}")
+    print(f"    {'prismor warden <cmd>'.ljust(col)}{d('the standalone warden CLI — use prismor directly')}")
+    print(f"    {'prismor info'.ljust(col)}{d('use `prismor status`')}")
+    print(f"    {'prismor serve'.ljust(col)}{d('use `prismor dashboard --no-open`')}")
     print()
 
 
@@ -230,13 +248,13 @@ def _warden_shim() -> None:
 
     Replaces the old standalone binary on upgrade so users who still have
     'warden' in aliases or scripts get a clear migration message instead of
-    silently running stale code.  All arguments are forwarded to immunity
+    silently running stale code.  All arguments are forwarded to prismor
     unchanged, so existing invocations keep working.
     """
     import sys
     sys.stderr.write(
         "Warning: 'warden' is deprecated and will be removed in a future release.\n"
-        "Use 'immunity' instead — it is a drop-in replacement.\n\n"
+        "Use 'prismor' instead — it is a drop-in replacement.\n\n"
     )
     main()
 

@@ -620,7 +620,7 @@ class PolicyEngine:
             })
 
         # ── Supply-chain install risk (OSV CVEs, typosquat, IOC) ────────
-        # Wires the same scoring `immunity supplychain npm install <pkg>`
+        # Wires the same scoring `prismor supplychain npm install <pkg>`
         # runs explicitly into the automatic hook path, so a plain
         # `npm install lodash@4.17.4` an agent runs on its own — without
         # being told to route through that wrapper — gets checked too.
@@ -1566,7 +1566,7 @@ _NPM_MANIFEST_PIN_RE = re.compile(
 # the gap that let a manifest edit bypass the npm-only version of this
 # check (see policy_engine tests for the regression case). A stateful
 # parser keyed off seeing the section header first (as warden/deps.py's
-# manifest parsers are, for the unrelated `immunity deps` static scan)
+# manifest parsers are, for the unrelated `prismor deps` static scan)
 # would silently miss that case again.
 _PIP_MANIFEST_PIN_RE = re.compile(
     r'(?<![\w.-])([A-Za-z][A-Za-z0-9_.-]*)\s*==\s*([0-9][A-Za-z0-9_.\-]*)'

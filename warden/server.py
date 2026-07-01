@@ -7,7 +7,7 @@ a single CDN link (Chart.js) loaded by the browser.
 Usage (via CLI):
     python3 warden/cli.py serve [--port 7070] [--host 127.0.0.1]
 
-Endpoints:
+Read endpoints:
     GET /                  → self-hosted HTML dashboard
     GET /health            → {"status": "ok", "ts": "<iso>"}
     GET /api/stats         → aggregate stats for charts/KPIs
@@ -15,6 +15,14 @@ Endpoints:
     GET /api/findings      → paginated findings  (?page&limit&agent&severity&category&q)
     GET /api/events        → paginated events    (?page&limit&verdict&agent)
     GET /api/supply-chain  → supply chain enforcement stats
+    GET /api/workspaces    → registered workspaces + enrollment status
+    GET /api/policy        → all policy layers for a workspace (?workspace=…)
+    GET /api/sessions/:id/control → scoped rules + recent blocks for a session
+
+Write endpoints (human-only — localhost):
+    PUT /api/policy/global         → body: {yaml} — write ~/.prismor/policy.yaml
+    PUT /api/policy/project        → body: {yaml, workspace} — write project policy
+    PATCH /api/sessions/:id/control → body: {action, workspace, …data}
     OPTIONS *              → 204 CORS preflight
 """
 from __future__ import annotations
@@ -23,7 +31,7 @@ import json
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse, parse_qs
 
 from warden.store import (
@@ -33,21 +41,31 @@ from warden.store import (
     get_events_page,
     get_supply_chain_stats,
     get_agents_overview,
+    list_registered_workspaces,
+    get_enrollment,
+    read_policy_layer,
+    write_policy_layer,
+    get_policy_rule_catalog,
+    set_project_rule_states,
+    get_session_scoped_detail,
+    update_session_control,
 )
 
 _DASHBOARD_HTML = Path(__file__).with_name("dashboard.html")
 
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
+# The workspace where the server was launched (set by run_server).
+_SERVER_WORKSPACE: Optional[Path] = None
+
 
 class WardenRequestHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler for the immunity dashboard API."""
+    """Minimal HTTP handler for the prismor dashboard API."""
 
-    # Silence the default per-request access log
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass
 
@@ -77,6 +95,20 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self) -> Any:
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if not length:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def _resolve_workspace(self, qs: Dict[str, list]) -> Optional[Path]:
+        """Resolve workspace from query param or fall back to server default."""
+        ws_param = qs.get("workspace", [None])[0]
+        if ws_param:
+            p = Path(ws_param)
+            return p if p.exists() else None
+        return _SERVER_WORKSPACE
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
         self._send_cors()
@@ -102,6 +134,44 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/health":
             self._send_json({"status": "ok", "ts": datetime.now(timezone.utc).isoformat()})
+            return
+
+        if path == "/api/workspaces":
+            workspaces = list_registered_workspaces()
+            enrollment = get_enrollment()
+            primary = str(_SERVER_WORKSPACE) if _SERVER_WORKSPACE else None
+            self._send_json({
+                "workspaces": [str(w) for w in workspaces],
+                "primary": primary,
+                "enrollment": enrollment,
+            })
+            return
+
+        if path == "/api/policy":
+            workspace = self._resolve_workspace(qs)
+            enrollment = get_enrollment()
+            result = {
+                "global": read_policy_layer("global"),
+                "project": read_policy_layer("project", workspace),
+                "enterprise": read_policy_layer("enterprise"),
+                "enrollment": enrollment,
+                "workspace": str(workspace) if workspace else None,
+                "enterprise_enrolled": enrollment is not None,
+            }
+            self._send_json(result)
+            return
+
+        if path == "/api/policy/rules":
+            workspace = self._resolve_workspace(qs)
+            try:
+                rules = get_policy_rule_catalog(workspace)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
+                return
+            self._send_json({
+                "rules": rules,
+                "workspace": str(workspace) if workspace else None,
+            })
             return
 
         if path == "/api/stats":
@@ -202,6 +272,21 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, status=500)
             return
 
+        # /api/sessions/<id>/control
+        parts = path.split("/")
+        if len(parts) == 5 and parts[1] == "api" and parts[2] == "sessions" and parts[4] == "control":
+            session_id = parts[3]
+            workspace = self._resolve_workspace(qs)
+            if not workspace:
+                self._send_json({"error": "workspace not found"}, status=404)
+                return
+            try:
+                detail = get_session_scoped_detail(workspace, session_id)
+                self._send_json(detail)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
+            return
+
         self._send_json({"error": "not found"}, status=404)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -244,23 +329,97 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
                 })
             except Exception as exc:
                 self._send_json({"error": str(exc)}, status=500)
+    def do_PUT(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        if path == "/api/policy/global":
+            try:
+                body = self._read_json_body()
+                content = body.get("yaml", "")
+                result = write_policy_layer("global", content)
+                self._send_json(result, status=200 if result["ok"] else 400)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        if path == "/api/policy/project":
+            try:
+                body = self._read_json_body()
+                content = body.get("yaml", "")
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else _SERVER_WORKSPACE
+                if not workspace:
+                    self._send_json({"ok": False, "error": "workspace required"}, status=400)
+                    return
+                result = write_policy_layer("project", content, workspace)
+                self._send_json(result, status=200 if result["ok"] else 400)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        if path == "/api/policy/rules":
+            try:
+                body = self._read_json_body()
+                disabled = body.get("disabled", [])
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else _SERVER_WORKSPACE
+                if not workspace:
+                    self._send_json({"ok": False, "error": "workspace required"}, status=400)
+                    return
+                if not isinstance(disabled, list):
+                    self._send_json({"ok": False, "error": "disabled must be a list"}, status=400)
+                    return
+                result = set_project_rule_states(workspace, [str(x) for x in disabled])
+                self._send_json(result, status=200 if result.get("ok") else 400)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
 
         self._send_json({"error": "not found"}, status=404)
 
-    # Suppress BrokenPipeError tracebacks when clients disconnect early
+    def do_PATCH(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        # /api/sessions/<id>/control
+        parts = path.split("/")
+        if len(parts) == 5 and parts[1] == "api" and parts[2] == "sessions" and parts[4] == "control":
+            session_id = parts[3]
+            try:
+                body = self._read_json_body()
+                action = body.get("action", "")
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else _SERVER_WORKSPACE
+                if not workspace:
+                    self._send_json({"ok": False, "error": "workspace required"}, status=400)
+                    return
+                result = update_session_control(workspace, session_id, action, body)
+                self._send_json(result, status=200 if result.get("ok") else 400)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        self._send_json({"error": "not found"}, status=404)
+
     def handle_error(self, request: Any, client_address: Any) -> None:
         pass
 
 
-def run_server(host: str = "127.0.0.1", port: int = 7070, open_browser: bool = False) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 7070,
+    open_browser: bool = False,
+    workspace: Optional[Path] = None,
+) -> None:
     """Start the warden HTTP API server (blocks until Ctrl-C).
 
-    When ``open_browser`` is set, opens the default browser to the dashboard
-    once the listening socket is bound. The socket is bound by the
-    ``HTTPServer(...)`` constructor, so the request lands even before
-    ``serve_forever()`` starts accepting.
+    ``workspace`` is the directory where the server was launched, used as
+    the default for project-level policy and session operations.
     """
+    global _SERVER_WORKSPACE
+    _SERVER_WORKSPACE = workspace
+
     import errno as _errno
     while True:
         try:
@@ -272,8 +431,10 @@ def run_server(host: str = "127.0.0.1", port: int = 7070, open_browser: bool = F
                 port += 1
             else:
                 raise
+
     url = f"http://{host}:{port}"
-    print(f"[warden] dashboard → {url}  (Ctrl-C to stop)", flush=True)
+    ws_label = f"  workspace → {workspace}" if workspace else ""
+    print(f"[warden] dashboard → {url}  (Ctrl-C to stop){ws_label}", flush=True)
     if open_browser:
         import threading
         import webbrowser

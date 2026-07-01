@@ -46,7 +46,7 @@ subsequent tool call against it alongside the base policy. The rules evaporate
 when the session ends — they never accumulate into your permanent policy.
 
 This synthesis happens automatically inside the hook dispatcher; you don't run a
-command to create scoped rules. The `immunity scope` commands are for
+command to create scoped rules. The `prismor scope` commands are for
 **inspecting and adjusting** them.
 
 ---
@@ -71,20 +71,20 @@ Injection that pivots off-task  ──►  outside the scope  ──►  blocked
 
 ```bash
 # List sessions that currently have scoped rules
-immunity scope list
+prismor scope list
 
 # Show the scoped rules (all active sessions, or one)
-immunity scope show
-immunity scope show --session-id <id>
+prismor scope show
+prismor scope show --session-id <id>
 
 # Hand-edit a session's scoped rules in $EDITOR
-immunity scope edit <id>
+prismor scope edit <id>
 
 # Drop a session's scoped rules
-immunity scope clear <id>
+prismor scope clear <id>
 ```
 
-`immunity scope` with no action prints the rules for all active sessions.
+`prismor scope` with no action prints the rules for all active sessions.
 
 ---
 

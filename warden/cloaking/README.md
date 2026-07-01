@@ -2,7 +2,7 @@
 
 **Prevention layer for secrets in AI coding agents.** Keeps real secret values out of the model's context, the on-disk JSONL transcript, and the upstream LLM API — while still letting the agent use those secrets to execute local tool calls.
 
-Complements `immunity sweep` (post-hoc disk-residue cleanup) by stopping leaks at the tool boundary in real time.
+Complements `prismor sweep` (post-hoc disk-residue cleanup) by stopping leaks at the tool boundary in real time.
 
 ---
 
@@ -11,7 +11,7 @@ Complements `immunity sweep` (post-hoc disk-residue cleanup) by stopping leaks a
 You enroll a real secret once under a human-readable placeholder:
 
 ```bash
-immunity cloak add stripe_key    # value read from stdin, never argv
+prismor cloak add stripe_key    # value read from stdin, never argv
 ```
 
 From that point on, the model refers to the secret as `@@SECRET:stripe_key@@`. When the agent emits a tool call containing that placeholder, Warden's `PreToolUse` hook:
@@ -44,7 +44,7 @@ User ──► Claude API ──► tool_use("@@SECRET:stripe_key@@")           
 From inside a project:
 
 ```bash
-immunity cloak install
+prismor cloak install
 ```
 
 This merges four hook entries into `.claude/settings.json` (preserving any Warden runtime-monitor hooks already there):
@@ -64,16 +64,16 @@ present in the vault (see below).
 Flags:
 
 ```bash
-immunity cloak install --scope user           # install globally in ~/.claude
-immunity cloak install --no-userprompt-guard  # skip the paste-detection hook
-immunity cloak install --no-secret-guard      # skip the tool-call detect-and-block hook
-immunity cloak install --sweep-on-stop        # add the Stop-hook sweep
+prismor cloak install --scope user           # install globally in ~/.claude
+prismor cloak install --no-userprompt-guard  # skip the paste-detection hook
+prismor cloak install --no-secret-guard      # skip the tool-call detect-and-block hook
+prismor cloak install --sweep-on-stop        # add the Stop-hook sweep
 ```
 
 Uninstall leaves unrelated Claude Code settings untouched:
 
 ```bash
-immunity cloak uninstall
+prismor cloak uninstall
 ```
 
 ---
@@ -82,18 +82,18 @@ immunity cloak uninstall
 
 ```bash
 # Register — value is read from stdin (or hidden prompt if interactive)
-immunity cloak add stripe_key          # prompts you to paste the value
-printf '%s' "$(cat ~/.keys/stripe)" | immunity cloak add stripe_key
-immunity cloak add aws_prod --from-file ~/.keys/aws
+prismor cloak add stripe_key          # prompts you to paste the value
+printf '%s' "$(cat ~/.keys/stripe)" | prismor cloak add stripe_key
+prismor cloak add aws_prod --from-file ~/.keys/aws
 
 # List registered placeholder names — NEVER shows values
-immunity cloak list
+prismor cloak list
 
 # Delete a registered secret (any tool call still referencing it will fail closed)
-immunity cloak remove stripe_key
+prismor cloak remove stripe_key
 
 # Show install state
-immunity cloak status
+prismor cloak status
 ```
 
 Secrets live under `$PRISMOR_HOME/secrets/` (default `~/.prismor/secrets/`) with the directory at `0700` and each file at `0600`. The directory should be **excluded from backups and sync** (Time Machine, iCloud, Dropbox). Override the location with `PRISMOR_SECRETS_DIR`.
@@ -168,9 +168,9 @@ Both guards detect secrets from a shared, file-based pattern set:
 Manage custom patterns — one POSIX ERE per line — with:
 
 ```bash
-immunity cloak pattern list                       # show built-in + custom patterns
-immunity cloak pattern add 'mycorp_[0-9a-f]{32}'  # validated, appended to custom file
-immunity cloak pattern remove 'mycorp_[0-9a-f]{32}'
+prismor cloak pattern list                       # show built-in + custom patterns
+prismor cloak pattern add 'mycorp_[0-9a-f]{32}'  # validated, appended to custom file
+prismor cloak pattern remove 'mycorp_[0-9a-f]{32}'
 ```
 
 `add` rejects an uncompilable regex; built-in patterns cannot be removed.
@@ -190,8 +190,8 @@ Enumerated honestly so you know what to layer on top:
 For residue that slips through despite all of the above, run:
 
 ```bash
-immunity sweep            # dry-run scan
-immunity sweep --redact   # scan + encrypted-vault redact
+prismor sweep            # dry-run scan
+prismor sweep --redact   # scan + encrypted-vault redact
 ```
 
 ---
@@ -201,14 +201,14 @@ immunity sweep --redact   # scan + encrypted-vault redact
 Cloak and Warden's runtime monitor coexist on the same `.claude/settings.json`. Install order does not matter; each feature merges its own matcher blocks and uninstall strips only its own entries. Recommended combination:
 
 ```bash
-immunity install-hooks --agent claude --mode enforce   # policy enforcement
-immunity cloak install                                 # secret prevention
+prismor install-hooks --agent claude --mode enforce   # policy enforcement
+prismor cloak install                                 # secret prevention
 ```
 
 Then on a cadence (or via the opt-in `--sweep-on-stop` flag above):
 
 ```bash
-immunity sweep --redact
+prismor sweep --redact
 ```
 
 ---

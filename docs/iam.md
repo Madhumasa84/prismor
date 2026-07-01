@@ -82,23 +82,23 @@ agents:
 
 ```bash
 # 1. Scaffold a config (global, or --scope project)
-immunity iam init
-immunity iam init --scope project
+prismor iam init
+prismor iam init --scope project
 
 # 2. Edit it to define your identities, then activate one:
 export WARDEN_AGENT_ID=researcher
 
 # 3. Inspect
-immunity iam list                 # all identities; marks the active one
-immunity iam show researcher      # the resolved permission profile
+prismor iam list                 # all identities; marks the active one
+prismor iam show researcher      # the resolved permission profile
 
 # 4. Test an action before trusting it
-immunity iam check researcher --type command --value "rm -rf /"
-immunity iam check researcher --type network --value "https://api.example.com"
-immunity iam check readonly-bot  --type write   --value "./out.txt"
+prismor iam check researcher --type command --value "rm -rf /"
+prismor iam check researcher --type network --value "https://api.example.com"
+prismor iam check readonly-bot  --type write   --value "./out.txt"
 ```
 
-`immunity iam check` returns `ALLOW` or `BLOCK` (with the rule that fired) and
+`prismor iam check` returns `ALLOW` or `BLOCK` (with the rule that fired) and
 sets the exit code accordingly — handy for testing a profile in CI before
 deploying an agent under it.
 

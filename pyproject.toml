@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "immunity-agent"
+name = "prismor"
 dynamic = ["version"]
 description = "Runtime security for AI coding agents: policy enforcement, secret prevention, and supply-chain blocking."
 readme = "PYPI.md"
@@ -38,11 +38,12 @@ dev = ["build", "pytest"]
 
 [project.urls]
 Homepage = "https://prismor.dev"
-Repository = "https://github.com/PrismorSec/immunity-agent"
+Repository = "https://github.com/PrismorSec/prismor"
 Documentation = "https://docs.prismor.dev"
 
 [project.scripts]
-immunity = "warden.immunity_cli:main"
+prismor = "warden.immunity_cli:main"
+immunity = "warden.immunity_cli:main"   # deprecated alias — prints a notice; removed in a future release
 warden = "warden.immunity_cli:_warden_shim"
 
 # Hermes Agent plugin auto-discovery entry point
@@ -66,7 +67,7 @@ packages = ["warden", "supplychain"]
 "warden/cloaking/hermes-plugin/plugin.yaml" = "warden/data/cloaking/hermes-plugin/plugin.yaml"
 "warden/cloaking/hermes-plugin/__init__.py" = "warden/data/cloaking/hermes-plugin/__init__.py"
 # Bundle the immunity-agent Claude skill (SKILL.md + its docs/, minus the heavy
-# unreferenced demo.gif) so `immunity setup` can install it into a workspace's
+# unreferenced demo.gif) so `prismor setup` can install it into a workspace's
 # .claude/skills/ directory. Files are listed explicitly — a `docs/` directory
 # mapping would drag in demo.gif (force-include ignores wheel `exclude`).
 "SKILL.md" = "warden/data/SKILL.md"

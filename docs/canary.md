@@ -80,17 +80,17 @@ rather than a known-bad pattern.
 
 ```bash
 # Plant a fake AWS credentials file with a beacon
-immunity canary plant ~/.aws/credentials.canary --type aws \
+prismor canary plant ~/.aws/credentials.canary --type aws \
     --webhook https://hooks.example.com/canary
 
 # List what's planted (markers are redacted)
-immunity canary list
+prismor canary list
 
 # Summary by type
-immunity canary status
+prismor canary status
 
 # Remove one (by id or path)
-immunity canary remove <id-or-path>
+prismor canary remove <id-or-path>
 ```
 
 > Plant the canary at a path the real file does **not** occupy, or use `--force`
@@ -130,7 +130,7 @@ entry records:
 ```
 
 The registry holds the raw marker values — they are what the policy engine
-matches against — so it is permission-restricted, and `immunity canary list`
+matches against — so it is permission-restricted, and `prismor canary list`
 redacts the marker before display. Treat the registry as security-sensitive:
 anyone who reads it learns which strings to avoid.
 

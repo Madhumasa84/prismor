@@ -5,8 +5,8 @@ positives, and detect evasion attempts where structurally similar commands
 bypass existing rules.
 
 Usage:
-    immunity learn                 # propose new rules from session history
-    immunity learn --apply ID      # accept a candidate rule into project policy
+    prismor learn                 # propose new rules from session history
+    prismor learn --apply ID      # accept a candidate rule into project policy
 """
 from __future__ import annotations
 
@@ -973,7 +973,7 @@ def format_learning_report(
     total = len(candidates) + len(false_positives) + len(refinements)
     if total > 0:
         lines.append(f"{_GREEN}Total insights: {total}{_NC}")
-        lines.append(f"Use {_BOLD}immunity learn --apply ID{_NC} to accept a candidate rule.")
+        lines.append(f"Use {_BOLD}prismor learn --apply ID{_NC} to accept a candidate rule.")
     else:
         lines.append(f"{_DIM}No actionable insights. Collect more session data.{_NC}")
 

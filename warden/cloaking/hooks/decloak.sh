@@ -47,7 +47,7 @@ while IFS= read -r placeholder; do
   if [[ ! -f "$secret_file" ]]; then
     # Fail closed: deny the tool call rather than silently leaving the
     # placeholder in, which would confuse downstream commands.
-    jq -n --arg reason "Prismor cloaking: secret '$name' not registered. Run: immunity cloak add $name" \
+    jq -n --arg reason "Prismor cloaking: secret '$name' not registered. Run: prismor cloak add $name" \
       '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
     exit 0
   fi

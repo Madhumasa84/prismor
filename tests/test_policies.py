@@ -535,14 +535,14 @@ class TestEvaluateEventNewRules(unittest.TestCase):
         self.assertIn("pii_exposure", categories)
 
     def test_pii_ssn_in_shell(self):
-        # `immunity check` synthesizes a shell event — PII must flag here.
+        # `prismor check` synthesizes a shell event — PII must flag here.
         event = {"type": "shell", "command": "echo 123-45-6789 >> log.txt"}
         findings = evaluate_event(event, 0)
         categories = [f["category"] for f in findings]
         self.assertIn("pii_exposure", categories)
 
     def test_pii_credit_card_in_text(self):
-        # `immunity check --type text` for agent-output validation.
+        # `prismor check --type text` for agent-output validation.
         event = {"type": "text", "content": "card on file: 4111-1111-1111-1111"}
         findings = evaluate_event(event, 0)
         categories = [f["category"] for f in findings]

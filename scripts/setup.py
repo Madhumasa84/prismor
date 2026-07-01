@@ -45,6 +45,44 @@ def _pkg_version() -> str:
 VERSION = f"v{_pkg_version()}"
 BACK = object()  # sentinel for "go back"
 
+# ── Hook catalogue ────────────────────────────────────────────────────────────
+
+HOOK_DEFS = [
+    {
+        "id":      "runtime",
+        "label":   "Runtime monitor",
+        "default": True,
+        "desc":    "Intercepts all tool calls — blocks/logs dangerous Bash, file ops, and prompt injections",
+    },
+    {
+        "id":      "cloak-core",
+        "label":   "Secret cloak",
+        "default": True,
+        "desc":    "Decloak @@SECRET:name@@ in Bash inputs; recloak real secrets from MCP tool output",
+    },
+    {
+        "id":      "cloak-guard",
+        "label":   "Secret guard",
+        "default": True,
+        "desc":    "Detects and denies tool calls where the model passes raw secret values directly",
+    },
+    {
+        "id":      "cloak-prompt",
+        "label":   "Prompt guard",
+        "default": True,
+        "desc":    "Soft-blocks if you paste a raw secret value directly into the chat prompt",
+    },
+    {
+        "id":      "cloak-sweep",
+        "label":   "Session sweep",
+        "default": False,
+        "desc":    "Scans session transcripts for secret residue at session end (verbose — off by default)",
+    },
+]
+
+def _default_hooks():
+    return {d["id"]: d["default"] for d in HOOK_DEFS}
+
 # ── ANSI ─────────────────────────────────────────────────────────────────────
 
 RST  = "\033[0m"
@@ -238,7 +276,7 @@ def header_lines(step=None, total=None, label=None):
     tw = term_width()
     out = [
         "",
-        f"  {w('PRISMOR IMMUNITY AGENT', BOLD, CYAN)}  {w('· ' + VERSION, DIM)}",
+        f"  {w('PRISMOR', BOLD, CYAN)}  {w('· ' + VERSION, DIM)}",
     ]
     if step and label:
         out.append(f"  {w(f'Step {step}/{total}', DIM)}  {w(label, BOLD)}")
@@ -319,49 +357,48 @@ def step_agents(target):
             return chosen if chosen else ["claude"]
         elif key in ('q','Q','\x03'): cleanup(); sys.exit(0)
 
-# ── Step 3: Secret Cloaking ──────────────────────────────────────────────────
+# ── Step 3: Hook selection ───────────────────────────────────────────────────
 
-def step_tokenize(current=True):
-    """Yes/no toggle for the secret-cloaking prevention layer.
-
-    Installs PreToolUse/PostToolUse/UserPromptSubmit hooks that keep real
-    secret values out of the model's context, the JSONL transcript, and
-    upstream API requests. Requires ``jq`` on the user's PATH.
-    """
-    opts = [
-        ("yes", "Install cloaking hooks  (recommended — prevents secret leaks to the LLM provider)"),
-        ("no",  "Skip — only runtime policy hooks will be installed"),
-    ]
-    sel = 0 if current else 1
+def step_hooks(current=None):
+    """Multi-select checklist: every hook with a one-liner description."""
+    if current is None:
+        current = _default_hooks()
+    hooks = {d["id"]: current.get(d["id"], d["default"]) for d in HOOK_DEFS}
+    sel = 0
+    label_w = max(visible_len(d["label"]) for d in HOOK_DEFS) + 2
 
     while True:
-        lines = header_lines(3, 3, "SECRET CLOAKING")
-        lines.append(f"  {w('Prevents real secrets from reaching model context, JSONL transcripts,', DIM)}")
-        lines.append(f"  {w('or upstream API requests. See warden/cloaking/README.md.', DIM)}")
+        tw = term_width()
+        lines = header_lines(3, 3, "HOOKS")
+        lines.append(f"  {w('Select which hooks to install:', DIM)}")
         lines.append("")
-        for i, (name, desc) in enumerate(opts):
-            arrow = w("▸ ", CYAN) if i == sel else "  "
-            dot   = w("●", GRN) if i == sel else w("○", DIM)
-            tw = term_width()
-            max_desc = max(tw - 24, 30)
-            nm    = pad(w(name, BOLD) if i == sel else w(name, DIM), 8)
-            lines.append(f"  {arrow}{dot}  {nm}{w(desc[:max_desc], DIM)}")
+        for i, hd in enumerate(HOOK_DEFS):
+            arrow    = w("▸ ", CYAN) if i == sel else "  "
+            dot      = w("●", GRN) if hooks[hd["id"]] else w("○", DIM)
+            lbl      = pad(w(hd["label"], BOLD) if i == sel else hd["label"], label_w)
+            max_desc = max(tw - label_w - 10, 20)
+            desc     = w(hd["desc"][:max_desc], DIM)
+            lines.append(f"  {arrow}{dot}  {lbl}{desc}")
         lines.append("")
         lines.append(control_line([
-            ("↑↓", "select"), ("←", "back"), ("enter", "next"), ("q", "quit"),
+            ("↑↓", "move"), ("space", "toggle"),
+            ("←", "back"), ("enter", "next"), ("q", "quit"),
         ]))
         render(lines)
 
         key = read_key()
-        if key in (UP,):              sel = (sel - 1) % len(opts)
-        elif key in (DOWN,):          sel = (sel + 1) % len(opts)
+        if key in (UP,):              sel = (sel - 1) % len(HOOK_DEFS)
+        elif key in (DOWN,):          sel = (sel + 1) % len(HOOK_DEFS)
+        elif key == SPACE:            hooks[HOOK_DEFS[sel]["id"]] = not hooks[HOOK_DEFS[sel]["id"]]
         elif key in (LEFT, 'b', 'B'): return BACK
-        elif key in (ENTER, '\n'):    return opts[sel][0] == "yes"
+        elif key in (ENTER, '\n'):    return dict(hooks)
         elif key in ('q','Q','\x03'): cleanup(); sys.exit(0)
 
 # ── Confirm ──────────────────────────────────────────────────────────────────
 
-def step_confirm(target, mode, rules, agents, tokenize=False):
+def step_confirm(target, mode, rules, agents, hooks=None):
+    if hooks is None:
+        hooks = _default_hooks()
     home = str(Path.home())
     disp = str(target).replace(home, "~")
     n_on = sum(1 for r in rules if r["on"])
@@ -387,8 +424,9 @@ def step_confirm(target, mode, rules, agents, tokenize=False):
         lines.append(row(kv("Mode", mode, GRN if mode == "enforce" else YEL)))
         lines.append(row(kv("Rules", f"{n_on}/{len(rules)} enabled")))
         lines.append(row(kv("Agents", ags)))
-        lines.append(row(kv("Cloak", "yes  (secret prevention)" if tokenize else "no",
-                              GRN if tokenize else DIM)))
+        n_hooks = sum(1 for d in HOOK_DEFS if hooks.get(d["id"], d["default"]))
+        lines.append(row(kv("Hooks", f"{n_hooks}/{len(HOOK_DEFS)} enabled",
+                              GRN if n_hooks else DIM)))
         lines.append(row())
         lines.append(bdr("╰", "─", "╯"))
         lines.append("")
@@ -430,14 +468,17 @@ def spinner_run(label, fn):
     sys.stdout.write(f"\r  {icon}  {label}{suffix}            \n")
     sys.stdout.flush()
 
-def do_install(target, mode, rules, agents, tokenize=False):
+def do_install(target, mode, rules, agents, hooks=None):
     # Switch back to normal buffer for install output
     sys.stdout.write(ALT_OFF)
     sys.stdout.write("\033[H\033[J" + HIDE)
     sys.stdout.flush()
-    print(w("  Installing Prismor Immunity Agent...\n", BOLD, CYAN))
+    print(w("  Installing Prismor...\n", BOLD, CYAN))
 
+    if hooks is None:
+        hooks = _default_hooks()
     target = Path(target).resolve()
+    cli = PRISMOR_DIR / "immunity"
 
     # 0. Register workspace globally
     try:
@@ -469,44 +510,50 @@ def do_install(target, mode, rules, agents, tokenize=False):
             return True, f"{len(disabled)} disabled"
         spinner_run("Writing policy overrides", write_policy)
 
-    # 3. Install hooks
-    cli = PRISMOR_DIR / "immunity"
-    for agent in agents:
-        def install(a=agent):
-            if not cli.exists():
-                return False, "immunity entry point not found"
-            r = subprocess.run([sys.executable, str(cli), "install-hooks",
-                                "--agent", a, "--workspace", str(target),
-                                "--scope", "project", "--mode", mode],
-                               capture_output=True, timeout=30)
-            return r.returncode == 0, ""
-        spinner_run(f"Installing {agent} hooks", install)
+    # 3. Warden runtime hooks
+    if hooks.get("runtime", True):
+        for agent in agents:
+            def install(a=agent):
+                if not cli.exists():
+                    return False, "prismor entry point not found"
+                r = subprocess.run([sys.executable, str(cli), "install-hooks",
+                                    "--agent", a, "--workspace", str(target),
+                                    "--scope", "project", "--mode", mode],
+                                   capture_output=True, timeout=30)
+                return r.returncode == 0, ""
+            spinner_run(f"Installing {agent} hooks", install)
 
-    # 3b. Cloaking hooks (opt-in — Claude Code only for now)
-    if tokenize and "claude" in agents:
-        def install_tokenize():
+    # 3b. Cloaking hooks (Claude Code only)
+    if hooks.get("cloak-core", True) and "claude" in agents:
+        def install_cloak():
             if not cli.exists():
-                return False, "immunity entry point not found"
+                return False, "prismor entry point not found"
             if not shutil.which("jq"):
                 return False, "jq not found (brew install jq)"
-            r = subprocess.run([sys.executable, str(cli), "cloak", "install",
-                                "--workspace", str(target), "--scope", "project"],
-                               capture_output=True, timeout=30)
+            cmd = [sys.executable, str(cli), "cloak", "install",
+                   "--workspace", str(target), "--scope", "project"]
+            if not hooks.get("cloak-guard", True):
+                cmd.append("--no-secret-guard")
+            if not hooks.get("cloak-prompt", True):
+                cmd.append("--no-userprompt-guard")
+            if hooks.get("cloak-sweep", False):
+                cmd.append("--sweep-on-stop")
+            r = subprocess.run(cmd, capture_output=True, timeout=30)
             return r.returncode == 0, "enabled" if r.returncode == 0 else r.stderr.decode()[:40]
-        spinner_run("Installing cloaking hooks", install_tokenize)
+        spinner_run("Installing cloaking hooks", install_cloak)
 
     # 4. CLAUDE.md
     def update_claude():
         md = target / "CLAUDE.md"
         block = (
-            "\n## Security (Prismor Immunity Agent)\n\n"
-            "This workspace is protected by Prismor Immunity Agent — runtime "
+            "\n## Security (Prismor)\n\n"
+            "This workspace is protected by Prismor — runtime "
             "security hooks that monitor tool calls in real time (destructive "
             "commands, secret leaks, supply-chain risk, prompt injection).\n\n"
-            "Run `immunity status` at the start of a session to check protection "
+            "Run `prismor status` at the start of a session to check protection "
             "state. The full decision tree lives in "
             "`.claude/skills/immunity-agent/SKILL.md`.\n\n"
-            "For more info: https://github.com/PrismorSec/immunity-agent\n"
+            "For more info: https://github.com/PrismorSec/prismor\n"
         )
         if md.exists():
             content = md.read_text()
@@ -553,19 +600,19 @@ def do_install(target, mode, rules, agents, tokenize=False):
         return r.returncode == 0, "verified" if r.returncode == 0 else "failed"
     spinner_run("Verifying feed signature", verify)
 
-    # 6. Add immunity to PATH
+    # 6. Add prismor to PATH
     def add_to_path():
-        wrapper = PRISMOR_DIR / "scripts" / "immunity"
+        wrapper = PRISMOR_DIR / "scripts" / "prismor"
         if not wrapper.exists():
             return False, "wrapper script not found"
         # Symlink into /usr/local/bin if writable, else add to PATH in rc
         local_bin = Path("/usr/local/bin")
-        link = local_bin / "immunity"
+        link = local_bin / "prismor"
         if local_bin.exists() and os.access(str(local_bin), os.W_OK):
             if link.exists() or link.is_symlink():
                 link.unlink()
             link.symlink_to(wrapper)
-            return True, "linked to /usr/local/bin/immunity"
+            return True, "linked to /usr/local/bin/prismor"
         # Fallback: add scripts dir to PATH in shell rc
         export_line = f'export PATH="{PRISMOR_DIR}/scripts:$PATH"'
         shell = os.environ.get("SHELL", "/bin/zsh")
@@ -579,32 +626,33 @@ def do_install(target, mode, rules, agents, tokenize=False):
             rc.write_text(content)
         if str(PRISMOR_DIR / "scripts") in content:
             return True, "already in " + rc.name
-        rc.write_text(content.rstrip() + f"\n\n# Prismor immunity\n{export_line}\n")
+        rc.write_text(content.rstrip() + f"\n\n# Prismor\n{export_line}\n")
         return True, f"PATH added to {rc.name}"
-    spinner_run("Adding immunity command", add_to_path)
+    spinner_run("Adding prismor command", add_to_path)
 
     # Done
     home = str(Path.home())
     print()
     print(w("  ╭───────────────────────────────────────────╮", DIM))
-    print(w("  │", DIM) + w("  Prismor Immunity Agent installed successfully!    ", GRN, BOLD) + w("│", DIM))
+    print(w("  │", DIM) + w("  Prismor installed successfully!    ", GRN, BOLD) + w("│", DIM))
     print(w("  ╰───────────────────────────────────────────╯", DIM))
     print()
     def info(k, v):
         print(f"  {w(k + ':', GRN)}  {w(v, DIM)}")
-    info("Hooks",      f"installed (mode: {mode})")
+    n_hooks = sum(1 for d in HOOK_DEFS if hooks.get(d["id"], d["default"]))
+    info("Hooks",      f"{n_hooks}/{len(HOOK_DEFS)} installed  (mode: {mode})")
     if "claude" in agents:
         info("Skill",  str(target / ".claude" / "skills" / "immunity-agent").replace(home, "~"))
-    info("Docs",       "https://github.com/PrismorSec/immunity-agent")
+    info("Docs",       "https://github.com/PrismorSec/prismor")
     info("Feed",       str(PRISMOR_DIR / "advisories/immunity-feed.json").replace(home, "~"))
     info("Config",     str(target / "CLAUDE.md").replace(home, "~"))
-    info("Command",    "immunity (restart shell if not found)")
+    info("Command",    "prismor (restart shell if not found)")
     print()
     print(w("  Quick commands:", GRN))
-    print(f"    immunity status                      {w('this workspace health check', DIM)}")
-    print(f"    immunity status --all                {w('overview across all workspaces', DIM)}")
-    print(f"    immunity sessions --findings-only     {w('all flagged sessions by risk', DIM)}")
-    print(f"    immunity check \"rm -rf /\"             {w('pre-check a command', DIM)}")
+    print(f"    prismor status                      {w('this workspace health check', DIM)}")
+    print(f"    prismor status --all                {w('overview across all workspaces', DIM)}")
+    print(f"    prismor sessions --findings-only     {w('all flagged sessions by risk', DIM)}")
+    print(f"    prismor check \"rm -rf /\"             {w('pre-check a command', DIM)}")
     print()
     sys.stdout.write(SHOW)
     sys.stdout.flush()
@@ -612,15 +660,21 @@ def do_install(target, mode, rules, agents, tokenize=False):
 # ── Non-interactive ──────────────────────────────────────────────────────────
 
 def run_non_interactive(target):
-    mode = os.environ.get("PRISMOR_MODE", "observe")
+    mode  = os.environ.get("PRISMOR_MODE", "observe")
     cloak = os.environ.get("PRISMOR_CLOAK", "").lower() in {"1", "true", "yes", "on"}
     rules = load_rules()
     target = Path(target).resolve()
-    det = detect_agents(target)
+    det    = detect_agents(target)
     agents = [n for n, ok in det.items() if ok] or ["claude"]
-    tok_tag = ", cloak=yes" if cloak else ""
-    print(f"[prismor] Non-interactive (mode={mode}, agents={','.join(agents)}{tok_tag})")
-    do_install(target, mode, rules, agents, tokenize=cloak)
+    hooks  = _default_hooks()
+    if not cloak:
+        hooks["cloak-core"]   = False
+        hooks["cloak-guard"]  = False
+        hooks["cloak-prompt"] = False
+        hooks["cloak-sweep"]  = False
+    cloak_tag = ", cloak=yes" if cloak else ""
+    print(f"[prismor] Non-interactive (mode={mode}, agents={','.join(agents)}{cloak_tag})")
+    do_install(target, mode, rules, agents, hooks=hooks)
 
 # ── Wizard ───────────────────────────────────────────────────────────────────
 
@@ -635,7 +689,7 @@ def run_wizard(target):
     rules = load_rules()
     mode = "enforce"
     agents = None
-    tokenize = True  # default yes in wizard; user can toggle at step 3
+    hooks = _default_hooks()
     step = 1
 
     try:
@@ -651,13 +705,13 @@ def run_wizard(target):
                 agents = result
                 step = 3
             elif step == 3:
-                result = step_tokenize(tokenize)
+                result = step_hooks(hooks)
                 if result is BACK:
                     step = 2; continue
-                tokenize = result
+                hooks = result
                 step = 4
             elif step == 4:
-                result = step_confirm(target, mode, rules, agents, tokenize=tokenize)
+                result = step_confirm(target, mode, rules, agents, hooks=hooks)
                 if result is BACK:
                     step = 3; continue
                 break  # confirmed → install
@@ -665,10 +719,10 @@ def run_wizard(target):
         rules = load_rules()
         mode = "enforce"
         agents = ["claude"]
-        tokenize = False
+        hooks = _default_hooks()
 
     raw_off()
-    do_install(target, mode, rules, agents, tokenize=tokenize)
+    do_install(target, mode, rules, agents, hooks=hooks)
 
 # ── Entry ────────────────────────────────────────────────────────────────────
 

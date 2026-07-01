@@ -1,26 +1,26 @@
 # Supply Chain Enforcement
 
-Immunity Agent wraps your package manager so every install is evaluated before it runs. The `immunity` CLI intercepts the command, scores each package against live threat intelligence, then either passes through to the real package manager or blocks with a reason.
+Prismor wraps your package manager so every install is evaluated before it runs. The `prismor` CLI intercepts the command, scores each package against live threat intelligence, then either passes through to the real package manager or blocks with a reason.
 
 ---
 
 ## Usage
 
 ```bash
-immunity supplychain npm install express
-immunity supplychain pip install requests numpy
-immunity supplychain pnpm add lodash
-immunity supplychain uv add fastapi
-immunity supplychain cargo add serde
-immunity supplychain go get github.com/some/pkg
+prismor supplychain npm install express
+prismor supplychain pip install requests numpy
+prismor supplychain pnpm add lodash
+prismor supplychain uv add fastapi
+prismor supplychain cargo add serde
+prismor supplychain go get github.com/some/pkg
 ```
 
-Any command that isn't a recognised package install passes through transparently - so you can alias `npm` or `pip` to `immunity` without breakage.
+Any command that isn't a recognised package install passes through transparently - so you can alias `npm` or `pip` to `prismor` without breakage.
 
 ```bash
 # Alias-based transparent wrapping
-alias npm="python3 /path/to/immunity-agent/immunity supplychain npm"
-alias pip="python3 /path/to/immunity-agent/immunity supplychain pip"
+alias npm="python3 /path/to/immunity-agent/prismor supplychain npm"
+alias pip="python3 /path/to/immunity-agent/prismor supplychain pip"
 ```
 
 ---
@@ -169,14 +169,14 @@ _SCRIPT_PATTERNS.append((
 
 ## Config Hardening
 
-Install-time scoring only fires when the install command actually goes through `immunity`. If something invokes `npm install` directly (a CI step, an IDE plugin, an agent that doesn't honour the alias), the runtime gate is bypassed.
+Install-time scoring only fires when the install command actually goes through `prismor`. If something invokes `npm install` directly (a CI step, an IDE plugin, an agent that doesn't honour the alias), the runtime gate is bypassed.
 
-`immunity supplychain harden` closes that gap by hardening the package manager's own config files. It runs before any install happens and applies settings the package manager itself enforces.
+`prismor supplychain harden` closes that gap by hardening the package manager's own config files. It runs before any install happens and applies settings the package manager itself enforces.
 
 ```bash
-immunity supplychain harden              # apply hardening to the current directory
-immunity supplychain harden --dry-run    # preview without writing
-immunity supplychain harden <path>       # harden a specific project root
+prismor supplychain harden              # apply hardening to the current directory
+prismor supplychain harden --dry-run    # preview without writing
+prismor supplychain harden <path>       # harden a specific project root
 ```
 
 What it does for each ecosystem detected in the project root:
@@ -189,11 +189,11 @@ What it does for each ecosystem detected in the project root:
 | `pip.conf` | `requirements.txt` / `pyproject.toml` / `setup.py` / `setup.cfg` | `no-input=true`, `disable-pip-version-check=true` |
 | `.cargo/config.toml` | `Cargo.toml` present | `[net] retry=2`, `git-fetch-with-cli=true` |
 
-Existing keys are never overwritten — if you've already set `save-exact=false` for a reason, the hardener leaves it and reports it. New settings are appended under a `# immunity supplychain harden` comment so they're easy to identify and remove later.
+Existing keys are never overwritten — if you've already set `save-exact=false` for a reason, the hardener leaves it and reports it. New settings are appended under a `# prismor supplychain harden` comment so they're easy to identify and remove later.
 
 ### Why these settings
 
-**`ignore-scripts` / `enableScripts: false`** is the single highest-impact rule. Every npm supply chain attack in [`supplychain/ioc.py`](../supplychain/ioc.py) — mini-shai-hulud, the AntV hijacked-maintainer wave, the PyPI mistralai/guardrails-ai variant — delivered its payload via a `preinstall` or `postinstall` hook. Disabling lifecycle scripts at the config layer neutralises that vector regardless of whether `immunity` is in the call path.
+**`ignore-scripts` / `enableScripts: false`** is the single highest-impact rule. Every npm supply chain attack in [`supplychain/ioc.py`](../supplychain/ioc.py) — mini-shai-hulud, the AntV hijacked-maintainer wave, the PyPI mistralai/guardrails-ai variant — delivered its payload via a `preinstall` or `postinstall` hook. Disabling lifecycle scripts at the config layer neutralises that vector regardless of whether `prismor` is in the call path.
 
 **`save-exact=true`** is the closest thing to age-gating that npm offers natively. With the default SemVer caret ranges, `npm install express` writes `"express": "^4.18.2"` and a fresh `npm install` on a teammate's machine can resolve to any 4.x version published since — including a hijacked one published an hour ago. Pinning exact versions means the lockfile is the source of truth and new versions only enter the project when someone explicitly bumps them.
 
@@ -206,7 +206,7 @@ The config hardening and the runtime scorer are complementary, not redundant:
 - **Hardening** narrows the attack surface for *any* install (`npm install` direct, CI, agent without alias).
 - **Runtime scoring** still catches the things hardening can't: a published-2-days-ago malicious package that has no install scripts but is named to typosquat a popular library, or a package whose name matches the IOC database.
 
-Run `immunity supplychain harden` once when bootstrapping a project, and use the `immunity` wrapper for installs. The two together give you both a static gate (what the package manager itself enforces) and a dynamic gate (what the immunity scorer rejects).
+Run `prismor supplychain harden` once when bootstrapping a project, and use the `prismor` wrapper for installs. The two together give you both a static gate (what the package manager itself enforces) and a dynamic gate (what the prismor scorer rejects).
 
 ### Caveats
 
@@ -218,7 +218,7 @@ Run `immunity supplychain harden` once when bootstrapping a project, and use the
 ## Architecture
 
 ```
-immunity supplychain npm install express
+prismor supplychain npm install express
          │
          ▼
 supplychain/ecosystems/detector.py   - parse argv → InstallEvent
@@ -238,4 +238,4 @@ supplychain/scoring/engine.py        - additive signal scoring → allow/warn/bl
   exit 1      os.execv(npm, argv)   - replace process, transparent passthrough
 ```
 
-The `immunity` binary at the repo root is a thin shebang wrapper over `supplychain/cli.py`. Non-install commands (`npm run build`, `pip freeze`, etc.) skip evaluation entirely and exec directly.
+The `prismor` binary at the repo root is a thin shebang wrapper over `supplychain/cli.py`. Non-install commands (`npm run build`, `pip freeze`, etc.) skip evaluation entirely and exec directly.

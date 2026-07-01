@@ -9,7 +9,7 @@ Two pattern sources, in priority order:
      (override with ``$PRISMOR_CLOAK_PATTERNS``) for org-specific token formats.
 
 Each line is one POSIX-ERE. Blank lines and ``#`` comments are ignored. The
-``immunity cloak pattern`` CLI manages the custom file; built-ins are read-only.
+``prismor cloak pattern`` CLI manages the custom file; built-ins are read-only.
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def add_pattern(regex: str) -> bool:
     if not path.exists():
         header = (
             "# Prismor Warden cloaking — custom (org-specific) secret patterns.\n"
-            "# One POSIX ERE per line. Managed by `immunity cloak pattern add/remove`.\n"
+            "# One POSIX ERE per line. Managed by `prismor cloak pattern add/remove`.\n"
         )
         path.write_text(header, encoding="utf-8")
     with path.open("a", encoding="utf-8") as f:

@@ -2,7 +2,7 @@
 
 This package groups everything that connects a local Warden install to an
 *optional* Prismor control plane (the self-hosted org dashboard). None of it is
-active unless the machine is enrolled (``immunity enroll <token>``); on a plain
+active unless the machine is enrolled (``prismor enroll <token>``); on a plain
 local install every entry point here is a guarded no-op, so the runtime works
 exactly the same with or without an org.
 

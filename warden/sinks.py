@@ -12,10 +12,17 @@ Supported sink types (configured under ``settings.outputs`` in policy.yaml):
       facility: local7
     - type: file
       path: ~/.prismor/audit.log
-      format: json     # or: cef
+      format: json     # or: cef, ocsf
+    - type: splunk              # Splunk HTTP Event Collector (OCSF body)
+      url: https://splunk.example.com:8088/services/collector
+      token: ${SPLUNK_HEC_TOKEN}
+      sourcetype: prismor:warden:ocsf
+    - type: datadog            # Datadog Logs intake (OCSF body)
+      api_key: ${DD_API_KEY}
+      site: datadoghq.com
     - type: prismor              # first-party control-plane sink
       # No config needed — the device key + endpoint come from the enrolled
-      # identity at ~/.prismor/identity.json (see `immunity enroll`). Sends a
+      # identity at ~/.prismor/identity.json (see `prismor enroll`). Sends a
       # *redacted* telemetry record by default; full content only when the
       # org's resolved policy sets full_capture: true.
 
@@ -138,10 +145,54 @@ def _dispatch_file(cfg: Dict[str, Any], event: Dict[str, Any]) -> None:
     fmt = str(cfg.get("format", "json")).lower()
     if fmt == "cef":
         line = _format_cef(event)
+    elif fmt == "ocsf":
+        line = json.dumps(_format_ocsf(event))
     else:
         line = json.dumps(event)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+
+
+def _dispatch_splunk_hec(cfg: Dict[str, Any], event: Dict[str, Any]) -> None:
+    """Splunk HTTP Event Collector. Wraps the OCSF finding in the HEC envelope
+    and authenticates with a token. Config: url, token, [sourcetype], [index]."""
+    import urllib.request
+
+    url = cfg.get("url")
+    token = cfg.get("token")
+    if not url or not token:
+        return
+    envelope: Dict[str, Any] = {"event": _format_ocsf(event), "sourcetype": cfg.get("sourcetype", "prismor:warden:ocsf")}
+    if cfg.get("index"):
+        envelope["index"] = cfg["index"]
+    data = json.dumps(envelope).encode("utf-8")
+    headers = {"Authorization": f"Splunk {token}", "Content-Type": "application/json"}
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_seconds", 3))) as resp:
+        resp.read(16)
+
+
+def _dispatch_datadog(cfg: Dict[str, Any], event: Dict[str, Any]) -> None:
+    """Datadog Logs intake. Sends the OCSF finding with a DD-API-KEY header.
+    Config: api_key, [site] (default datadoghq.com), [service]."""
+    import urllib.request
+
+    api_key = cfg.get("api_key")
+    if not api_key:
+        return
+    site = cfg.get("site", "datadoghq.com")
+    url = cfg.get("url") or f"https://http-intake.logs.{site}/api/v2/logs"
+    payload = {
+        "ddsource": "prismor-warden",
+        "service": cfg.get("service", "warden"),
+        "ddtags": f"severity:{str(event.get('severity', '')).lower()},category:{event.get('category', '')}",
+        "message": json.dumps(_format_ocsf(event)),
+    }
+    data = json.dumps([payload]).encode("utf-8")
+    headers = {"DD-API-KEY": str(api_key), "Content-Type": "application/json"}
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_seconds", 3))) as resp:
+        resp.read(16)
 
 
 def _format_cef(event: Dict[str, Any]) -> str:
@@ -165,6 +216,57 @@ def _format_cef(event: Dict[str, Any]) -> str:
     return f"{header}|{ext_str}"
 
 
+# OCSF severity_id: 0 Unknown, 1 Informational, 2 Low, 3 Medium, 4 High,
+# 5 Critical, 6 Fatal. Map Warden's four levels onto Low..Critical.
+_OCSF_SEVERITY = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2}
+
+
+def _format_ocsf(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a Warden finding event to an OCSF Detection Finding (class_uid 2004).
+
+    OCSF (Open Cybersecurity Schema Framework) is the schema-standard format
+    SIEMs such as Splunk, Datadog and Amazon Security Lake ingest natively, so
+    findings land as structured detections rather than opaque blobs. Returns a
+    dict (callers JSON-encode it). Activity is "Create" (1); type_uid is
+    class_uid * 100 + activity_id = 200401.
+    """
+    ts = event.get("@timestamp")
+    sev_name = str(event.get("severity", "LOW")).upper()
+    return {
+        "activity_id": 1,
+        "category_uid": 2,            # Findings
+        "class_uid": 2004,            # Detection Finding
+        "type_uid": 200401,
+        "severity_id": _OCSF_SEVERITY.get(sev_name, 2),
+        "severity": sev_name.capitalize(),
+        "status_id": 1,               # New
+        "time": ts,
+        "message": event.get("title") or event.get("evidence") or "Warden finding",
+        "metadata": {
+            "product": {"name": "Warden", "vendor_name": "Prismor", "version": "1.1.0"},
+            "version": "1.1.0",       # OCSF schema version
+            "log_name": "prismor-warden",
+        },
+        "finding_info": {
+            "title": event.get("title") or event.get("rule_id") or "finding",
+            "uid": event.get("finding_id"),
+            "types": [event.get("category")] if event.get("category") else [],
+        },
+        "evidences": [{"data": event.get("evidence")}] if event.get("evidence") else [],
+        "observables": [
+            {"name": "device.hostname", "type": "Hostname", "value": event.get("hostname")},
+        ],
+        # Warden-specific fields under the OCSF "unmapped" escape hatch.
+        "unmapped": {
+            "rule_id": event.get("rule_id"),
+            "category": event.get("category"),
+            "action": event.get("action"),
+            "session_id": event.get("session_id"),
+            "subject": event.get("subject"),
+        },
+    }
+
+
 def _dispatch_prismor(
     cfg: Dict[str, Any],
     findings: List[Dict[str, Any]],
@@ -175,7 +277,7 @@ def _dispatch_prismor(
     to prismor-web using the enrolled device key.
 
     No-op (silent) when the machine is not enrolled — the sink can be left on
-    in default policy without effect until `immunity enroll` runs.
+    in default policy without effect until `prismor enroll` runs.
     """
     import urllib.request
     import urllib.error
@@ -289,7 +391,7 @@ def upload_telemetry(
             _identity.mark_revoked(f"telemetry upload rejected ({exc.code})")
             sys.stderr.write(
                 "[warden] control plane rejected this device's key "
-                f"({exc.code}) — telemetry paused. Re-enroll with: immunity enroll <token>\n"
+                f"({exc.code}) — telemetry paused. Re-enroll with: prismor enroll <token>\n"
             )
             return
         _spool.append(batch)
@@ -303,6 +405,8 @@ _DISPATCHERS = {
     "webhook": _dispatch_webhook,
     "syslog": _dispatch_syslog,
     "file": _dispatch_file,
+    "splunk": _dispatch_splunk_hec,
+    "datadog": _dispatch_datadog,
 }
 
 

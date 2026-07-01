@@ -21,8 +21,8 @@ upstream API request. Pasted secrets are intercepted automatically.
 Two layers — install both, they're complementary:
 
 ```bash
-immunity cloak install                                  # prevention: cloak secrets at the tool boundary
-immunity install-hooks --agent claude --mode enforce    # enforcement: block direct reads of the vault
+prismor cloak install                                  # prevention: cloak secrets at the tool boundary
+prismor install-hooks --agent claude --mode enforce    # enforcement: block direct reads of the vault
 ```
 
 Cloak alone keeps secrets out of context. The enforce-mode monitor is what stops
@@ -43,10 +43,10 @@ You mostly do nothing. The flow is automatic:
 Register a secret deliberately (value read from stdin, never argv):
 
 ```bash
-immunity cloak add stripe_key                 # reference anywhere as @@SECRET:stripe_key@@
-immunity cloak add aws_prod --from-file ~/.keys/aws
-immunity cloak list                           # placeholder names only — never values
-immunity cloak status
+prismor cloak add stripe_key                 # reference anywhere as @@SECRET:stripe_key@@
+prismor cloak add aws_prod --from-file ~/.keys/aws
+prismor cloak list                           # placeholder names only — never values
+prismor cloak status
 ```
 
 ### Custom detection patterns
@@ -55,9 +55,9 @@ Built-in patterns cover Stripe, GitHub, AWS, Google, Slack, GitLab, and JWTs.
 Add your org's token formats:
 
 ```bash
-immunity cloak pattern add 'mycorp_[0-9a-f]{32}'
-immunity cloak pattern list
-immunity cloak pattern remove 'mycorp_[0-9a-f]{32}'
+prismor cloak pattern add 'mycorp_[0-9a-f]{32}'
+prismor cloak pattern list
+prismor cloak pattern remove 'mycorp_[0-9a-f]{32}'
 ```
 
 Patterns are POSIX regex, validated on add, and apply to both the paste guard and
@@ -106,16 +106,16 @@ credentials, then lets you redact or delete them. Redacted values are saved to a
 AES-256 encrypted vault so you can restore them if needed.
 
 ```bash
-immunity sweep                     # dry run — shows what's exposed, no changes
-immunity sweep --redact            # redact in place, save originals to vault
-immunity sweep --clean             # delete files containing secrets (vault backup first)
-immunity sweep --restore --all     # restore all secrets from vault
-immunity sweep --restore --file <path>  # restore one file
-immunity sweep --show-vault        # inspect vault contents (requires passphrase)
-immunity sweep --purge             # redact with no vault backup (no recovery)
+prismor sweep                     # dry run — shows what's exposed, no changes
+prismor sweep --redact            # redact in place, save originals to vault
+prismor sweep --clean             # delete files containing secrets (vault backup first)
+prismor sweep --restore --all     # restore all secrets from vault
+prismor sweep --restore --file <path>  # restore one file
+prismor sweep --show-vault        # inspect vault contents (requires passphrase)
+prismor sweep --purge             # redact with no vault backup (no recovery)
 ```
 
-Run `immunity sweep` dry first; if something looks like a false positive, check
+Run `prismor sweep` dry first; if something looks like a false positive, check
 the cloak pattern list before reaching for `--purge`.
 
 ---

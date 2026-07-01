@@ -89,7 +89,7 @@ in a shell command or tool call, reference it as `@@SECRET:name@@`. The Warden
 decloak hook substitutes the real value at execution time and scrubs it back out
 of the captured output before it reaches this context. Never echo, print, log,
 or narrate real secret values — use the placeholder form in all code, commands,
-and prose. Use `immunity cloak list` to see registered placeholder names.
+and prose. Use `prismor cloak list` to see registered placeholder names.
 """
 
 
@@ -123,7 +123,7 @@ def install(
             catches raw secrets the model emits directly (not via a
             placeholder) and denies the call after vaulting the value.
         enable_sweep_on_stop: Wire the Stop-hook dry-run sweep. Off by
-            default because it runs ``immunity sweep`` against ``~/.claude``
+            default because it runs ``prismor sweep`` against ``~/.claude``
             on every session end, which is noisy for quick sessions.
 
     Returns:
@@ -186,7 +186,7 @@ def install(
         installed.append("Stop (sweep)")
 
     # Also seed the secrets-dir env var so the scripts pick up overrides
-    # set through ``immunity cloak`` rather than the default location.
+    # set through ``prismor cloak`` rather than the default location.
     env = dict(config.get("env", {}))
     env["PRISMOR_SECRETS_DIR"] = str(sdir)
 

@@ -3,7 +3,7 @@
 actions, and deduplicated references.
 
 MAINTAINER TOOL — NOT for end users. Re-writing the feed invalidates the
-Ed25519 signature and breaks `immunity audit`. Run this only in CI where
+Ed25519 signature and breaks `prismor audit`. Run this only in CI where
 PRISMOR_SIGNING_PRIVATE_KEY is available so the feed is re-signed in the
 same step.
 
@@ -13,7 +13,7 @@ Behaviour:
   - Changes applied in CI       → feed is re-signed automatically via
                                   pipeline/sign_feed.sh.
   - Changes applied locally     → warn loudly that the signature is now
-                                  stale; `immunity audit` will fail until the
+                                  stale; `prismor audit` will fail until the
                                   user re-clones or a signed feed is pulled.
 """
 
@@ -141,7 +141,7 @@ def main():
     else:
         print(
             "\nWARNING: feed content changed but was NOT re-signed.\n"
-            "         `immunity audit` will report a signature mismatch until a\n"
+            "         `prismor audit` will report a signature mismatch until a\n"
             "         freshly signed feed is pulled (set PRISMOR_SIGNING_PRIVATE_KEY\n"
             "         and re-run, or restore the original feed with `git checkout`).",
             file=sys.stderr,

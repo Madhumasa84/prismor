@@ -64,7 +64,7 @@ if [ -f "$SETUP_PY_FALLBACK" ] && command -v python3 &>/dev/null; then
 fi
 
 # ── Step 1: Ensure Prismor is cloned locally ────────────────────────────
-if [ -d "$PRISMOR_DIR" ] && [ -f "$PRISMOR_DIR/immunity" ]; then
+if [ -d "$PRISMOR_DIR" ] && [ -f "$PRISMOR_DIR/prismor" ]; then
     info "Prismor found at $PRISMOR_DIR"
     info "Pulling latest..."
     git -C "$PRISMOR_DIR" pull --quiet 2>/dev/null || warn "Could not pull (offline?). Using existing version."
@@ -126,7 +126,7 @@ HOOKS_OK=0
 for agent in "${AGENTS_FOUND[@]}"; do
     # Capture stderr so we can surface the real cause on failure instead of
     # silently swallowing it (a failed install must never look like success).
-    if hook_err="$(python3 "$PRISMOR_DIR/immunity" install-hooks \
+    if hook_err="$(python3 "$PRISMOR_DIR/prismor" install-hooks \
         --agent "$agent" \
         --workspace "$TARGET_DIR" \
         --scope project \
@@ -147,10 +147,10 @@ if [ "$CLOAK" = "1" ]; then
                 warn "PRISMOR_CLOAK=1 set but jq is missing — install with 'brew install jq' and re-run"
             else
                 info "Installing cloaking hooks (secret prevention layer)..."
-                python3 "$PRISMOR_DIR/immunity" cloak install \
+                python3 "$PRISMOR_DIR/prismor" cloak install \
                     --workspace "$TARGET_DIR" \
                     --scope project >/dev/null 2>&1 && \
-                    ok "Cloaking hooks installed. Register secrets with: immunity cloak add <name>" || \
+                    ok "Cloaking hooks installed. Register secrets with: prismor cloak add <name>" || \
                     warn "Could not install cloaking hooks"
             fi
             ;;
@@ -160,13 +160,13 @@ if [ "$CLOAK" = "1" ]; then
     esac
 fi
 
-# ── Step 4c: Put `immunity` on PATH ─────────────────────────────────────
-# The git-clone path (this script) otherwise leaves no `immunity` command,
+# ── Step 4c: Put `prismor` on PATH ─────────────────────────────────────
+# The git-clone path (this script) otherwise leaves no `prismor` command,
 # so the cloak/status commands the README points at would be "not found".
-WRAPPER="$PRISMOR_DIR/scripts/immunity"
+WRAPPER="$PRISMOR_DIR/scripts/prismor"
 if [ -f "$WRAPPER" ]; then
     if [ -w /usr/local/bin ]; then
-        ln -sf "$WRAPPER" /usr/local/bin/immunity \
+        ln -sf "$WRAPPER" /usr/local/bin/prismor \
             && ok "Linked 'immunity' to /usr/local/bin" \
             || warn "Could not link 'immunity' to /usr/local/bin"
     else
@@ -178,12 +178,12 @@ if [ -f "$WRAPPER" ]; then
         if grep -qF "$PRISMOR_DIR/scripts" "$RC" 2>/dev/null; then
             ok "'immunity' already on PATH via $(basename "$RC")"
         else
-            printf '\n# Prismor immunity\nexport PATH="%s/scripts:$PATH"\n' "$PRISMOR_DIR" >> "$RC"
+            printf '\n# Prismor\nexport PATH="%s/scripts:$PATH"\n' "$PRISMOR_DIR" >> "$RC"
             ok "Added 'immunity' to PATH in $(basename "$RC") — run: source $RC"
         fi
     fi
 else
-    warn "immunity wrapper not found at $WRAPPER — CLI not added to PATH"
+    warn "prismor wrapper not found at $WRAPPER — CLI not added to PATH"
 fi
 
 # ── Step 5: Verify feed ─────────────────────────────────────────────────
@@ -229,7 +229,7 @@ if [ -t 0 ]; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
         info "Analyzing your current session..."
-        python3 "$PRISMOR_DIR/immunity" analyze 2>/dev/null || \
+        python3 "$PRISMOR_DIR/prismor" analyze 2>/dev/null || \
             warn "Session analysis failed"
     fi
     echo ""

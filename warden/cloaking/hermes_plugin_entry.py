@@ -9,7 +9,7 @@ implementation:
    point ``prismor-warden-cloak`` points to
    ``warden.cloaking.hermes_plugin_entry:register``.
 
-2. **Filesystem plugin** — when installed via ``immunity cloak install
+2. **Filesystem plugin** — when installed via ``prismor cloak install
    --agent hermes``, the plugin directory is copied to
    ``~/.hermes/plugins/prismor-warden-cloak/`` with its own
    ``plugin.yaml`` + ``__init__.py``. The ``__init__.py`` re-exports the
@@ -226,7 +226,7 @@ def on_pre_tool_call(
                     "action": "block",
                     "message": (
                         f"Secret @@SECRET:{name}@@ is not registered. "
-                        f"Register it with: immunity cloak add {name}"
+                        f"Register it with: prismor cloak add {name}"
                     ),
                 }
 

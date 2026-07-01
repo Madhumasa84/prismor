@@ -98,7 +98,7 @@ def clear_identity() -> bool:
 # When the control plane answers 401/403 to a device-key call, the key has
 # been revoked (or the device deleted). We record that locally so the runtime
 # (a) stops hammering the control plane with doomed requests, and (b) can
-# surface "this device was revoked" in `immunity enroll-status`. Local
+# surface "this device was revoked" in `prismor enroll-status`. Local
 # protection is unaffected — the last good policy keeps applying.
 
 # After this many seconds we try the control plane again, in case the device

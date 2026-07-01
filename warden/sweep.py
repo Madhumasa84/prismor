@@ -484,7 +484,7 @@ def redact(findings: list[dict], passphrase: str, purge: bool = False) -> int:
         print(f"  {_c(short_vault, _DIM)}")
         print()
         print(f"  {_c('Reminder:', _YELLOW)} You need your vault passphrase to restore these secrets.")
-        print(f"  Run {_c('immunity sweep --restore', _BOLD)} to recover them later.")
+        print(f"  Run {_c('prismor sweep --restore', _BOLD)} to recover them later.")
 
     if purge and redacted_count > 0:
         print()

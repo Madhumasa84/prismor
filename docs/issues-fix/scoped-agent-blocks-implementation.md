@@ -19,10 +19,10 @@ Every subsequent tool call in the session checks against that cached file. If th
 ## Observed Behavior
 
 ```
-PreToolUse:Bash hook error: Prismor Immunity Agent blocked this action:
+PreToolUse:Bash hook error: Prismor blocked this action:
   [HIGH] [scoped agent] Tool 'Bash' is explicitly denied for this session
 
-PreToolUse:Edit hook error: Prismor Immunity Agent blocked this action:
+PreToolUse:Edit hook error: Prismor blocked this action:
   [HIGH] [scoped agent] Tool 'Edit' is explicitly denied for this session
 ```
 

@@ -91,7 +91,7 @@ That's it. The rest of the defaults are sensible out of the box. Reinstall hooks
 if already running:
 
 ```bash
-immunity install-hooks --agent all --mode enforce
+prismor install-hooks --agent all --mode enforce
 ```
 
 ### Step 3 — Verify it is active
@@ -171,7 +171,7 @@ Exit codes: `0` = allow, `1` = warn, `2` = block.
 ```bash
 # Install Warden hooks for Claude Code with semantic guard enabled
 cd /your/project
-immunity install-hooks --agent claude --mode enforce
+prismor install-hooks --agent claude --mode enforce
 
 # Enable semantic guard in the project policy
 mkdir -p .prismor-warden
@@ -188,7 +188,7 @@ The same policy file is shared across all agents. Enable once and it applies to
 every agent Warden monitors in that workspace.
 
 ```bash
-immunity install-hooks --agent cursor --mode enforce   # or windsurf, codex, all
+prismor install-hooks --agent cursor --mode enforce   # or windsurf, codex, all
 ```
 
 ## Per-Project Override Examples

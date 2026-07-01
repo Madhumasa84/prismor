@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prismor Sweep — convenience wrapper for `immunity sweep`
+# Prismor Sweep — convenience wrapper for `prismor sweep`
 #
 # Usage:
 #   bash sweep.sh                 # dry-run: scan and report only
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMMUNITY_CLI="$(dirname "$SCRIPT_DIR")/immunity"
 
 if [[ ! -f "$IMMUNITY_CLI" ]]; then
-  echo "[sweep] Error: immunity entry point not found at $IMMUNITY_CLI" >&2
+  echo "[sweep] Error: prismor entry point not found at $IMMUNITY_CLI" >&2
   exit 1
 fi
 

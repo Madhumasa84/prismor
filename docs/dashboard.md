@@ -32,11 +32,11 @@ across every project you've protected.
 
 ---
 
-## Terminal: `immunity status` and `immunity status --all`
+## Terminal: `prismor status` and `prismor status --all`
 
 ```bash
-immunity status        # THIS workspace: hooks, mode, cloak, latest session, next step
-immunity status --all  # ALL workspaces: risk, findings, mode, last activity
+prismor status        # THIS workspace: hooks, mode, cloak, latest session, next step
+prismor status --all  # ALL workspaces: risk, findings, mode, last activity
 ```
 
 - **`status`** is the per-workspace health check — run it first every session. It
@@ -48,16 +48,16 @@ immunity status --all  # ALL workspaces: risk, findings, mode, last activity
 
 ---
 
-## Web: `immunity dashboard`
+## Web: `prismor dashboard`
 
 ```bash
-immunity dashboard                   # opens http://127.0.0.1:7070 in your browser
-immunity dashboard --port 8080       # custom port
-immunity dashboard --host 127.0.0.1  # bind host (keep it local)
-immunity dashboard --no-open         # headless: start the server, don't open a browser
+prismor dashboard                   # opens http://127.0.0.1:7070 in your browser
+prismor dashboard --port 8080       # custom port
+prismor dashboard --host 127.0.0.1  # bind host (keep it local)
+prismor dashboard --no-open         # headless: start the server, don't open a browser
 ```
 
-> `immunity serve` is the deprecated alias of `immunity dashboard --no-open`.
+> `prismor serve` is the deprecated alias of `prismor dashboard --no-open`.
 
 Serves a self-contained HTML dashboard plus a small JSON API over the registered
 workspace databases. The only external resource is a Chart.js CDN link loaded by
@@ -81,17 +81,17 @@ are registered yet — install hooks in a project first to collect data.
 ## Drilling in: `sessions` and `session`
 
 ```bash
-immunity sessions                          # recent sessions, this workspace
-immunity sessions --findings-only          # only flagged runs, sorted by risk
-immunity sessions --findings-only --global # flagged runs across all workspaces
-immunity sessions --limit 50 --json        # machine-readable
+prismor sessions                          # recent sessions, this workspace
+prismor sessions --findings-only          # only flagged runs, sorted by risk
+prismor sessions --findings-only --global # flagged runs across all workspaces
+prismor sessions --limit 50 --json        # machine-readable
 
-immunity session <id>                      # full trace + findings for one session
-immunity session <id> --json
+prismor session <id>                      # full trace + findings for one session
+prismor session <id> --json
 ```
 
 Every shell command, file read/write, web fetch, and user prompt is captured, so
-`immunity session <id>` is your forensic timeline for a specific incident — what
+`prismor session <id>` is your forensic timeline for a specific incident — what
 the agent did, in order, and which findings fired.
 
 ---
@@ -101,10 +101,10 @@ the agent did, in order, and which findings fired.
 For CI gating or replaying an old trace against a newer policy:
 
 ```bash
-immunity analyze                       # analyze the most recent session
-immunity analyze --input session.jsonl # analyze a specific JSONL log
-immunity analyze --sarif               # SARIF 2.1.0 for GitHub Code Scanning
-immunity ingest --input session.jsonl  # analyze AND store in the DB
+prismor analyze                       # analyze the most recent session
+prismor analyze --input session.jsonl # analyze a specific JSONL log
+prismor analyze --sarif               # SARIF 2.1.0 for GitHub Code Scanning
+prismor ingest --input session.jsonl  # analyze AND store in the DB
 ```
 
 `--sarif` output drops straight into GitHub Code Scanning or the VS Code SARIF

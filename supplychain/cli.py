@@ -1,18 +1,18 @@
-"""Supply-chain enforcement layer for the unified ``immunity`` CLI.
+"""Supply-chain enforcement layer for the unified ``prismor`` CLI.
 
 Reachable as:
 
-  immunity supplychain npm install express
-  immunity supplychain pip install requests numpy
-  immunity supplychain pnpm add lodash
-  immunity supplychain uv add fastapi
-  immunity supplychain cargo add serde
-  immunity supplychain go get github.com/some/pkg
-  immunity supplychain harden [--dry-run] [PATH]
+  prismor supplychain npm install express
+  prismor supplychain pip install requests numpy
+  prismor supplychain pnpm add lodash
+  prismor supplychain uv add fastapi
+  prismor supplychain cargo add serde
+  prismor supplychain go get github.com/some/pkg
+  prismor supplychain harden [--dry-run] [PATH]
 
 Any sub-argv that isn't a recognised package install is passed through
 transparently — so the same wrapper can be used as a shell alias for
-``npm`` / ``pip`` / etc. via ``alias npm='immunity supplychain npm'``.
+``npm`` / ``pip`` / etc. via ``alias npm='prismor supplychain npm'``.
 """
 from __future__ import annotations
 
@@ -202,7 +202,7 @@ def _exec(argv: List[str]) -> None:
         if "externally-managed-environment" in probe.stderr:
             packages = " ".join(a for a in argv[2:] if not a.startswith("-"))
             sys.stderr.write(
-                f"immunity: pip is externally managed on this system (PEP 668).\n"
+                f"prismor: pip is externally managed on this system (PEP 668).\n"
                 f"  Use a virtual environment:\n"
                 f"    python3 -m venv .venv && .venv/bin/pip install {packages}\n"
                 f"  Or install system-wide (not recommended):\n"
@@ -229,7 +229,7 @@ def _record_to_store(event, verdicts, recommendations=None) -> None:
         }
         write_supply_chain_event(
             workspace=workspace,
-            session_id=f"immunity-{uuid.uuid4().hex[:16]}",
+            session_id=f"prismor-{uuid.uuid4().hex[:16]}",
             ts=datetime.now(timezone.utc).isoformat(),
             ecosystem=event.ecosystem,
             install_cmd=" ".join(sys.argv[1:]),
@@ -243,7 +243,7 @@ def _record_to_store(event, verdicts, recommendations=None) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def run_supply(argv: Optional[List[str]] = None) -> None:
-    """Entry point for the ``immunity supplychain`` subcommand."""
+    """Entry point for the ``prismor supplychain`` subcommand."""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -337,7 +337,7 @@ def _cmd_harden(args: List[str]) -> None:
     root = Path(path_args[0]).resolve() if path_args else Path.cwd()
 
     if not root.is_dir():
-        sys.stderr.write(f"immunity supplychain harden: not a directory: {root}\n")
+        sys.stderr.write(f"prismor supplychain harden: not a directory: {root}\n")
         sys.exit(2)
 
     results = harden_project(root, dry_run=dry_run)
@@ -345,23 +345,23 @@ def _cmd_harden(args: List[str]) -> None:
 
 
 def _usage() -> None:
-    print(f"  {_c('immunity supplychain', _BOLD)} — AI-native supply chain enforcement")
+    print(f"  {_c('prismor supplychain', _BOLD)} — AI-native supply chain enforcement")
     print()
-    print("  Usage: immunity supplychain <package-manager> <args...>")
-    print("         immunity supplychain harden [--dry-run] [PATH]")
+    print("  Usage: prismor supplychain <package-manager> <args...>")
+    print("         prismor supplychain harden [--dry-run] [PATH]")
     print()
     print("  Install interception:")
-    print("    immunity supplychain npm install express")
-    print("    immunity supplychain pip install requests numpy")
-    print("    immunity supplychain pnpm add lodash")
-    print("    immunity supplychain uv add fastapi")
-    print("    immunity supplychain cargo add serde")
-    print("    immunity supplychain go get github.com/some/pkg")
+    print("    prismor supplychain npm install express")
+    print("    prismor supplychain pip install requests numpy")
+    print("    prismor supplychain pnpm add lodash")
+    print("    prismor supplychain uv add fastapi")
+    print("    prismor supplychain cargo add serde")
+    print("    prismor supplychain go get github.com/some/pkg")
     print()
     print("  Config hardening:")
-    print("    immunity supplychain harden              Apply hardening to project configs")
-    print("    immunity supplychain harden --dry-run    Preview without writing")
-    print("    immunity supplychain harden <path>       Harden a specific project root")
+    print("    prismor supplychain harden              Apply hardening to project configs")
+    print("    prismor supplychain harden --dry-run    Preview without writing")
+    print("    prismor supplychain harden <path>       Harden a specific project root")
     print()
     print("  Non-install commands pass through transparently.")
     print()

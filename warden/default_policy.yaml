@@ -52,7 +52,7 @@ settings:
   # Score every package-manager install command (npm/pnpm/yarn/bun/pip/uv/
   # cargo/go) against OSV.dev (CVEs + malicious-package IOCs), typosquat
   # heuristics, and registry metadata (age, maintainer count, install
-  # scripts) — the same checks `immunity supplychain npm install <pkg>`
+  # scripts) — the same checks `prismor supplychain npm install <pkg>`
   # runs explicitly, applied automatically to every shell command an agent
   # runs so a plain `npm install lodash@4.17.4` gets checked too, not just
   # installs routed through that wrapper. Also scans manifest edits
@@ -780,7 +780,7 @@ rules:
 
   # ── HIGH: Claude Code session transcript access ───────────────────
   # file_read is excluded so immunity's own session-read commands
-  # (immunity sessions, immunity learn) don't self-trigger. Shell and
+  # (prismor sessions, prismor learn) don't self-trigger. Shell and
   # file_write events still fire — catches piping transcripts out or
   # overwriting them.
   - id: claude-session-transcript-access

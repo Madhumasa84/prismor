@@ -5,9 +5,9 @@ Discovers MCP server and skill configurations across supported agents
 events from each entry, and evaluates them through the PolicyEngine.
 
 Usage (from CLI):
-    immunity scan                   # scan all discovered configs
-    immunity scan --agent claude    # only Claude Code configs
-    immunity scan --json            # machine-readable output
+    prismor scan                   # scan all discovered configs
+    prismor scan --agent claude    # only Claude Code configs
+    prismor scan --json            # machine-readable output
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Prismor Warden — interactive setup wizard, usable from both pip install and git clone.
 
 This module contains the full 4-step TUI wizard and the non-interactive install path.
-It is the backing implementation for ``immunity setup``.
+It is the backing implementation for ``prismor setup``.
 
 The original wizard in ``scripts/setup.py`` continues to work for git-clone users
 running ``bash ~/.prismor/scripts/init.sh``; this module is its pip-installable twin.
@@ -255,7 +255,7 @@ def _header_lines(step: Optional[int] = None, total: Optional[int] = None, label
     tw = _term_width()
     out = [
         "",
-        f"  {_w('PRISMOR IMMUNITY AGENT', BOLD, CYAN)}  {_w('· ' + _VERSION, DIM)}",
+        f"  {_w('PRISMOR', BOLD, CYAN)}  {_w('· ' + _VERSION, DIM)}",
     ]
     if step and label:
         out.append(f"  {_w(f'Step {step}/{total}', DIM)}  {_w(label, BOLD)}")
@@ -486,17 +486,17 @@ def _spinner_run(label: str, fn) -> None:
 
 
 _AGENT_CONTEXT_BLOCK = (
-    "\n## Security (Prismor Immunity Agent)\n\n"
-    "This workspace is protected by Prismor Immunity Agent. "
-    "Run `immunity status` at the start of every session.\n\n"
+    "\n## Security (Prismor)\n\n"
+    "This workspace is protected by Prismor. "
+    "Run `prismor status` at the start of every session.\n\n"
     "Key commands:\n\n"
     "| Action | Command |\n"
     "|---|---|\n"
-    "| Check protection state | `immunity status` |\n"
-    "| Install packages safely | `immunity supplychain <pm> install <pkg>` |\n"
-    "| Pre-check a risky command | `immunity check \"<cmd>\"` |\n"
-    "| Scan for dep vulnerabilities | `immunity deps` |\n"
-    "| Harden package config | `immunity supplychain harden` |\n\n"
+    "| Check protection state | `prismor status` |\n"
+    "| Install packages safely | `prismor supplychain <pm> install <pkg>` |\n"
+    "| Pre-check a risky command | `prismor check \"<cmd>\"` |\n"
+    "| Scan for dep vulnerabilities | `prismor deps` |\n"
+    "| Harden package config | `prismor supplychain harden` |\n\n"
     "Full decision tree: `.claude/skills/immunity-agent/SKILL.md`\n"
 )
 
@@ -561,7 +561,7 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     sys.stdout.write(ALT_OFF)
     sys.stdout.write("\033[H\033[J" + HIDE)
     sys.stdout.flush()
-    print(_w("  Installing Prismor Immunity Agent...\n", BOLD, CYAN))
+    print(_w("  Installing Prismor...\n", BOLD, CYAN))
 
     target = target.resolve()
 
@@ -648,14 +648,14 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     def _update_claude():
         md = target / "CLAUDE.md"
         block = (
-            "\n## Security (Prismor Immunity Agent)\n\n"
-            "This workspace is protected by Prismor Immunity Agent — runtime "
+            "\n## Security (Prismor)\n\n"
+            "This workspace is protected by Prismor — runtime "
             "security hooks that monitor tool calls in real time (destructive "
             "commands, secret leaks, supply-chain risk, prompt injection).\n\n"
-            "Run `immunity status` at the start of a session to check protection "
+            "Run `prismor status` at the start of a session to check protection "
             "state. The full decision tree lives in "
             "`.claude/skills/immunity-agent/SKILL.md`.\n\n"
-            "For more info: https://github.com/PrismorSec/immunity-agent\n"
+            "For more info: https://github.com/PrismorSec/prismor\n"
         )
         if md.exists():
             content = md.read_text()
@@ -715,7 +715,7 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     home = str(Path.home())
     print()
     print(_w("  ╭───────────────────────────────────────────╮", DIM))
-    print(_w("  │", DIM) + _w("  Prismor Immunity Agent installed successfully!    ", GRN, BOLD) + _w("│", DIM))
+    print(_w("  │", DIM) + _w("  Prismor installed successfully!    ", GRN, BOLD) + _w("│", DIM))
     print(_w("  ╰───────────────────────────────────────────╯", DIM))
     print()
 
@@ -725,16 +725,16 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     _info("Hooks",      f"installed  (mode: {mode})")
     if "claude" in agents:
         _info("Skill",  str(target / ".claude" / "skills" / "immunity-agent").replace(home, "~"))
-    _info("Docs",       "https://github.com/PrismorSec/immunity-agent")
+    _info("Docs",       "https://github.com/PrismorSec/prismor")
     _info("Config",     str(target / "CLAUDE.md").replace(home, "~"))
-    _info("Command",    "immunity status  ·  immunity sessions  ·  immunity check \"<cmd>\"")
+    _info("Command",    "prismor status  ·  prismor sessions  ·  prismor check \"<cmd>\"")
     print()
     print(_w("  Quick commands:", GRN))
-    print(f"    immunity status                       {_w('this workspace health check', DIM)}")
-    print(f"    immunity status --all                 {_w('overview across all workspaces', DIM)}")
-    print(f"    immunity sessions --findings-only     {_w('all flagged sessions by risk', DIM)}")
-    print(f"    immunity check \"rm -rf /\"              {_w('pre-check a command', DIM)}")
-    print(f"    immunity sweep                        {_w('scan AI tool configs for leaked secrets', DIM)}")
+    print(f"    prismor status                       {_w('this workspace health check', DIM)}")
+    print(f"    prismor status --all                 {_w('overview across all workspaces', DIM)}")
+    print(f"    prismor sessions --findings-only     {_w('all flagged sessions by risk', DIM)}")
+    print(f"    prismor check \"rm -rf /\"              {_w('pre-check a command', DIM)}")
+    print(f"    prismor sweep                        {_w('scan AI tool configs for leaked secrets', DIM)}")
     print()
     sys.stdout.write(SHOW)
     sys.stdout.flush()

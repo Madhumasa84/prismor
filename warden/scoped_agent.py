@@ -66,6 +66,7 @@ Rules:
 - If the task involves reading/editing code, allow Read/Edit/Write for relevant paths
 - If the task does NOT mention network, web, fetch, install, or download, set deny_network: true
 - Always include Read in allowed_tools (agents need to read files to orient)
+- If the task prompt contains @@SECRET:name@@ placeholders, always include Bash in allowed_tools — the runtime cloaking layer requires shell execution (curl/bash) to substitute and scrub secrets at execution time
 """
 
 
@@ -129,11 +130,31 @@ def synthesize_scoped_rules(
         rules["allowed_tools"] = [t for t in rules["allowed_tools"] if t in available_set]
         rules["deny_tools"] = [t for t in rules["deny_tools"] if t in available_set]
 
-        return rules
+        return _apply_cloak_invariant(rules, goal)
 
     except Exception as exc:
         sys.stderr.write(f"[warden] scoped agent API error: {exc} — using static fallback.\n")
         return _static_fallback_rules(goal, available_tools)
+
+
+def _apply_cloak_invariant(rules: Dict[str, Any], goal: str) -> Dict[str, Any]:
+    """Enforce the cloaking invariant deterministically, regardless of how the
+    rules were produced (LLM or static heuristic).
+
+    A prompt that references a cloaked secret (``@@SECRET:name@@``) can only be
+    fulfilled by a shell tool call — the decloak hook substitutes the real value
+    into a Bash command at execution time. So Bash MUST be allowed and network
+    MUST be permitted whenever the goal carries a placeholder. The LLM path is
+    advisory and sometimes drops Bash; this code-level guard makes the
+    invariant non-negotiable so the secret-cloaking flow never self-blocks.
+    """
+    if "@@secret:" not in goal.lower():
+        return rules
+    allowed = [t for t in rules.get("allowed_tools", []) if t != "Bash"]
+    rules["allowed_tools"] = allowed + ["Bash"]
+    rules["deny_tools"] = [t for t in rules.get("deny_tools", []) if t != "Bash"]
+    rules["deny_network"] = False
+    return rules
 
 
 def _static_fallback_rules(goal: str, available_tools: List[str]) -> Dict[str, Any]:
@@ -162,12 +183,14 @@ def _static_fallback_rules(goal: str, available_tools: List[str]) -> Dict[str, A
 
     deny = [t for t in available_tools if t not in allowed]
 
-    return {
+    rules = {
         "allowed_tools": sorted(allowed),
         "allowed_paths": ["**"],  # broad by default in static mode
         "deny_tools": deny,
         "deny_network": deny_network,
     }
+    # Cloaked-secret placeholders always require Bash (decloak runs in shell).
+    return _apply_cloak_invariant(rules, goal)
 
 
 # ── Sidecar persistence ───────────────────────────────────────────────────
@@ -239,6 +262,9 @@ def check_scoped_rules(
 
     Returns a finding dict if the event is blocked, None if allowed.
     """
+    if rules.get("paused", False):
+        return None  # prismor paused by human operator via dashboard
+
     event_type = event.get("type", "")
     tool_name = _resolve_tool_name(event)
 

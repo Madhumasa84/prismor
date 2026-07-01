@@ -56,4 +56,4 @@ else
 fi
 
 echo ""
-echo "Run 'immunity setup' to get started."
+echo "Run 'prismor setup' to get started."

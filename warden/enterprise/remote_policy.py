@@ -161,7 +161,7 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
             _identity.mark_revoked(f"policy version check rejected ({exc.code})")
             sys.stderr.write(
                 "[warden] control plane rejected this device's key "
-                f"({exc.code}) — keeping last good policy. Re-enroll with: immunity enroll <token>\n"
+                f"({exc.code}) — keeping last good policy. Re-enroll with: prismor enroll <token>\n"
             )
         return False
     except (urllib.error.URLError, ValueError, OSError):
@@ -358,7 +358,7 @@ def fetch(ttl: float = DEFAULT_TTL_SECONDS, force: bool = False) -> bool:
             _identity.mark_revoked(f"policy fetch rejected ({exc.code})")
             sys.stderr.write(
                 "[warden] control plane rejected this device's key "
-                f"({exc.code}) — keeping last good policy. Re-enroll with: immunity enroll <token>\n"
+                f"({exc.code}) — keeping last good policy. Re-enroll with: prismor enroll <token>\n"
             )
         else:
             sys.stderr.write(f"[warden] remote policy fetch failed: {exc}\n")
@@ -392,7 +392,7 @@ def fetch(ttl: float = DEFAULT_TTL_SECONDS, force: bool = False) -> bool:
             sys.stderr.write(
                 "[warden] NOTICE: your org admin enabled FULL telemetry capture — "
                 "flagged events now include scrubbed content (not just metadata). "
-                "Check `immunity enroll-status` for details.\n"
+                "Check `prismor enroll-status` for details.\n"
             )
         else:
             sys.stderr.write(

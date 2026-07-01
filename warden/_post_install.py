@@ -36,9 +36,9 @@ def maybe_show() -> None:
         f"\n"
         f"  {BOLD}{CYAN}immunity-agent{RST} installed\n"
         f"\n"
-        f"  Run {BOLD}immunity setup{RST} to configure runtime hooks for your AI coding agent.\n"
+        f"  Run {BOLD}prismor setup{RST} to configure runtime hooks for your AI coding agent.\n"
         f"\n"
-        f"  {DIM}Interactive TUI:{RST}   immunity setup\n"
-        f"  {DIM}Scripted / CI:{RST}     immunity setup --non-interactive --mode observe\n"
-        f"  {DIM}All options:{RST}       immunity setup --help\n"
+        f"  {DIM}Interactive TUI:{RST}   prismor setup\n"
+        f"  {DIM}Scripted / CI:{RST}     prismor setup --non-interactive --mode observe\n"
+        f"  {DIM}All options:{RST}       prismor setup --help\n"
     )

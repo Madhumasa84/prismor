@@ -1,6 +1,6 @@
 # Layered Policy & Admin-Granted Exemptions
 
-*How Immunity policy applies at global / project / repo levels, and how a
+*How Prismor policy applies at global / project / repo levels, and how a
 developer gets an exemption for a specific repo without being able to silently
 bypass security — with full telemetry visibility. Companion to the
 scoped-agent design ([docs/scoped-agent.md](scoped-agent.md)) and
@@ -38,7 +38,7 @@ core block categories) survives every layer — an exemption literally cannot le
 
 ## The request → grant flow
 
-1. **Dev requests** (in the repo): `immunity exempt request --reason "deploy.sh uses curl|sh"`.
+1. **Dev requests** (in the repo): `prismor exempt request --reason "deploy.sh uses curl|sh"`.
    Posts `{device key, repo remote, reason}` → a **pending** `PolicyExemption`.
    The dev can only *ask* — they cannot relax anything locally.
 2. **Admin reviews** in the console (Admin → Policy → Exemptions): edits the
