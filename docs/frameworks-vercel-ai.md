@@ -189,7 +189,7 @@ redeploying TypeScript code.
 ## Other languages
 
 The eval-server speaks plain JSON over HTTP, so any language can act as an
-adapter. Validated on st3ve with real OpenAI function calls:
+adapter. Validated on a Linux host with real OpenAI function calls:
 
 | Language | HTTP client | Lines of adapter code |
 |---|---|---|
