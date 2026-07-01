@@ -7,8 +7,7 @@ premium feed) is proprietary. This document describes the *open client side* of
 that link: how an enrolled Warden install talks to the control plane, what it
 trusts, and exactly what does and does not leave the machine.
 
-See also: [OPEN_CORE.md](../OPEN_CORE.md) (the boundary) ·
-[COMPARISON.md](../COMPARISON.md) · [docs/sdk-integration.md](sdk-integration.md)
+See also: [docs/sdk-integration.md](sdk-integration.md)
 (the runtime, not the SDK, is what connects).
 
 Everything here is **opt-in**. On a plain install, `warden/enterprise/*` is the
@@ -140,5 +139,4 @@ spool, heartbeat, and scope map.
   opt-in — any commands, paths, URLs, prompts, or file contents; and cannot
   silently disable the local security floor.
 
-> Known follow-ups for this path (auth on the enroll UX, subject handling) are
-> tracked in [GAPS.md](../GAPS.md).
+> Known follow-ups for this path: auth on the enroll UX, and subject handling.
