@@ -186,7 +186,7 @@ def warden_guard(
         # In observe mode the call is always allowed to proceed — the finding is
         # still recorded and shipped to telemetry, so it is log-only monitoring.
         # Only enforce mode turns a denial into a hard block.
-        if not decision.allow and mode == "enforce":
+        if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             if raise_on_block:
                 raise WardenBlocked(decision.reason or "blocked", decision)
             return decision
@@ -265,7 +265,7 @@ def _guard_function_tool(
             session_id=sid,
             subject=resolve_subject(subject),
         )
-        if not decision.allow and mode == "enforce":
+        if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             reason = decision.reason or "policy violation"
             if raise_on_block:
                 raise WardenBlocked(reason, decision)

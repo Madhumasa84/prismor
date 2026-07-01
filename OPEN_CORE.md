@@ -13,7 +13,7 @@ paid tier adds the fleet/governance layer that doesn't exist in single-player.
 | Component | Path | License |
 |---|---|---|
 | Warden runtime — interception, policy engine, enforcement | `warden/` | Apache-2.0 (root `LICENSE`) |
-| All 61 default detection rules + the rule format | `warden/default_policy.yaml`, `warden/policy_schema.json` | Apache-2.0 |
+| All 63 default detection rules + the rule format | `warden/default_policy.yaml`, `warden/policy_schema.json` | Apache-2.0 |
 | Coding-agent hooks (Claude Code, Cursor, Codex, …) | `warden/cloaking/hooks/` | Apache-2.0 |
 | Cloak — local secret substitution | `warden/cloaking/` | Apache-2.0 |
 | Per-machine IAM / scoped access | `warden/iam.py`, `warden/scoped_agent.py` | Apache-2.0 |

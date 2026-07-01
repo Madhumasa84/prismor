@@ -161,7 +161,7 @@ def guard_controller(
             subject=resolved,
         )
 
-        if not decision.allow and mode == "enforce":
+        if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             reason = decision.reason or "policy violation"
             if raise_on_block:
                 raise WardenBlocked(reason, decision)

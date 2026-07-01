@@ -21,6 +21,24 @@
 
 ---
 
+## Open-core
+
+Prismor is open-core: **single-player is free and open; multiplayer (org
+governance) is paid.** Nothing is stripped from the open runtime to push an
+upgrade.
+
+- **Free & open (this repo):** the full Warden runtime, all 63 detection rules,
+  Cloak secret prevention, supply-chain blocking, per-machine IAM, local
+  OCSF/syslog telemetry, and the 5 framework adapters — `pip install
+  immunity-agent`, runs locally, no account.
+- **Enterprise (`prismor-web`):** signed remote-policy distribution, fleet
+  observability, SSO/SCIM, org-scale audit/SIEM, and the curated signed threat
+  feed. Priced per seat, never per call.
+
+Read more: [OPEN_CORE.md](OPEN_CORE.md) · [COMPARISON.md](COMPARISON.md) ·
+[Connecting to the platform](docs/connecting-to-the-platform.md) ·
+[Framework SDKs](docs/sdk-integration.md)
+
 ## The Problem
 
 AI coding agents execute shell commands, read and write files, access credentials, and call external APIs. They do this autonomously, often across many steps, with limited checkpoints.
