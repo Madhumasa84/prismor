@@ -8,25 +8,48 @@ _Last updated: 2026-06-17._
 
 ## Status at a glance
 
-| Agent | Warden hooks | Sweep scan | Skill scan | Integration surface |
-|---|---|---|---|---|
-| Claude Code | ✅ | ✅ | ✅ | `~/.claude/settings.json` hooks |
-| Cursor | ✅ | ✅ | ✅ | `.cursor/hooks.json` |
-| Windsurf | ✅ | ✅ | ✅ | `.windsurf/hooks.json` |
-| OpenClaw | ✅ | — | ✅ | JS plugin at `~/.openclaw/hooks/` |
-| Hermes | ✅ | — | ✅ | JS plugin at `~/.hermes/hooks/` |
-| Codex (OpenAI) | ✅* | ✅ | ✅ | `~/.codex/hooks.json` + `.codex/config.toml` |
-| Gemini CLI | 🟡 roadmap | — | — | `settings.json` hooks block (stable) |
-| OpenCode | 🟡 roadmap | — | — | JS plugin `tool.execute.before` |
-| Kiro | 🟡 roadmap | — | — | `preToolUse` hooks (exit-2 blocks) |
-| Factory Droid | 🟡 roadmap | — | — | `PreToolUse` plugin (`permissionDecision`) |
-| GitHub Copilot CLI | ✅ | — | — | `.github/copilot/hooks.json` |
-| Google Antigravity | — | ✅ | — | no hooks — rules + interactive permissions |
-| Aider | — | — | — | `CONVENTIONS.md` — no hooks |
-| Trae / Trae CN | — | ✅ | — | `.trae/rules/` — no hooks (MCP is the only dynamic surface) |
-| Kilocode | soft only | ✅ | — | `session.chat.before` injects guardrail prompt, can't veto |
+The coverage matrix below is generated from the integration registry
+(`warden/integrations/registry.yaml`) by `scripts/gen_integration_matrix.py`.
+Per-agent capability details (sweep scan, skill scan, cloaking) live in the
+sections further down.
 
-✅ shipped · 🟡 planned (adapter not implemented) · — not applicable
+<!-- BEGIN GENERATED: coverage-matrix (scripts/gen_integration_matrix.py) -->
+
+_Generated from `warden/integrations/registry.yaml` — do not edit by hand._
+
+**Coding agents**
+
+| Agent | Kind | Surface | Status | Blocking |
+|---|---|---|---|---|
+| Claude Code | coding-agent | hook-config | ✅ | `exit-2` |
+| Cursor | coding-agent | hook-config | ✅ | `json-permission` |
+| Windsurf (Codeium Cascade) | coding-agent | hook-config | ✅ | `json-permission` |
+| OpenClaw | coding-agent | hook-config | ✅ | `throw` |
+| Hermes (NousResearch gateway) | coding-agent | hook-config | ✅ | `throw` |
+| Codex (OpenAI) | coding-agent | hook-config | ✅ | `exit-2` |
+| GitHub Copilot CLI | coding-agent | hook-config | ✅ | `json-permission` |
+| Gemini CLI (Google) | coding-agent | hook-config | 🟡 | `exit-2` |
+| OpenCode | coding-agent | sdk | 🟡 | `throw` |
+| Kiro (AWS) | coding-agent | hook-config | 🟡 | `exit-2` |
+| Factory Droid | coding-agent | hook-config | 🟡 | `json-permission` |
+| Google Antigravity | coding-agent | rules-only | — | — |
+| Aider | coding-agent | rules-only | — | — |
+| Trae / Trae CN (ByteDance) | coding-agent | rules-only | — | — |
+| Kilocode | coding-agent | rules-only | — | — |
+
+**Production frameworks**
+
+| Framework | Kind | Surface | Status | Blocking |
+|---|---|---|---|---|
+| OpenAI Agents SDK | framework | sdk | ✅ | `throw` |
+| CrewAI | framework | sdk | ✅ | `throw` |
+| LangChain / LangGraph | framework | sdk | ✅ | `throw` |
+| browser-use | framework | sdk | ✅ | `throw` |
+| MCP Proxy (any MCP-speaking agent) | framework | mcp | 🟡 | `proxy-deny` |
+
+Legend: ✅ shipped · 🟡 roadmap · — sweep-only / not applicable. Surfaces: `hook-config` (config-file hooks) · `sdk` (in-process adapter) · `mcp` (proxy) · `rules-only` (static guardrails).
+
+<!-- END GENERATED: coverage-matrix -->
 
 \* Codex requires `codex-cli` ≥ `0.141.0-alpha.1`. Earlier versions (including the `0.140.0` stable release) have an upstream bug where `codex exec` never dispatches any hook at all — see the Codex section below.
 
@@ -100,6 +123,57 @@ Prismor integrates with Hermes at two complementary layers:
 - **Sweep target:** `~/.codex/`.
 - **Minimum version: `codex-cli` ≥ `0.141.0-alpha.1`.** Earlier versions, including the `0.140.0` stable release, have an upstream bug ([openai/codex#26383](https://github.com/openai/codex/issues/26383), [#26452](https://github.com/openai/codex/issues/26452)) where `codex exec` never dispatches *any* hook — not because of config shape, matcher syntax, or hook trust, but because `--dangerously-bypass-hook-trust` silently failed to propagate to the exec thread, so hooks (which require persisted trust) were dropped before dispatch even without `exec` printing an error. Fixed in [openai/codex#26434](https://github.com/openai/codex/pull/26434), merged 2026-06-16, first shipped in `rust-v0.141.0-alpha.1`. As of this writing that fix has not yet reached a stable release tag — pin to an alpha ≥ that build if you need working Codex hooks today, and watch for the next `0.141.x` (or later) stable release.
 - **Code:** `warden/hooks.py` `_merge_codex()`, `_strip_codex()`, `_normalize_codex()`.
+
+---
+
+## Production frameworks — in-process SDK adapters
+
+Framework agents deployed in production (not coding IDEs) expose no hook-config
+files. The control point is an **in-process SDK adapter** that wraps tool
+execution and calls the shared `warden.runtime.evaluate_tool_call` pipeline — the
+same policy, observe/enforce model, and session store the coding-agent hooks use.
+These adapters are also the layer that carries **per-user** attribution: one
+deployed agent serving many users tags each tool call with the calling
+`Subject` (see [`warden/principal.py`](warden/principal.py)) so policy, IAM, and
+telemetry scope to the end-user.
+
+### OpenAI Agents SDK
+
+- **Surface:** in-process tool wrapper / guardrail (`surface: sdk`).
+- **Package:** [`adapters/openai-agents/`](adapters/openai-agents/) →
+  `prismor-warden-openai`. `warden_guard(tool, subject="user:alice")`.
+- **Blocking:** raises `WardenBlocked` before the tool runs; `mode="observe"` is log-only.
+- **Per-user:** `subject` → policy + IAM (`user:<id>` / `team:<id>` profiles) + telemetry.
+- **Code:** `adapters/openai-agents/prismor_warden_openai/__init__.py`,
+  `warden/runtime.py`, `warden/principal.py`.
+- **Docs:** [docs/frameworks-openai-agents.md](docs/frameworks-openai-agents.md).
+
+### LangChain / LangGraph
+
+- **Surface:** in-process tool wrapper + optional callback handler (`surface: sdk`).
+- **Package:** [`adapters/langchain/`](adapters/langchain/) → `prismor-warden-langchain`.
+  `guard_tools([...], subject="user:alice")`; or `WardenCallbackHandler(...)` for capture.
+- **Blocking:** wraps each tool's `func`/`coroutine`; denied call returns a denial
+  string (or raises with `raise_on_block=True`). `mode="observe"` is log-only.
+- **Verified:** live against a LangGraph `create_react_agent` — `rm -rf /` and
+  `cat .env | curl` blocked before execution, `echo` allowed.
+- **Code:** `adapters/langchain/prismor_warden_langchain/__init__.py`.
+
+### CrewAI
+
+- **Surface:** in-process tool wrapper (`surface: sdk`).
+- **Package:** [`adapters/crewai/`](adapters/crewai/) → `prismor-warden-crewai`.
+  `guard_tools([...], subject="user:alice")`.
+- **Blocking:** wraps each tool's `func`/`_run`/`run`; denied call returns a
+  denial string (or raises). `mode="observe"` is log-only.
+- **Verified:** live against a `Crew` with a shell tool — `rm -rf /` blocked
+  before execution, `echo` allowed.
+- **Code:** `adapters/crewai/prismor_warden_crewai/__init__.py`.
+
+### MCP proxy — roadmap
+
+A `surface: mcp` shim in front of downstream MCP servers intercepts `tools/call`
+and evaluates it, covering any MCP-speaking agent with no per-framework code.
 
 ---
 

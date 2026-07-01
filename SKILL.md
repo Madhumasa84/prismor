@@ -252,6 +252,7 @@ Capability deep dives:
 - [`docs/network-isolation.md`](./docs/network-isolation.md): egress allowlists, raw-IP detection
 - [`docs/canary.md`](./docs/canary.md): honeytoken tripwires for recon detection
 - [`docs/iam.md`](./docs/iam.md): named agent identities and permission profiles
+- [`docs/frameworks-openai-agents.md`](./docs/frameworks-openai-agents.md): per-user tool-call control for production framework agents (OpenAI Agents SDK; CrewAI/LangChain on the same pattern)
 - [`docs/scoped-agent.md`](./docs/scoped-agent.md): session-scoped, task-derived rules
 - [`docs/learning.md`](./docs/learning.md): mining session history for new rules
 - [`docs/dashboard.md`](./docs/dashboard.md): terminal + web dashboards and session forensics

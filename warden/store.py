@@ -164,8 +164,8 @@ def read_session_events(workspace: Path, session_id: str) -> List[Dict[str, Any]
 # the constraint via CREATE TABLE.
 _EXPECTED_COLUMNS: Dict[str, List[tuple]] = {
     "sessions": [
-        ("session_id", "TEXT"), ("agent", "TEXT"), ("source", "TEXT"),
-        ("workspace_path", "TEXT"), ("repo_url", "TEXT"),
+        ("session_id", "TEXT"), ("agent", "TEXT"), ("agent_name", "TEXT"),
+        ("source", "TEXT"), ("workspace_path", "TEXT"), ("repo_url", "TEXT"),
         ("started_at", "TEXT"), ("updated_at", "TEXT"),
         ("risk_score", "INTEGER"), ("findings_count", "INTEGER"),
         ("summary_json", "TEXT"),
@@ -219,6 +219,7 @@ def initialize_database(workspace: Path) -> Path:
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 agent TEXT,
+                agent_name TEXT,
                 source TEXT,
                 workspace_path TEXT,
                 repo_url TEXT,
@@ -297,6 +298,7 @@ def save_session_snapshot(
     repo_url: Optional[str],
     events: List[Dict[str, Any]],
     analysis: Dict[str, Any],
+    agent_name: str = "",
 ) -> Path:
     db_path = initialize_database(workspace)
     # Defense in depth: ensure no raw secret value reaches the SQLite store,
@@ -312,12 +314,14 @@ def save_session_snapshot(
         cursor.execute(
             """
             INSERT OR REPLACE INTO sessions (
-                session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                session_id, agent, agent_name, source, workspace_path, repo_url,
+                started_at, updated_at, risk_score, findings_count, summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
                 agent,
+                agent_name or agent,
                 source,
                 str(workspace),
                 repo_url,
@@ -1083,13 +1087,16 @@ def get_sessions_page(
         if conn is None:
             continue
         try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+            name_col = "agent_name" if "agent_name" in cols else "agent"
             for row in conn.execute(
-                "SELECT session_id, agent, source, risk_score, findings_count, "
+                f"SELECT session_id, agent, {name_col} as agent_name, source, risk_score, findings_count, "
                 "started_at, updated_at, workspace_path FROM sessions LIMIT 5000"
             ):
                 rows.append({
                     "sessionId": row["session_id"] or "",
                     "agent": row["agent"] or "unknown",
+                    "agentName": row["agent_name"] or row["agent"] or "unknown",
                     "source": row["source"] or "agent",
                     "riskScore": row["risk_score"] or 0,
                     "findingsCount": row["findings_count"] or 0,
@@ -1663,6 +1670,64 @@ def get_supply_chain_stats(hours: int = 24) -> Dict[str, Any]:
     }
 
 
+def get_agents_overview() -> List[Dict[str, Any]]:
+    """Return per-agent-name stats: framework, last_seen, total_calls, blocked_calls.
+
+    Groups across all registered workspace DBs. Falls back gracefully when
+    the agent_name column doesn't exist yet (pre-migration DBs).
+    """
+    from collections import Counter
+    workspaces = list_registered_workspaces()
+
+    # agent_name → {framework, last_seen, total_calls, blocked_calls}
+    acc: Dict[str, Dict[str, Any]] = {}
+
+    for ws in workspaces:
+        db_path = get_db_path(ws)
+        conn = _connect_ro(db_path)
+        if conn is None:
+            continue
+        try:
+            # Check column exists (pre-migration DBs won't have it)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            name_col = "agent_name" if "agent_name" in cols else "agent"
+
+            for row in conn.execute(
+                f"""
+                SELECT
+                    COALESCE({name_col}, agent, 'unknown') as agent_name,
+                    agent as framework,
+                    MAX(updated_at) as last_seen,
+                    COUNT(*) as total_calls,
+                    SUM(CASE WHEN findings_count > 0 THEN 1 ELSE 0 END) as blocked_calls
+                FROM sessions
+                WHERE {name_col} IS NOT NULL AND {name_col} != ''
+                GROUP BY {name_col}
+                """
+            ):
+                name = row["agent_name"] or "unknown"
+                existing = acc.get(name)
+                if existing is None:
+                    acc[name] = {
+                        "name": name,
+                        "framework": row["framework"] or "",
+                        "last_seen": row["last_seen"] or "",
+                        "total_calls": row["total_calls"] or 0,
+                        "blocked_calls": row["blocked_calls"] or 0,
+                    }
+                else:
+                    existing["total_calls"] += row["total_calls"] or 0
+                    existing["blocked_calls"] += row["blocked_calls"] or 0
+                    if (row["last_seen"] or "") > existing["last_seen"]:
+                        existing["last_seen"] = row["last_seen"] or ""
+                    if row["framework"] and not existing["framework"]:
+                        existing["framework"] = row["framework"]
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+    return sorted(acc.values(), key=lambda x: x["last_seen"] or "", reverse=True)
 # ── Policy management helpers ─────────────────────────────────────────────────
 
 def _global_policy_path() -> Path:

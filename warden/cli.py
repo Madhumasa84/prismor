@@ -78,6 +78,7 @@ except ImportError:
 from warden.feed import load_feed, match_advisories
 from warden.hooks import install_hooks, legacy_should_block, normalize_payload, should_block, uninstall_hooks
 from warden.policy_engine import PolicyEngine, validate_policy
+from warden.runtime import evaluate_tool_call
 from warden.store import (
     append_session_event,
     get_db_path,
@@ -149,6 +150,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not ws_value:
         ws_value = os.environ.get("PRISMOR_WARDEN_WORKSPACE")
     workspace = Path(ws_value).resolve() if ws_value else infer_default_workspace(Path.cwd())
+
+    # ── eval-server: HTTP evaluation endpoint for non-Python adapters ────
+    if args.command == "eval-server":
+        from warden.eval_server import run_eval_server
+        from pathlib import Path as _Path
+        run_eval_server(
+            host=args.host,
+            port=args.port,
+            workspace=_Path(args.workspace) if getattr(args, "workspace", None) else None,
+        )
+        return
 
     # ── dashboard / serve: local web dashboard (HTTP server) ─────────────
     # `dashboard` starts the server and opens a browser tab. `serve` is the
@@ -845,7 +857,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         payload = json.loads(sys.stdin.read() or "{}")
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
-        append_session_event(workspace, normalized["sessionId"], event)
 
         # ── Scoped agent: synthesize rules on first prompt ────────────
         if event.get("agent_event") == "UserPromptSubmit":
@@ -870,135 +881,24 @@ def main(argv: Optional[List[str]] = None) -> None:
             except Exception as _scoped_exc:
                 sys.stderr.write(f"[warden] scoped agent error: {_scoped_exc}\n")
 
-        events = read_session_events(workspace, normalized["sessionId"])
-        result = analyze_events(events, repo_root=repo_root, workspace=workspace, session_id=normalized["sessionId"])
-        save_session_snapshot(
+        # Run the shared evaluation pipeline: persists the event, analyzes the
+        # session, evaluates policy + scoped rules + IAM + cross-call learning,
+        # forwards telemetry, records the heartbeat, and returns the per-rule
+        # enforce decision. The same entrypoint backs production SDK adapters and
+        # the MCP proxy, so every agent gets identical semantics. Subject is
+        # resolved inside (WARDEN_SUBJECT / device identity) — single-user installs
+        # are unchanged.
+        decision = evaluate_tool_call(
+            event=event,
             workspace=workspace,
-            session_id=normalized["sessionId"],
             agent=args.agent,
-            source="hook",
-            repo_url=None,
-            events=events,
-            analysis=result,
+            mode=args.mode,
+            session_id=normalized["sessionId"],
+            repo_root=repo_root,
         )
-        # Only evaluate the current event for real-time blocking decisions.
-        # Using all session findings would cause stale shell-event findings
-        # (e.g. from a previous agent run) to block unrelated UserPromptSubmit
-        # events, creating a false-positive loop.
-        from warden.policy_engine import PolicyEngine as _PolicyEngine
-        _current_engine = _PolicyEngine(workspace=workspace)
-        current_findings = _current_engine.evaluate(event, len(events) - 1, session_id=normalized["sessionId"])
-
-        # ── Scoped agent: enforce session-scoped rules ────────────────
-        try:
-            from warden.scoped_agent import load_scoped_rules as _load_sr, check_scoped_rules as _check_sr
-            _sr = _load_sr(workspace, normalized["sessionId"])
-            if _sr is not None:
-                _sr_finding = _check_sr(_sr, event, session_id=normalized["sessionId"])
-                if _sr_finding:
-                    current_findings.append(_sr_finding)
-        except Exception as _sr_exc:
-            sys.stderr.write(f"[warden] scoped enforcement error: {_sr_exc}\n")
-
-        # ── IAM: named agent identity enforcement ────────────────────
-        try:
-            from warden.iam import check_iam as _check_iam
-            _iam_finding = _check_iam(workspace=workspace, event=event, session_id=normalized["sessionId"])
-            if _iam_finding:
-                current_findings.append(_iam_finding)
-        except Exception as _iam_exc:
-            sys.stderr.write(f"[warden] IAM enforcement error: {_iam_exc}\n")
-
-        # ── Learning: evasion detection on passing shell events ───────
-        if not current_findings and event.get("type") == "shell":
-            try:
-                from warden.learning import detect_evasion as _detect_evasion
-                _evasion_findings = _detect_evasion(workspace, normalized["sessionId"], event, current_findings)
-                if _evasion_findings:
-                    current_findings.extend(_evasion_findings)
-            except Exception as _ev_exc:
-                sys.stderr.write(f"[warden] evasion detection error: {_ev_exc}\n")
-
-        # ── Learning: staged-execution / fetch-then-exec / exfil correlation ──
-        # Catches the cross-call bypass where a file is created in one tool call
-        # (download, redirect, Write) and executed/exfiltrated in another.
-        if not current_findings and event.get("type") == "shell":
-            try:
-                from warden.learning import detect_staged_execution as _detect_staged
-                _staged_findings = _detect_staged(workspace, normalized["sessionId"], event, current_findings)
-                if _staged_findings:
-                    current_findings.extend(_staged_findings)
-            except Exception as _staged_exc:
-                sys.stderr.write(f"[warden] staged-exec detection error: {_staged_exc}\n")
-
-        # Forward findings to configured telemetry sinks (webhook/syslog/file)
-        # BEFORE the blocking decision — so a SIEM sees every event, even
-        # the ones that get blocked. Dispatch is best-effort.
-        if _current_engine.outputs and current_findings:
-            try:
-                from warden.sinks import dispatch as _sink_dispatch
-                # Tag telemetry with the repo and the policy scope so the org
-                # dashboard SHOWS when a repo is running under a granted
-                # exemption (vs full org policy) — exempted repos stay visible.
-                _exm = getattr(_current_engine, "active_exemption", None)
-                _policy_scope = f"repo_exemption:{_exm.get('id')}" if isinstance(_exm, dict) and _exm.get("id") else "org"
-                # Only attach the repo identifier for org-MANAGED workspaces
-                # (audit #17): a personal/local-only repo must never have its
-                # remote leaked to the org, regardless of sink configuration.
-                # Mirrors the explicit gate on the heartbeat below.
-                _repo = None
-                if getattr(_current_engine, "workspace_managed", False):
-                    try:
-                        from warden.enterprise import workspace_scope as _ws
-                        _repo = _ws.detect_git_remote(workspace)
-                    except Exception:
-                        _repo = None
-                _sink_dispatch(
-                    current_findings,
-                    _current_engine.outputs,
-                    extra={
-                        "session_id": normalized["sessionId"],
-                        "agent": args.agent,
-                        "mode": args.mode,
-                        "workspace": str(workspace),
-                        "policy_scope": _policy_scope,
-                        "repo": _repo,
-                    },
-                    raw_event=event,
-                )
-            except Exception as _sink_exc:
-                sys.stderr.write(f"[warden] sink dispatch error: {_sink_exc}\n")
-
-        # Per-call inspected-volume heartbeat (enterprise observability): count
-        # this tool call; flush the accumulated count at most once per minute.
-        # Carries only a number — no command/path/content. Gated on workspace
-        # scope: personal/local-only workspaces report nothing to the org.
-        if getattr(_current_engine, "workspace_managed", False):
-            try:
-                from warden.enterprise import heartbeat as _heartbeat
-                _heartbeat.record_call(agent=args.agent, session_id=normalized["sessionId"])
-                _heartbeat.maybe_flush()
-            except Exception:
-                pass
-
-        # Enforcement is per-rule and policy-authoritative: should_block() returns
-        # a finding only when its effective mode is "enforce" (the rule's mode, or
-        # the policy's default_mode — both default to "observe"). This is honored
-        # regardless of how the hook was installed (--mode), so an admin flipping a
-        # rule to enforce in the control plane blocks even on observe-installed
-        # devices. A local `--mode observe` still acts as a dry-run kill-switch.
-        blocking = should_block(current_findings, event)
-        # Backward-compat enforce bridge: a policy that predates per-rule
-        # observe/enforce (sets block_categories but no default_mode/mode) keeps
-        # its original semantics — block its block_categories when installed with
-        # --mode enforce — so upgrading an existing install doesn't silently stop
-        # blocking. Any policy that adopts the per-rule model is unaffected.
-        if (
-            blocking is None
-            and args.mode == "enforce"
-            and getattr(_current_engine, "is_legacy_policy", False)
-        ):
-            blocking = legacy_should_block(current_findings, event, _current_engine.block_categories)
+        _current_engine = decision.engine
+        current_findings = decision.findings
+        blocking = decision.blocking
         force_observe = args.mode == "observe" and os.environ.get("PRISMOR_LOCAL_DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
         if blocking is not None and not force_observe:
             if args.agent == "copilot":
@@ -1248,6 +1148,63 @@ def main(argv: Optional[List[str]] = None) -> None:
                 raise SystemExit(2)
             else:
                 print(_color("ALLOW", _GREEN) + f"  agent '{agent_id}' may perform: {check_type} {check_value}")
+            return
+
+        return
+
+    # ── agents ─────────────────────────────────────────────────────────
+    if args.command == "agents":
+        from warden.agents import (
+            list_agents as _list_agents,
+            resolve_agent_control as _resolve_agent_ctl,
+            upsert_agent as _upsert_agent,
+            format_agent_table as _fmt_agent_table,
+        )
+        subcmd = getattr(args, "agents_subcommand", None)
+
+        if subcmd == "list" or subcmd is None:
+            agents = _list_agents(workspace)
+            print(f"\n  {_color('PRISMOR IMMUNITY', _BOLD)}  named agents\n")
+            print(_fmt_agent_table(agents))
+            print()
+            return
+
+        if subcmd == "show":
+            agent_name_arg = getattr(args, "agent_name", None)
+            if not agent_name_arg:
+                sys.stderr.write("error: agent name required for 'agents show'\n")
+                raise SystemExit(1)
+            ctl = _resolve_agent_ctl(agent_name_arg, workspace)
+            print(f"\n  name:        {ctl.name}")
+            print(f"  framework:   {ctl.framework or '(unknown)'}")
+            print(f"  enabled:     {'yes' if ctl.enabled else _color('NO (paused)', _RED)}")
+            print(f"  mode:        {ctl.mode or '(global)'}")
+            print(f"  iam_profile: {ctl.iam_profile or '(none)'}")
+            print(f"  last_seen:   {ctl.last_seen or '(never)'}")
+            print()
+            return
+
+        if subcmd == "set":
+            agent_name_arg = getattr(args, "agent_name", None)
+            if not agent_name_arg:
+                sys.stderr.write("error: agent name required for 'agents set'\n")
+                raise SystemExit(1)
+            fields = {}
+            if getattr(args, "enabled", False):
+                fields["enabled"] = True
+            if getattr(args, "disabled", False):
+                fields["enabled"] = False
+            mode_val = getattr(args, "mode", None)
+            if mode_val:
+                fields["mode"] = mode_val
+            iam_val = getattr(args, "iam_profile", None)
+            if iam_val is not None:
+                fields["iam_profile"] = iam_val or None
+            if not fields:
+                sys.stderr.write("error: specify at least one of --enabled, --disabled, --mode, --iam-profile\n")
+                raise SystemExit(1)
+            ctl = _upsert_agent(agent_name_arg, workspace, **fields)
+            print(f"Updated '{agent_name_arg}': enabled={ctl.enabled}, mode={ctl.mode or '(global)'}, iam_profile={ctl.iam_profile or '(none)'}")
             return
 
         return
@@ -1836,6 +1793,15 @@ def build_parser() -> argparse.ArgumentParser:
             help="Don't open a browser tab (headless server only)",
         )
 
+    # ── eval-server: HTTP evaluation endpoint ───────────────────────────
+    _ep = subparsers.add_parser(
+        "eval-server",
+        help="Start an HTTP evaluation server for non-Python adapters (Vercel AI SDK, etc.)",
+    )
+    _ep.add_argument("--port", type=int, default=7071, help="Port to listen on (default: 7071)")
+    _ep.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    _ep.add_argument("--workspace", default=None, help="Workspace path for policy/IAM (default: cwd)")
+
     # ── check ──────────────────────────────────────────────────────────
     check_parser = subparsers.add_parser("check", help="Quick pre-check a command or file path")
     check_parser.add_argument("value", nargs="?", help="The command string or file path to check (omit with --from-log)")
@@ -2159,6 +2125,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Event type to test (default: command)",
     )
     iam_check.add_argument("--value", required=True, help="Value to test (command, path, or URL)")
+
+    # ── agents ───────────────────────────────────────────────────────────
+    agents_parser = subparsers.add_parser(
+        "agents",
+        help="Manage named agent instances (kill-switch, mode, IAM profile)",
+    )
+    agents_subs = agents_parser.add_subparsers(dest="agents_subcommand")
+
+    agents_subs.add_parser("list", help="List all known named agents")
+
+    agents_show = agents_subs.add_parser("show", help="Show control settings for a named agent")
+    agents_show.add_argument("agent_name", help="Agent instance name")
+
+    agents_set = agents_subs.add_parser("set", help="Update control settings for a named agent")
+    agents_set.add_argument("agent_name", help="Agent instance name")
+    agents_set_group = agents_set.add_mutually_exclusive_group()
+    agents_set_group.add_argument("--enabled", action="store_true", dest="enabled", default=False,
+                                  help="Enable the agent (lift kill-switch)")
+    agents_set_group.add_argument("--disabled", action="store_true", dest="disabled", default=False,
+                                  help="Disable the agent (kill-switch: all tool calls blocked)")
+    agents_set.add_argument(
+        "--mode",
+        choices=["observe", "enforce"],
+        default=None,
+        help="Per-agent mode override (observe or enforce)",
+    )
+    agents_set.add_argument(
+        "--iam-profile",
+        dest="iam_profile",
+        default=None,
+        metavar="PROFILE",
+        help="Bind agent to an IAM profile (empty string to clear)",
+    )
 
     # ── setup ────────────────────────────────────────────────────────────
     setup_parser = subparsers.add_parser(

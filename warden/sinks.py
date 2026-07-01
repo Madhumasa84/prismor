@@ -319,10 +319,19 @@ def _dispatch_prismor(
     if not records:
         return
 
+    # SECURITY: the prismor sink carries the device-key bearer credential
+    # (see upload_telemetry's Authorization header). A local policy.yaml could
+    # otherwise set `url:` and redirect that credential to an attacker endpoint,
+    # so the destination is PINNED to the enrolled identity's api_base and a
+    # local `url` override is ignored for type:prismor.
+    if cfg.get("url"):
+        sys.stderr.write(
+            "[warden] ignoring `url` on the prismor sink — telemetry is pinned to the "
+            "enrolled control plane (a local url override cannot redirect the device key)\n"
+        )
     upload_telemetry(
         records,
         timeout=float(cfg.get("timeout_seconds", 6)),
-        url_base=cfg.get("url"),
     )
 
 

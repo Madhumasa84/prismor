@@ -170,15 +170,45 @@ _DENY_ALL_PROFILE: Dict[str, Any] = {
 _WARNED_UNKNOWN_IDS: set = set()
 
 
+def _resolve_identity(
+    config: Dict[str, Any], subject: Optional[Any]
+) -> Optional[str]:
+    """Pick the IAM identity to enforce.
+
+    ``WARDEN_AGENT_ID`` (the named-agent path) wins for backward compatibility.
+    Otherwise, when an end-user subject is supplied, fall back to a per-user
+    profile keyed ``user:<user_id>`` then a per-team profile ``team:<team_id>``
+    — so a production framework agent can carry distinct IAM profiles per user
+    without setting an env var per request. Returns ``None`` when nothing matches.
+    """
+    agent_id = get_active_agent_id()
+    if agent_id:
+        return agent_id
+    if subject is None:
+        return None
+    agents = config.get("agents", {})
+    user_id = getattr(subject, "user_id", None)
+    team_id = getattr(subject, "team_id", None)
+    if user_id and f"user:{user_id}" in agents:
+        return f"user:{user_id}"
+    if team_id and f"team:{team_id}" in agents:
+        return f"team:{team_id}"
+    return None
+
+
 def check_iam(
     workspace: Optional[Path] = None,
     event: Optional[Dict[str, Any]] = None,
     session_id: str = "",
+    subject: Optional[Any] = None,
+    agent_profile: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Check an event against the IAM profile for the active agent identity.
+    """Check an event against the IAM profile for the active identity.
 
     Returns a finding dict if the event is blocked, None if allowed or if no
-    WARDEN_AGENT_ID is set.
+    identity applies. The identity is the named ``WARDEN_AGENT_ID`` if set, else
+    a per-user / per-team profile selected from ``subject`` (see
+    :func:`_resolve_identity`).
 
     Trust boundary: the identity is selected by the ``WARDEN_AGENT_ID``
     environment variable, which is inherited by the very agent being
@@ -188,11 +218,17 @@ def check_iam(
     not a sandbox against an adversarial one — pair it with a deny-all base
     policy and OS-level isolation when the threat model requires it.
     """
-    agent_id = get_active_agent_id()
-    if not agent_id or event is None:
+    if event is None:
         return None
 
     config = load_iam_config(workspace)
+    agent_id = _resolve_identity(config, subject)
+    # Fall back to the per-agent IAM profile assigned in agents.yaml
+    if not agent_id and agent_profile:
+        agent_id = agent_profile
+    if not agent_id:
+        return None
+
     profile = resolve_agent_profile(agent_id, config)
 
     if profile is None:

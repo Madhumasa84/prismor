@@ -40,6 +40,7 @@ from warden.store import (
     get_findings_page,
     get_events_page,
     get_supply_chain_stats,
+    get_agents_overview,
     list_registered_workspaces,
     get_enrollment,
     read_policy_layer,
@@ -54,7 +55,7 @@ _DASHBOARD_HTML = Path(__file__).with_name("dashboard.html")
 
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
@@ -237,6 +238,40 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
             self._send_json(data)
             return
 
+        if path == "/api/agents":
+            try:
+                from warden.agents import list_agents, load_agents_config
+                from warden.iam import list_agent_ids, load_iam_config
+                from pathlib import Path as _Path
+                workspace = _Path.cwd()
+
+                # Merge store stats with registry config
+                store_stats = {a["name"]: a for a in get_agents_overview()}
+                registry = {a.name: a for a in list_agents(workspace)}
+
+                # Union of both — include agents seen in store but not configured yet
+                all_names = sorted(set(store_stats) | set(registry))
+                items = []
+                for name in all_names:
+                    stats = store_stats.get(name, {})
+                    ctrl = registry.get(name)
+                    items.append({
+                        "name": name,
+                        "framework": (ctrl.framework if ctrl else "") or stats.get("framework", ""),
+                        "enabled": ctrl.enabled if ctrl else True,
+                        "mode": ctrl.mode if ctrl else None,
+                        "iam_profile": ctrl.iam_profile if ctrl else None,
+                        "last_seen": stats.get("last_seen") or (ctrl.last_seen if ctrl else None),
+                        "total_calls": stats.get("total_calls", 0),
+                        "blocked_calls": stats.get("blocked_calls", 0),
+                    })
+
+                iam_profiles = list_agent_ids(load_iam_config(workspace))
+                self._send_json({"agents": items, "iam_profiles": iam_profiles})
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
+            return
+
         # /api/sessions/<id>/control
         parts = path.split("/")
         if len(parts) == 5 and parts[1] == "api" and parts[2] == "sessions" and parts[4] == "control":
@@ -254,6 +289,46 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
 
         self._send_json({"error": "not found"}, status=404)
 
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        # POST /api/agents/<name> — update per-agent control settings
+        if path.startswith("/api/agents/"):
+            agent_name = path[len("/api/agents/"):]
+            if not agent_name:
+                self._send_json({"error": "agent name required"}, status=400)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except Exception as exc:
+                self._send_json({"error": f"invalid JSON: {exc}"}, status=400)
+                return
+            try:
+                from warden.agents import upsert_agent
+                # Resolve the workspace from the server's perspective
+                from pathlib import Path as _Path
+                workspace = _Path.cwd()
+                # Map camelCase keys the UI sends to snake_case
+                fields = {}
+                if "enabled" in body:
+                    fields["enabled"] = bool(body["enabled"])
+                if "mode" in body:
+                    fields["mode"] = body["mode"] or None
+                if "iam_profile" in body or "iamProfile" in body:
+                    fields["iam_profile"] = body.get("iamProfile") or body.get("iam_profile") or None
+                control = upsert_agent(agent_name, workspace, **fields)
+                self._send_json({
+                    "name": control.name,
+                    "framework": control.framework,
+                    "enabled": control.enabled,
+                    "mode": control.mode,
+                    "iam_profile": control.iam_profile,
+                    "last_seen": control.last_seen,
+                })
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
     def do_PUT(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")

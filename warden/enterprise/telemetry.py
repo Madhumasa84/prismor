@@ -170,6 +170,10 @@ def build_record(
         "ts": _now_iso(),
         "session_id": extra.get("session_id"),
         "device_id": extra.get("device_id"),
+        # End-user principal the tool call is attributed to ({source,user_id,
+        # team_id,org_id} — non-secret identifiers). Enables per-user views in the
+        # org dashboard for production framework agents serving many users.
+        "subject": extra.get("subject"),
         "agent": extra.get("agent"),
         "mode": extra.get("mode"),
         "type": event_type,
