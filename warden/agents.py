@@ -23,7 +23,10 @@ is responsible for using ``control.iam_profile`` when calling check_iam.
 """
 from __future__ import annotations
 
+import json
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +38,10 @@ _PROJECT_AGENTS_FILE = "agents.yaml"
 # Module-level seen-set: throttle record_seen() so we only update the YAML
 # once per agent per process, not on every tool call.
 _SEEN_THIS_PROCESS: set = set()
+
+# On-disk debounce for control-plane registration: 1000 short-lived processes
+# must not turn into 1000 POSTs per agent per day.
+_REGISTER_DEBOUNCE_SECONDS = 3600.0
 
 # (path+mtime) → parsed config
 _CONFIG_CACHE: Dict[Any, Dict[str, Any]] = {}
@@ -195,7 +202,13 @@ def upsert_agent(name: str, workspace: Path, **fields: Any) -> AgentControl:
 
 
 def record_seen(name: str, framework: str, workspace: Optional[Path]) -> None:
-    """Auto-register a discovered agent; best-effort, once per process per agent."""
+    """Auto-register a discovered agent; best-effort, once per process per agent.
+
+    Registers locally (project agents.yaml) and, for enrolled devices working
+    in an org-managed workspace, tells the control plane the instance exists —
+    so a deployed agent shows up in the org's fleet view even before it emits
+    its first finding.
+    """
     if not name or not workspace:
         return
     seen_key = (name, str(workspace))
@@ -210,6 +223,80 @@ def record_seen(name: str, framework: str, workspace: Optional[Path]) -> None:
         )
     except Exception as exc:
         sys.stderr.write(f"[warden/agents] record_seen error: {exc}\n")
+    try:
+        _register_remote(name, framework, workspace)
+    except Exception:
+        pass  # never let fleet bookkeeping affect the tool-call path
+
+
+def _register_debounce_path() -> Path:
+    from warden.enterprise import identity as _identity
+    return _identity.prismor_home() / "agent-register.json"
+
+
+def _register_remote(name: str, framework: str, workspace: Path) -> None:
+    """Best-effort fleet registration with the org control plane.
+
+    Guards (all must hold): device enrolled, no revoked-key backoff, workspace
+    org-managed (personal workspaces never report anything). Debounced on disk
+    per instance so short-lived processes don't hammer the endpoint; the POST
+    itself runs on a daemon thread so the hook hot path never waits on the
+    network. Failures are silent — the control plane's ingest-side upsert is
+    the safety net for anything missed here.
+    """
+    from warden.enterprise import identity as _identity
+    ident = _identity.load_identity()
+    if not ident or _identity.revoked_backoff_active():
+        return
+    from warden.enterprise import workspace_scope as _scope
+    if not _scope.is_managed(workspace):
+        return
+
+    # On-disk debounce (optimistic: marked before the POST; a failed POST waits
+    # out the window, which the ingest-side upsert covers).
+    key = f"{framework}|{name if name != framework else ''}"
+    now = time.time()
+    path = _register_debounce_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    if now - float(data.get(key, 0) or 0) < _REGISTER_DEBOUNCE_SECONDS:
+        return
+    data[key] = now
+    # Keep the debounce file bounded: drop entries older than a day.
+    data = {k: v for k, v in data.items() if now - float(v or 0) < 86400.0}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+    payload = {"agents": [{"name": "" if name == framework else name, "framework": framework}]}
+    threading.Thread(target=_post_registration, args=(dict(ident), payload), daemon=True).start()
+
+
+def _post_registration(ident: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    """POST the registration; swallow every failure (best-effort by design)."""
+    try:
+        import urllib.request
+        from warden.enterprise import identity as _identity
+        base = str(ident.get("api_base") or _identity.api_base()).rstrip("/")
+        req = urllib.request.Request(
+            f"{base}/api/agents/register",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {ident.get('device_key')}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+    except Exception:
+        pass
 
 
 # ── Kill-switch finding ────────────────────────────────────────────────────────
