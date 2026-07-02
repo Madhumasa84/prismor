@@ -199,7 +199,11 @@ def evaluate_tool_call(
     if getattr(engine, "workspace_managed", False):
         try:
             from warden.enterprise import heartbeat
-            heartbeat.record_call(agent=agent, session_id=session_id)
+            heartbeat.record_call(
+                agent=agent,
+                agent_name=_agent_name if _agent_name != agent else "",
+                session_id=session_id,
+            )
             heartbeat.maybe_flush()
         except Exception:
             pass
