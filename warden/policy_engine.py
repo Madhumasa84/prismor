@@ -474,6 +474,13 @@ class PolicyEngine:
 
         # Compile settings.
         self.block_categories = set(settings.get("block_categories", []))
+        # Org per-agent controls (kill-switch / forced mode / IAM profile per
+        # named agent) from the verified signed remote policy. Only populated on
+        # org-managed workspaces (the remote overlay is only merged there); the
+        # runtime passes this into agents.resolve_agent_control for the
+        # tighten-only merge with the local agents.yaml.
+        _ac = settings.get("agent_controls")
+        self.agent_controls: Dict[str, Any] = _ac if isinstance(_ac, dict) else {}
         # Global observe/enforce default for rules that don't set their own mode.
         # Defaults to "observe" — a fresh policy blocks nothing until an admin
         # flips rules (or this) to enforce.

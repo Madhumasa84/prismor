@@ -108,48 +108,81 @@ class AgentControl:
     mode: Optional[str] = None   # None = inherit global mode; "observe"/"enforce"
     iam_profile: Optional[str] = None  # IAM profile name to enforce for this agent
     last_seen: Optional[str] = None
+    # Which layer disabled the agent: "local" (agents.yaml), "org" (the signed
+    # remote policy's settings.agent_controls), "both", or None when enabled.
+    disabled_by: Optional[str] = None
 
 
 _DEFAULT = AgentControl(name="")  # sentinel — used for agents not in the registry
 
 
-def resolve_agent_control(name: str, workspace: Optional[Path] = None) -> AgentControl:
-    """Return the AgentControl for ``name``.
+def resolve_agent_control(
+    name: str,
+    workspace: Optional[Path] = None,
+    remote_controls: Optional[Dict[str, Any]] = None,
+) -> AgentControl:
+    """Return the AgentControl for ``name``, merging local and org controls.
+
+    ``remote_controls`` is the org's ``settings.agent_controls`` map from the
+    VERIFIED signed policy (present only on org-managed workspaces — the
+    runtime passes ``engine.agent_controls``). The merge is tighten-only:
+
+    * ``enabled`` — local AND remote: an org kill-switch cannot be re-enabled
+      locally, and a local disable holds even if the org says enabled.
+    * ``mode`` — remote wins when set (the org admin is the same authority
+      that sets the global mode); else local.
+    * ``iam_profile`` — remote wins when set. The named profile must be
+      defined in the local/project iam.yaml (remote selects among locally
+      defined profiles; it doesn't ship definitions).
 
     Returns a permissive default (enabled=True, mode=None, iam_profile=None)
-    when the agent is not in the registry, so unregistered agents are
-    unaffected by the new control layer.
+    when the agent is in neither registry, so unregistered agents are
+    unaffected by the control layer.
     """
     if not name:
         return AgentControl(name=name)
     config = load_agents_config(workspace)
-    entry = config.get("agents", {}).get(name)
-    if entry is None:
+    entry = config.get("agents", {}).get(name) or {}
+    remote = (remote_controls or {}).get(name)
+    remote = remote if isinstance(remote, dict) else {}
+    if not entry and not remote:
         return AgentControl(name=name)
+
+    local_enabled = bool(entry.get("enabled", True))
+    remote_enabled = bool(remote.get("enabled", True))
+    remote_mode = remote.get("mode") if remote.get("mode") in ("observe", "enforce") else None
+    disabled_by = (
+        "both" if not local_enabled and not remote_enabled
+        else "org" if not remote_enabled
+        else "local" if not local_enabled
+        else None
+    )
     return AgentControl(
         name=name,
         framework=entry.get("framework", ""),
-        enabled=bool(entry.get("enabled", True)),
-        mode=entry.get("mode") or None,
-        iam_profile=entry.get("iam_profile") or None,
+        enabled=local_enabled and remote_enabled,
+        mode=remote_mode or entry.get("mode") or None,
+        iam_profile=remote.get("iam_profile") or entry.get("iam_profile") or None,
         last_seen=entry.get("last_seen"),
+        disabled_by=disabled_by,
     )
 
 
-def list_agents(workspace: Optional[Path] = None) -> List[AgentControl]:
-    """Return all agents defined in the active config."""
+def list_agents(
+    workspace: Optional[Path] = None,
+    remote_controls: Optional[Dict[str, Any]] = None,
+) -> List[AgentControl]:
+    """Return all agents known to either registry (local config + org controls).
+
+    Each entry is the merged effective control (see resolve_agent_control), so
+    the union of locally-configured and org-controlled agents is returned with
+    ``disabled_by`` set to whichever layer(s) apply.
+    """
     config = load_agents_config(workspace)
-    out = []
-    for name, entry in config.get("agents", {}).items():
-        out.append(AgentControl(
-            name=name,
-            framework=entry.get("framework", ""),
-            enabled=bool(entry.get("enabled", True)),
-            mode=entry.get("mode") or None,
-            iam_profile=entry.get("iam_profile") or None,
-            last_seen=entry.get("last_seen"),
-        ))
-    return out
+    names = set(config.get("agents", {}).keys())
+    if isinstance(remote_controls, dict):
+        names.update(remote_controls.keys())
+    return [resolve_agent_control(name, workspace, remote_controls) for name in sorted(names)]
 
 
 # ── Writes ────────────────────────────────────────────────────────────────────
@@ -301,8 +334,27 @@ def _post_registration(ident: Dict[str, Any], payload: Dict[str, Any]) -> None:
 
 # ── Kill-switch finding ────────────────────────────────────────────────────────
 
-def make_disabled_finding(name: str, session_id: str = "") -> Dict[str, Any]:
-    """Return a CRITICAL blocking finding for a disabled (paused) agent."""
+def make_disabled_finding(
+    name: str, session_id: str = "", disabled_by: Optional[str] = None
+) -> Dict[str, Any]:
+    """Return a CRITICAL blocking finding for a disabled (paused) agent.
+
+    ``disabled_by`` names the layer that pulled the kill switch ("local",
+    "org", "both") so the developer sees WHERE to go to lift it — a local
+    re-enable can never lift an org-pushed pause.
+    """
+    if disabled_by == "org":
+        evidence = f"agent '{name}' is paused by your org's control plane (signed policy)"
+        remediation = f"Ask an org admin to re-enable '{name}' in the dashboard's fleet view."
+    elif disabled_by == "both":
+        evidence = f"agent '{name}' is paused locally AND by your org's control plane"
+        remediation = (
+            f"Ask an org admin to re-enable '{name}' in the dashboard, "
+            f"then: prismor agents set {name} --enabled"
+        )
+    else:
+        evidence = f"agent '{name}' is disabled in .prismor-warden/agents.yaml"
+        remediation = f"Re-enable via dashboard or: prismor agents set {name} --enabled"
     return {
         "id": f"{session_id}:agent-disabled:{name}",
         "ruleId": "agent-disabled",
@@ -310,11 +362,9 @@ def make_disabled_finding(name: str, session_id: str = "") -> Dict[str, Any]:
         "category": "agent-control",
         "mode": "enforce",  # always blocks regardless of policy mode
         "title": f"[agent:{name}] Agent is paused — all tool calls blocked",
-        "evidence": f"agent '{name}' is disabled in .prismor-warden/agents.yaml",
+        "evidence": evidence,
         "eventIndex": 0,
-        "remediation": (
-            f"Re-enable via dashboard or: immunity agents set {name} --enabled"
-        ),
+        "remediation": remediation,
     }
 
 
@@ -324,12 +374,15 @@ def format_agent_table(agents: List[AgentControl]) -> str:
     if not agents:
         return "  (no named agents registered)"
     lines = [
-        f"  {'NAME':<20} {'FRAMEWORK':<16} {'ENABLED':<8} {'MODE':<10} {'IAM PROFILE':<20}",
-        "  " + "-" * 76,
+        f"  {'NAME':<20} {'FRAMEWORK':<16} {'ENABLED':<8} {'MODE':<10} {'IAM PROFILE':<18} {'SOURCE':<8}",
+        "  " + "-" * 84,
     ]
     for a in agents:
+        # SOURCE reflects where a disable came from (org/local/both); an enabled
+        # agent shows blank so the column only draws attention to kill switches.
+        source = a.disabled_by or ""
         lines.append(
             f"  {a.name:<20} {a.framework:<16} {'yes' if a.enabled else 'NO':<8} "
-            f"{(a.mode or '(global)'):<10} {(a.iam_profile or ''):<20}"
+            f"{(a.mode or '(global)'):<10} {(a.iam_profile or ''):<18} {source:<8}"
         )
     return "\n".join(lines)

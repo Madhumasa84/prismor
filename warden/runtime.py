@@ -95,19 +95,6 @@ def evaluate_tool_call(
         meta["subject"] = subject.as_dict()
     meta.setdefault("agent_name", _agent_name)
 
-    # Resolve per-agent control (kill-switch, mode override, IAM profile).
-    _control = None
-    try:
-        from warden.agents import resolve_agent_control, record_seen, make_disabled_finding
-        _control = resolve_agent_control(_agent_name, workspace)
-        # Throttled auto-registration — once per agent per process.
-        record_seen(_agent_name, framework=agent, workspace=workspace)
-        # Per-agent mode override: takes precedence over the caller's mode.
-        if _control.mode:
-            mode = _control.mode
-    except Exception as _exc:
-        sys.stderr.write(f"[warden] agent control error: {_exc}\n")
-
     if persist:
         append_session_event(workspace, session_id, event)
         events = read_session_events(workspace, session_id)
@@ -132,6 +119,26 @@ def evaluate_tool_call(
         events = [event]
 
     engine = PolicyEngine(workspace=workspace)
+
+    # Resolve per-agent control (kill-switch, mode override, IAM profile).
+    # Runs AFTER engine construction so the org's remote controls — carried in
+    # the verified signed policy's settings.agent_controls, managed workspaces
+    # only — merge with the local agents.yaml (tighten-only: see agents.py).
+    _control = None
+    try:
+        from warden.agents import resolve_agent_control, record_seen, make_disabled_finding
+        _control = resolve_agent_control(
+            _agent_name, workspace,
+            remote_controls=getattr(engine, "agent_controls", None),
+        )
+        # Throttled auto-registration — once per agent per process.
+        record_seen(_agent_name, framework=agent, workspace=workspace)
+        # Per-agent mode override: takes precedence over the caller's mode.
+        if _control.mode:
+            mode = _control.mode
+    except Exception as _exc:
+        sys.stderr.write(f"[warden] agent control error: {_exc}\n")
+
     # Only the current event drives the real-time decision (stale prior findings
     # must not block an unrelated event — see cli.py hook-dispatch rationale).
     findings = engine.evaluate(event, len(events) - 1, session_id=session_id, subject=subject)
@@ -152,7 +159,8 @@ def evaluate_tool_call(
     if _control is not None and not _control.enabled:
         try:
             from warden.agents import make_disabled_finding
-            findings.insert(0, make_disabled_finding(_agent_name, session_id))
+            findings.insert(0, make_disabled_finding(
+                _agent_name, session_id, disabled_by=_control.disabled_by))
         except Exception as exc:
             sys.stderr.write(f"[warden] kill-switch error: {exc}\n")
 

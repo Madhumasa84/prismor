@@ -128,3 +128,56 @@ def test_no_remote_policy_is_inert(tmp_path, monkeypatch):
     # Default policy still loads; core rule present; no remote meta.
     assert any(r.id == "destructive-command" for r in engine.rules)
     assert engine.remote_policy_meta == {}
+    # No remote controls without a policy.
+    assert engine.agent_controls == {}
+
+
+AGENT_CONTROL_POLICY = """
+settings:
+  agent_controls:
+    checkout-bot:
+      enabled: false
+    support-bot:
+      enabled: true
+      mode: enforce
+rules: []
+"""
+
+
+def test_signed_agent_controls_reach_engine(tmp_path, monkeypatch):
+    """settings.agent_controls in the verified signed policy is lifted onto the
+    engine so the runtime can merge it with the local registry."""
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
+    _write_remote(tmp_path / ".prismor", AGENT_CONTROL_POLICY)
+    _enroll()
+
+    from warden.policy_engine import PolicyEngine
+    engine = PolicyEngine(workspace=tmp_path)
+    assert engine.agent_controls.get("checkout-bot", {}).get("enabled") is False
+    assert engine.agent_controls.get("support-bot", {}).get("mode") == "enforce"
+
+
+def test_agent_controls_sig_matches_server_format(tmp_path, monkeypatch):
+    """_current_agent_controls_sig reproduces the server's agentControlsSig
+    (sorted key:enabled:mode:iam → sha256 → 16 hex) so a control change triggers
+    a re-pull; empty when there are no controls."""
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
+    from warden.enterprise import remote_policy
+
+    _write_remote(tmp_path / ".prismor", AGENT_CONTROL_POLICY)
+    _enroll()
+    sig = remote_policy._current_agent_controls_sig()
+    assert sig and len(sig) == 16
+
+    # Reproduce the server side independently and compare.
+    import hashlib
+    lines = sorted([
+        "checkout-bot:0::",
+        "support-bot:1:enforce:",
+    ])
+    expected = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+    assert sig == expected
+
+    # No controls → empty signature.
+    _write_remote(tmp_path / ".prismor", "settings: {}\nrules: []\n")
+    assert remote_policy._current_agent_controls_sig() == ""
