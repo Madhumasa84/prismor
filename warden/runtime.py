@@ -189,6 +189,7 @@ def evaluate_tool_call(
         event=event,
         workspace=workspace,
         agent=agent,
+        agent_name=_agent_name if _agent_name != agent else None,
         mode=mode,
         session_id=session_id,
         subject=subject,
@@ -231,6 +232,7 @@ def _dispatch_telemetry(
     event: Dict[str, Any],
     workspace: Path,
     agent: str,
+    agent_name: Optional[str] = None,
     mode: str,
     session_id: str,
     subject: Subject,
@@ -263,7 +265,7 @@ def _dispatch_telemetry(
                 # Instance label (adapter `name=`), distinct from the framework
                 # id above — lets the org dashboard tell "checkout-bot" apart
                 # from every other agent on the same framework.
-                "agent_name": _agent_name if _agent_name != agent else None,
+                "agent_name": agent_name,
                 "mode": mode,
                 "workspace": str(workspace),
                 "policy_scope": policy_scope,
