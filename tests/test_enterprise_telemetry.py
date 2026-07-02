@@ -89,6 +89,20 @@ def test_redacted_record_carries_no_free_text():
     telemetry.assert_redacted(rec)  # must not raise
 
 
+def test_record_carries_agent_instance_name():
+    # The adapter's per-instance `name=` label must reach the control plane so
+    # the org dashboard can tell "checkout-bot" apart from other agents on the
+    # same framework. Absent a name, the field is None (framework id only).
+    named = telemetry.build_record(
+        SECRET_FINDING, SECRET_EVENT,
+        extra={"agent": "openai-agents", "agent_name": "checkout-bot"})
+    assert named["agent"] == "openai-agents"
+    assert named["agent_name"] == "checkout-bot"
+    unnamed = telemetry.build_record(SECRET_FINDING, SECRET_EVENT, extra={"agent": "claude"})
+    assert unnamed["agent_name"] is None
+    telemetry.assert_redacted(named)  # names are labels, never evidence
+
+
 def test_evidence_hash_is_stable_and_distinct():
     a = telemetry.build_record(SECRET_FINDING, SECRET_EVENT, extra={})
     b = telemetry.build_record(SECRET_FINDING, SECRET_EVENT, extra={})
