@@ -1163,7 +1163,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         subcmd = getattr(args, "agents_subcommand", None)
 
         if subcmd == "list" or subcmd is None:
-            agents = _list_agents(workspace)
+            # Merge org controls (from the cached verified policy) so the table
+            # shows org-pushed pauses, not just local ones.
+            _remote_ctl = None
+            try:
+                from warden.enterprise import remote_policy as _rp
+                _pol = _rp.verify_and_load()
+                _remote_ctl = ((_pol or {}).get("settings") or {}).get("agent_controls")
+            except Exception:
+                _remote_ctl = None
+            agents = _list_agents(workspace, remote_controls=_remote_ctl)
             print(f"\n  {_color('PRISMOR', _BOLD)}  named agents\n")
             print(_fmt_agent_table(agents))
             print()

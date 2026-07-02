@@ -194,7 +194,25 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_repos_sig is not None
         and str(latest_repos_sig) != str(_current_managed_repos_sig())
     )
-    if version_changed or profile_changed or capture_changed or repos_changed:
+    # Per-agent controls (kill-switch / forced mode / IAM) are served in the
+    # resolved policy but deliberately do NOT bump the profile version — the
+    # server exposes their signature instead, so an org pause reaches every
+    # device within one debounce interval regardless of profile scope.
+    latest_controls_sig = body.get("agentControlsSig")
+    controls_changed = (
+        latest_controls_sig is not None
+        and str(latest_controls_sig) != str(_current_agent_controls_sig())
+    )
+    # Per-event rule exemptions (relax/flag a rule for a user/device/session)
+    # also live in the resolved policy without a version bump — compare their
+    # signature so an admin's exempt reaches the device within one debounce.
+    latest_rule_ex_sig = body.get("ruleExemptionsSig")
+    rule_ex_changed = (
+        latest_rule_ex_sig is not None
+        and str(latest_rule_ex_sig) != str(_current_rule_exemptions_sig())
+    )
+    if (version_changed or profile_changed or capture_changed
+            or repos_changed or controls_changed or rule_ex_changed):
         return fetch(force=True)
     return False
 
@@ -218,6 +236,51 @@ def _current_managed_repos_sig() -> str:
         import hashlib
         sig_input = "\n".join([*pats, "|", *ex_parts])
         return hashlib.sha256(sig_input.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _current_rule_exemptions_sig() -> str:
+    """Signature of the cached policy's rule exemptions, matching the server's
+    ruleExemptionsSig format (sorted ``id:ruleId:scope:scopeId:action:expires``
+    lines → sha256 → 16 hex; empty when none) so the device re-pulls when an
+    exemption is added, revoked, or expires."""
+    try:
+        pol = verify_and_load()
+        exemptions = ((pol or {}).get("settings") or {}).get("rule_exemptions") or []
+        if not isinstance(exemptions, list) or not exemptions:
+            return ""
+        lines = sorted(
+            f"{e.get('id')}:{e.get('ruleId') or ''}:{e.get('scope') or ''}:"
+            f"{e.get('scopeId') or ''}:{e.get('action') or 'allow'}:{e.get('expires') or ''}"
+            for e in exemptions if isinstance(e, dict) and e.get("id")
+        )
+        if not lines:
+            return ""
+        import hashlib
+        return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _current_agent_controls_sig() -> str:
+    """Signature of the cached policy's per-agent controls, matching the
+    server's agentControlsSig format (sorted ``key:enabled:mode:iam`` lines →
+    sha256 → 16 hex chars; empty when no controls are set) so the device
+    re-pulls the moment an org admin pauses or reconfigures an agent."""
+    try:
+        pol = verify_and_load()
+        controls = ((pol or {}).get("settings") or {}).get("agent_controls") or {}
+        if not isinstance(controls, dict) or not controls:
+            return ""
+        lines = sorted(
+            f"{name}:{'1' if c.get('enabled', True) else '0'}:{c.get('mode') or ''}:{c.get('iam_profile') or ''}"
+            for name, c in controls.items() if isinstance(c, dict)
+        )
+        if not lines:
+            return ""
+        import hashlib
+        return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
     except Exception:
         return ""
 

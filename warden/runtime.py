@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +42,73 @@ class Decision:
     # Engine kept so callers that need post-decision config (e.g. the Claude
     # sandbox rewrite path) don't have to re-instantiate it.
     engine: Optional[PolicyEngine] = None
+
+
+def _apply_rule_exemptions(
+    findings: List[Dict[str, Any]],
+    rule_exemptions: Optional[List[Dict[str, Any]]],
+    *,
+    session_id: str,
+    subject: Optional[Subject],
+) -> List[Dict[str, Any]]:
+    """Relax or downgrade findings per admin-granted, signed rule exemptions.
+
+    Each exemption is ``{ruleId, scope (user|device|session), scopeId, action
+    (allow|flag), expires?}``, matched at eval time against the current context.
+    ``allow`` drops the matched finding (the call proceeds, nothing recorded);
+    ``flag`` downgrades it to observe (reported as a warning, but non-blocking).
+
+    Core protections are never exemptable: a floor rule id / core block category
+    (and the agent kill-switch) is left untouched regardless of any exemption.
+    """
+    if not rule_exemptions:
+        return findings
+    from warden.policy_engine import _NON_OVERRIDABLE_RULE_IDS, _CORE_BLOCK_CATEGORIES
+
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    user_id = subject.user_id if subject else None
+    device_id = None
+    try:
+        from warden.enterprise import identity as _identity
+        ident = _identity.load_identity()
+        device_id = ident.get("device_id") if ident else None
+    except Exception:
+        device_id = None
+
+    def _matches(ex: Dict[str, Any], rule_id: str) -> bool:
+        if str(ex.get("ruleId") or "") != rule_id:
+            return False
+        exp = ex.get("expires")
+        if exp and str(exp) < now_iso:
+            return False
+        scope, scope_id = ex.get("scope"), ex.get("scopeId")
+        if scope == "user":
+            return bool(user_id) and scope_id == user_id
+        if scope == "device":
+            return bool(device_id) and scope_id == device_id
+        if scope == "session":
+            return bool(session_id) and scope_id == session_id
+        return False
+
+    out: List[Dict[str, Any]] = []
+    for f in findings:
+        rule_id = str(f.get("ruleId") or "")
+        category = f.get("category")
+        # Floor + admin kill-switch are never relaxable.
+        if (rule_id in _NON_OVERRIDABLE_RULE_IDS
+                or category in _CORE_BLOCK_CATEGORIES
+                or category == "agent-control"):
+            out.append(f)
+            continue
+        match = next((ex for ex in rule_exemptions if isinstance(ex, dict) and _matches(ex, rule_id)), None)
+        if match is None:
+            out.append(f)
+        elif str(match.get("action") or "allow") == "flag":
+            # Keep the finding (auditable warning), but strip its ability to block.
+            downgraded = {**f, "mode": "observe", "exempted": "flag"}
+            out.append(downgraded)
+        # action == "allow": drop the finding entirely.
+    return out
 
 
 def _block_reason(finding: Dict[str, Any]) -> str:
@@ -95,19 +163,6 @@ def evaluate_tool_call(
         meta["subject"] = subject.as_dict()
     meta.setdefault("agent_name", _agent_name)
 
-    # Resolve per-agent control (kill-switch, mode override, IAM profile).
-    _control = None
-    try:
-        from warden.agents import resolve_agent_control, record_seen, make_disabled_finding
-        _control = resolve_agent_control(_agent_name, workspace)
-        # Throttled auto-registration — once per agent per process.
-        record_seen(_agent_name, framework=agent, workspace=workspace)
-        # Per-agent mode override: takes precedence over the caller's mode.
-        if _control.mode:
-            mode = _control.mode
-    except Exception as _exc:
-        sys.stderr.write(f"[warden] agent control error: {_exc}\n")
-
     if persist:
         append_session_event(workspace, session_id, event)
         events = read_session_events(workspace, session_id)
@@ -132,6 +187,26 @@ def evaluate_tool_call(
         events = [event]
 
     engine = PolicyEngine(workspace=workspace)
+
+    # Resolve per-agent control (kill-switch, mode override, IAM profile).
+    # Runs AFTER engine construction so the org's remote controls — carried in
+    # the verified signed policy's settings.agent_controls, managed workspaces
+    # only — merge with the local agents.yaml (tighten-only: see agents.py).
+    _control = None
+    try:
+        from warden.agents import resolve_agent_control, record_seen, make_disabled_finding
+        _control = resolve_agent_control(
+            _agent_name, workspace,
+            remote_controls=getattr(engine, "agent_controls", None),
+        )
+        # Throttled auto-registration — once per agent per process.
+        record_seen(_agent_name, framework=agent, workspace=workspace)
+        # Per-agent mode override: takes precedence over the caller's mode.
+        if _control.mode:
+            mode = _control.mode
+    except Exception as _exc:
+        sys.stderr.write(f"[warden] agent control error: {_exc}\n")
+
     # Only the current event drives the real-time decision (stale prior findings
     # must not block an unrelated event — see cli.py hook-dispatch rationale).
     findings = engine.evaluate(event, len(events) - 1, session_id=session_id, subject=subject)
@@ -152,7 +227,8 @@ def evaluate_tool_call(
     if _control is not None and not _control.enabled:
         try:
             from warden.agents import make_disabled_finding
-            findings.insert(0, make_disabled_finding(_agent_name, session_id))
+            findings.insert(0, make_disabled_finding(
+                _agent_name, session_id, disabled_by=_control.disabled_by))
         except Exception as exc:
             sys.stderr.write(f"[warden] kill-switch error: {exc}\n")
 
@@ -183,6 +259,18 @@ def evaluate_tool_call(
             except Exception as exc:
                 sys.stderr.write(f"[warden] {fn_name} error: {exc}\n")
 
+    # Per-event rule exemptions (admin-granted, signed): relax ("allow", drop the
+    # finding) or downgrade ("flag", warn but don't block) a rule for the current
+    # user / device / session. Applied after ALL findings are gathered, so it can
+    # also relax scoped-agent denials — but never a core/floor protection.
+    try:
+        findings = _apply_rule_exemptions(
+            findings, getattr(engine, "rule_exemptions", None),
+            session_id=session_id, subject=subject,
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[warden] rule-exemption error: {exc}\n")
+
     _dispatch_telemetry(
         engine=engine,
         findings=findings,
@@ -199,7 +287,11 @@ def evaluate_tool_call(
     if getattr(engine, "workspace_managed", False):
         try:
             from warden.enterprise import heartbeat
-            heartbeat.record_call(agent=agent, session_id=session_id)
+            heartbeat.record_call(
+                agent=agent,
+                agent_name=_agent_name if _agent_name != agent else "",
+                session_id=session_id,
+            )
             heartbeat.maybe_flush()
         except Exception:
             pass
