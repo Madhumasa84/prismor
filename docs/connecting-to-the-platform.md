@@ -20,7 +20,7 @@ control-plane path short-circuits. Local protection — the 63 default rules in
 ```
   Developer machine (Warden, this repo)      Prismor control plane (prismor-web, proprietary)
   ─────────────────────────────────────      ───────────────────────────────────────────────
-  immunity enroll <token>  ──POST /api/devices/enroll──▶  validate one-time token
+  prismor enroll <token>  ──POST /api/devices/enroll──▶  validate one-time token
    identity.enroll()           {token,label,platform}     mint revocable device_key
    save_identity() 0600  ◀──{device_id,org_id,user_id,──  record device row
    ~/.prismor/identity.json        device_key,org_name}
@@ -46,8 +46,8 @@ lives in the proprietary control plane.
 ## 1. Enroll (token → device key)
 
 ```
-immunity enroll <TOKEN>
-immunity enroll --token <TOKEN> --label "ci-runner-3" --api-base https://prismor.dev
+prismor enroll <TOKEN>
+prismor enroll --token <TOKEN> --label "ci-runner-3" --api-base https://prismor.dev
 ```
 
 - **Token:** a one-time enrollment token from the dashboard (Admin → Devices →
@@ -104,7 +104,7 @@ records via `telemetry.build_record()` and runs `assert_redacted()` before uploa
 - **Full capture (admin opt-in, per-org):** additionally ships evidence/content,
   still scrubbed through the cloaking secret patterns so registered secrets never
   leave. A flip is surfaced to the developer via a stderr `NOTICE` and in
-  `immunity enroll-status` (`capture: FULL`).
+  `prismor enroll-status` (`capture: FULL`).
 
 Upload: `POST /api/telemetry/ingest`. An offline **spool** gives at-least-once
 delivery, written *after* redaction. Short hot-path timeout (~6s) ⇒ a slow
@@ -122,7 +122,7 @@ detail — gated to managed workspaces. Powers the "tool calls inspected" KPI.
 
 Any control-plane **401/403** ⇒ `mark_revoked()`; for 1h, control-plane calls
 short-circuit (no hammering). Local protection is unaffected — the last good
-signed policy keeps enforcing. `immunity logout` wipes identity, cached policy,
+signed policy keeps enforcing. `prismor logout` wipes identity, cached policy,
 spool, heartbeat, and scope map.
 
 ## Trust model

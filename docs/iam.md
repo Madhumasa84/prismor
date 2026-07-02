@@ -12,20 +12,14 @@ Implementation: [`warden/iam.py`](../warden/iam.py).
 
 ## How it works
 
-```
-                       WARDEN_AGENT_ID=researcher
-                                 │
-   agent tool call ──────────────┼──────────────► Warden hook
-   { Bash: "curl …" }            │                     │
-                                 ▼                     ▼
-                    ┌─────────────────────┐   resolve profile for
-                    │  iam.yaml            │   "researcher":
-                    │   researcher:        │     allowed_tools: [Read, WebFetch]
-                    │     allowed_tools …  │     deny_tools:    [Bash, Write]
-                    │     deny_tools …     │     deny_network:  false
-                    │     deny_network …   │
-                    │     allowed_paths …  │   Bash ∈ deny_tools ──► BLOCK
-                    └─────────────────────┘
+```mermaid
+flowchart LR
+    ENV["WARDEN_AGENT_ID=researcher"] --> HOOK
+    CALL["agent tool call<br/>{ Bash: 'curl …' }"] --> HOOK["Warden hook"]
+    HOOK --> YAML[("iam.yaml<br/>researcher:<br/>allowed_tools: [Read, WebFetch]<br/>deny_tools: [Bash, Write]<br/>deny_network: false")]
+    YAML --> DEC{"Bash ∈ deny_tools?"}
+    DEC -->|yes| BLOCK["BLOCK"]
+    DEC -->|no| ALLOW["continue to policy engine"]
 ```
 
 The active identity comes from the `WARDEN_AGENT_ID` environment variable. If it

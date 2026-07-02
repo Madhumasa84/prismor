@@ -8,24 +8,13 @@ tool call against policy, returning a JSON decision in milliseconds.
 
 ## How it works
 
-```
-LLM decides to call a tool
-         │
-         ▼
- wardenTool / wardenTools
-  wraps tool.execute()
-         │
-         ▼
-  POST /v1/evaluate ──► immunity eval-server (Python)
-         │                  │
-         │                  ├─ evaluate_tool_call()
-         │                  ├─ policy engine + IAM
-         │                  └─ telemetry / findings
-         │
-    { allow, reason, subject }
-         │
-   allow=false + enforce ──► throw WardenBlocked  (tool body never runs)
-   allow=true             ──► call original execute()
+```mermaid
+flowchart TD
+    LLM["LLM decides to call a tool"] --> WRAP["wardenTool / wardenTools<br/>wraps tool.execute()"]
+    WRAP -->|"POST /v1/evaluate"| SRV["prismor eval-server (Python)<br/>evaluate_tool_call() · policy engine + IAM · telemetry / findings"]
+    SRV -->|"{ allow, reason, subject }"| DEC{allow?}
+    DEC -->|"false + enforce"| BLOCK["throw WardenBlocked<br/>(tool body never runs)"]
+    DEC -->|true| RUN["call original execute()"]
 ```
 
 The Python runtime stays canonical. The TypeScript adapter is ~80 lines of
@@ -37,7 +26,7 @@ Start the eval-server once alongside your app (Python, from the `immunity-agent`
 repo or any machine with `immunity` installed):
 
 ```bash
-immunity eval-server --port 7071 --workspace /path/to/project
+prismor eval-server --port 7071 --workspace /path/to/project
 # or directly:
 python3 -m warden.eval_server --port 7071 --workspace .
 ```
@@ -163,7 +152,7 @@ const tools = wardenTools(myTools, { eventType: "network" });
 
 If the eval-server is unreachable (down, not yet started, crashed), the adapter
 **warns and allows** — it never breaks the agent because of infrastructure
-issues. Run `immunity eval-server` as a long-lived sidecar process or a Docker
+issues. Run `prismor eval-server` as a long-lived sidecar process or a Docker
 container to minimise downtime.
 
 ```typescript

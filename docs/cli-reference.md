@@ -35,17 +35,20 @@ unchanged and prints a migration notice. Use `prismor`.
 ## The command map
 
 ```
-immunity
+prismor
 │
 ├─ Onboarding & lifecycle
 │   ├─ setup                  Interactive onboarding wizard (4-step TUI)
 │   ├─ install-hooks          Wire Warden hooks into an agent/IDE
 │   ├─ uninstall-hooks        Remove hooks
+│   ├─ update                 Self-update check / upgrade
 │   └─ status [--all]         Health check (this workspace / all workspaces)
 │
 ├─ Runtime protection (policy engine)
 │   ├─ check                  Pre-check a command or path against policy
 │   ├─ semantic-check         Hybrid LLM prompt-injection guard
+│   ├─ sandbox <action>       status · check · run — Docker command sandbox
+│   ├─ eval-server            HTTP evaluation endpoint for non-Python adapters
 │   └─ policy <action>        init · validate · show · edit · test
 │
 ├─ Visibility (audit & forensics)
@@ -63,11 +66,19 @@ immunity
 │
 ├─ Identity & scoping
 │   ├─ iam <action>           Named agent identities / permission profiles
+│   ├─ agents <action>        Named agent instances — list · show · set (kill-switch, mode, IAM)
 │   ├─ scope <action>         Session-scoped, task-specific rules
 │   └─ canary <action>        Plant & manage honeytoken tripwires
 │
 ├─ Adaptive defense
 │   └─ learn                  Mine session history for new rules
+│
+├─ Enterprise / org
+│   ├─ enroll <token>         Enroll this machine against your org's control plane
+│   ├─ enroll-status          Show enrollment + applied policy version
+│   ├─ workspace <action>     Show/set whether this workspace is org-managed or personal
+│   ├─ exempt <action>        Request an admin exemption for this repo
+│   └─ logout                 Un-enroll (remove device identity + cached policy)
 │
 └─ Supply chain
     └─ supplychain <action>   npm/pip/pnpm/uv/cargo/go install gate · harden
@@ -83,6 +94,7 @@ immunity
 | `prismor install-hooks` | `--agent <name\|all>` (required), `--mode <observe\|enforce>`, `--scope <project\|user>` | Writes hook config for the chosen agent so Warden sees tool calls. Without hooks, nothing is monitored. |
 | `prismor uninstall-hooks` | `--agent <name\|all>`, `--scope` | Removes Prismor hooks for an agent. Clean rollback. |
 | `prismor status` | `--workspace`, `--all`, `--days N` | Health check: hooks, mode, cloak state, latest session, and the single next action. Run this first every session. `--all` shows every registered workspace. |
+| `prismor update` | `--check` | Check for (or install) a newer prismor release. |
 | `prismor info` | `--workspace` | _Deprecated_ alias of `status`. |
 
 Agent → config matrix and per-agent details: [AGENT_INTEGRATIONS.md](../AGENT_INTEGRATIONS.md).
@@ -101,6 +113,13 @@ Modes (`observe` vs `enforce`): [Warden](warden.md).
 | `prismor policy edit` | `--workspace` | Interactive TUI to toggle rules on/off. |
 | `prismor policy validate <file>` | — | Static-validate a policy YAML file. |
 | `prismor policy test` | `--file` | Run declarative policy tests (falls back to the bundled OWASP LLM starter pack). |
+| `prismor sandbox <status\|check\|run>` | `--workspace` | Docker-backed command sandbox: show config, check the backend, or run one command isolated. See [Docker sandbox](docker.md). |
+
+### eval-server
+
+| Command | Key flags | Description |
+|---|---|---|
+| `prismor eval-server` | `--port` (default 7071), `--host` (default 127.0.0.1), `--workspace` | HTTP evaluation endpoint (`POST /v1/evaluate`) so non-Python adapters (Vercel AI SDK, anything HTTP) get the same policy pipeline. See [Frameworks overview](frameworks-overview.md) and [Vercel AI SDK](frameworks-vercel-ai.md). |
 
 Full policy model, rule schema, and the default rule list: [Warden](warden.md).
 
@@ -151,6 +170,9 @@ Design, setup, best practices, and threat model: [Sweep & Cloak](sweep-and-cloak
 | `prismor scope list` | — | List sessions with active scoped rules. |
 | `prismor scope edit <id>` | — | Edit a session's scoped rules in `$EDITOR`. |
 | `prismor scope clear <id>` | — | Remove a session's scoped rules. |
+| `prismor agents list` | — | List every named agent instance seen (the adapter's `name=`), with framework + control state. |
+| `prismor agents show <name>` | — | Show one named agent's control settings (enabled, mode, IAM profile, last seen). |
+| `prismor agents set <name>` | `--enabled/--disabled`, `--mode <observe\|enforce>`, `--iam-profile <p>` | Per-agent runtime control: kill-switch, mode override, forced IAM profile. Config lives in `agents.yaml`. |
 | `prismor canary plant <path>` | `--type <aws\|ssh\|env\|generic>`, `--webhook`, `--force` | Plant a honeytoken credential tripwire. |
 | `prismor canary list` | — | List planted canaries (markers redacted). |
 | `prismor canary status` | — | Summary of canaries by type. |
@@ -170,6 +192,20 @@ Deep dives: [IAM](iam.md) · [Scoped Agent](scoped-agent.md) · [Canary](canary.
 | `prismor learn --reject <id>` | — | Reject a candidate. |
 
 Deep dive: [Learning](learning.md).
+
+---
+
+## Enterprise / org
+
+| Command | Key flags | Description |
+|---|---|---|
+| `prismor enroll <token>` | `--label`, `--api-base` | Exchange a single-use org token (minted in the dashboard) for this machine's device identity; pulls the signed org policy. |
+| `prismor enroll-status` | — | Show enrollment state, device label, and the applied policy version. |
+| `prismor workspace <show\|managed\|personal>` | — | Show or set whether this workspace is org-managed (org policy + telemetry) or personal (local-only). Org-claimed repos can't be downgraded. |
+| `prismor exempt <request\|status>` | `--reason` | Ask an org admin to relax specific non-floor rules for this repo; served back in the signed policy. |
+| `prismor logout` | — | Un-enroll: removes the device identity and cached remote policy. Local protection stays on. |
+
+Deep dive: [Connecting to the platform](connecting-to-the-platform.md) · [Policy layers & exemptions](policy-layers-and-exemptions.md).
 
 ---
 

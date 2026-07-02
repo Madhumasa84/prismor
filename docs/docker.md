@@ -2,7 +2,7 @@
 
 When running AI agents in containers (Docker, Kubernetes, CI runners), Warden provides runtime monitoring but containers require additional hardening to be secure. The agent process has the same filesystem and network access as any other process running as that user.
 
-Warden also includes an opt-in Docker-backed command sandbox for Claude Code Bash tool calls. This is defense in depth: Warden still evaluates the original command against policy first, then rewrites allowed Bash commands to run through `immunity sandbox run`.
+Warden also includes an opt-in Docker-backed command sandbox for Claude Code Bash tool calls. This is defense in depth: Warden still evaluates the original command against policy first, then rewrites allowed Bash commands to run through `prismor sandbox run`.
 
 ## Prerequisites
 
@@ -69,22 +69,22 @@ allowlists: []
 Check readiness:
 
 ```bash
-immunity sandbox status
-immunity sandbox check
-immunity sandbox run -- "echo hello from sandbox"
+prismor sandbox status
+prismor sandbox check
+prismor sandbox run -- "echo hello from sandbox"
 ```
 
 Install regular Warden hooks for Claude. No separate sandbox hook is needed:
 
 ```bash
-immunity install-hooks --agent claude --mode enforce
+prismor install-hooks --agent claude --mode enforce
 ```
 
 When sandboxing is enabled, the Claude `PreToolUse:Bash` hook path works in this order:
 
 1. Normalize the original Bash command.
 2. Evaluate Warden policy, scoped-agent rules, IAM, and evasion checks.
-3. If the command is allowed, rewrite it to `immunity sandbox run --encoded ...`.
+3. If the command is allowed, rewrite it to `prismor sandbox run --encoded ...`.
 4. The sandbox runner executes the original command inside Docker with a bind-mounted workspace, dropped capabilities, no-new-privileges, resource limits, and the configured network mode.
 
 `network: allowlist` currently fails closed to Docker `--network none`. Docker alone cannot enforce domain allowlists; use `network: none` for hard isolation or `network: bridge` / `host` only when the task genuinely needs outbound access.
@@ -101,7 +101,7 @@ Warden monitors tool-use events (shell commands, file reads/writes, network call
 | Multi-step social engineering          | Each step (read file, encode, send) is individually benign                       | Session-level correlation (roadmap)                                                 |
 | Project-level policy overrides         | `.prismor-warden/policy.yaml` can disable rules                                  | Make policy files read-only: `chmod 444 .prismor-warden/policy.yaml`                |
 | Domain allowlists inside Docker        | Docker has network modes, not domain-aware egress policy                         | `network: none` by default; use proxy/firewall integration in a future backend      |
-| Non-Claude agent command mutation      | Not every agent hook API supports safe input rewriting                           | Use `immunity sandbox run -- <cmd>` directly; hook-based sandboxing starts with Claude Bash |
+| Non-Claude agent command mutation      | Not every agent hook API supports safe input rewriting                           | Use `prismor sandbox run -- <cmd>` directly; hook-based sandboxing starts with Claude Bash |
 
 ## Post-Install Verification
 
