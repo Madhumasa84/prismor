@@ -481,6 +481,14 @@ class PolicyEngine:
         # tighten-only merge with the local agents.yaml.
         _ac = settings.get("agent_controls")
         self.agent_controls: Dict[str, Any] = _ac if isinstance(_ac, dict) else {}
+        # Per-event rule exemptions (relax/flag a rule for a specific user,
+        # device, or session) from the verified signed policy. A list matched at
+        # evaluation time against the current context (see runtime), NOT a
+        # profile — so it works for session scope and can relax any finding,
+        # including scoped-agent. Floor rules can never be exempted. Managed
+        # workspaces only.
+        _re = settings.get("rule_exemptions")
+        self.rule_exemptions: List[Dict[str, Any]] = _re if isinstance(_re, list) else []
         # Global observe/enforce default for rules that don't set their own mode.
         # Defaults to "observe" — a fresh policy blocks nothing until an admin
         # flips rules (or this) to enforce.

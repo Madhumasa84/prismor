@@ -189,6 +189,44 @@
             },
             "additionalProperties": false
           }
+        },
+        "rule_exemptions": {
+          "type": "array",
+          "description": "Admin-granted per-event rule exemptions, matched at eval time against the current user/device/session. 'allow' drops the finding; 'flag' downgrades it to a non-blocking warning. Core/floor rules can never be exempted.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ruleId": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "device",
+                  "session"
+                ]
+              },
+              "scopeId": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "flag"
+                ]
+              },
+              "expires": {
+                "type": "string",
+                "description": "ISO-8601 expiry; absent = permanent until revoked"
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +42,73 @@ class Decision:
     # Engine kept so callers that need post-decision config (e.g. the Claude
     # sandbox rewrite path) don't have to re-instantiate it.
     engine: Optional[PolicyEngine] = None
+
+
+def _apply_rule_exemptions(
+    findings: List[Dict[str, Any]],
+    rule_exemptions: Optional[List[Dict[str, Any]]],
+    *,
+    session_id: str,
+    subject: Optional[Subject],
+) -> List[Dict[str, Any]]:
+    """Relax or downgrade findings per admin-granted, signed rule exemptions.
+
+    Each exemption is ``{ruleId, scope (user|device|session), scopeId, action
+    (allow|flag), expires?}``, matched at eval time against the current context.
+    ``allow`` drops the matched finding (the call proceeds, nothing recorded);
+    ``flag`` downgrades it to observe (reported as a warning, but non-blocking).
+
+    Core protections are never exemptable: a floor rule id / core block category
+    (and the agent kill-switch) is left untouched regardless of any exemption.
+    """
+    if not rule_exemptions:
+        return findings
+    from warden.policy_engine import _NON_OVERRIDABLE_RULE_IDS, _CORE_BLOCK_CATEGORIES
+
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    user_id = subject.user_id if subject else None
+    device_id = None
+    try:
+        from warden.enterprise import identity as _identity
+        ident = _identity.load_identity()
+        device_id = ident.get("device_id") if ident else None
+    except Exception:
+        device_id = None
+
+    def _matches(ex: Dict[str, Any], rule_id: str) -> bool:
+        if str(ex.get("ruleId") or "") != rule_id:
+            return False
+        exp = ex.get("expires")
+        if exp and str(exp) < now_iso:
+            return False
+        scope, scope_id = ex.get("scope"), ex.get("scopeId")
+        if scope == "user":
+            return bool(user_id) and scope_id == user_id
+        if scope == "device":
+            return bool(device_id) and scope_id == device_id
+        if scope == "session":
+            return bool(session_id) and scope_id == session_id
+        return False
+
+    out: List[Dict[str, Any]] = []
+    for f in findings:
+        rule_id = str(f.get("ruleId") or "")
+        category = f.get("category")
+        # Floor + admin kill-switch are never relaxable.
+        if (rule_id in _NON_OVERRIDABLE_RULE_IDS
+                or category in _CORE_BLOCK_CATEGORIES
+                or category == "agent-control"):
+            out.append(f)
+            continue
+        match = next((ex for ex in rule_exemptions if isinstance(ex, dict) and _matches(ex, rule_id)), None)
+        if match is None:
+            out.append(f)
+        elif str(match.get("action") or "allow") == "flag":
+            # Keep the finding (auditable warning), but strip its ability to block.
+            downgraded = {**f, "mode": "observe", "exempted": "flag"}
+            out.append(downgraded)
+        # action == "allow": drop the finding entirely.
+    return out
 
 
 def _block_reason(finding: Dict[str, Any]) -> str:
@@ -190,6 +258,18 @@ def evaluate_tool_call(
                     findings.extend(extra)
             except Exception as exc:
                 sys.stderr.write(f"[warden] {fn_name} error: {exc}\n")
+
+    # Per-event rule exemptions (admin-granted, signed): relax ("allow", drop the
+    # finding) or downgrade ("flag", warn but don't block) a rule for the current
+    # user / device / session. Applied after ALL findings are gathered, so it can
+    # also relax scoped-agent denials — but never a core/floor protection.
+    try:
+        findings = _apply_rule_exemptions(
+            findings, getattr(engine, "rule_exemptions", None),
+            session_id=session_id, subject=subject,
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[warden] rule-exemption error: {exc}\n")
 
     _dispatch_telemetry(
         engine=engine,
