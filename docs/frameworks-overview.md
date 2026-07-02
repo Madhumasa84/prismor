@@ -51,7 +51,7 @@ For TypeScript, Go, Ruby, Java, Rust — any language that can make an HTTP requ
 — run the **eval-server** as a sidecar and call it before executing each tool:
 
 ```bash
-immunity eval-server --port 7071 --workspace /path/to/project
+prismor eval-server --port 7071 --workspace /path/to/project
 ```
 
 ```
@@ -83,6 +83,40 @@ Validated live on an Ubuntu EC2 instance with real OpenAI function calls:
 | Rust | ~25 lines | `ureq` crate |
 
 See `examples/multilang/` for runnable examples in all four languages.
+
+## Naming agents
+
+Every guard entry point takes an optional `name=` — an **instance label**
+distinct from the framework id. Multiple agents on the same framework
+("checkout-bot" and "support-bot", both on the OpenAI Agents SDK) become
+individually visible and controllable:
+
+```python
+guard_agent(agent, name="checkout-bot")            # OpenAI Agents SDK
+tools = guard_tools(tools, name="support-bot")     # LangChain / CrewAI
+guard_controller(controller, name="browser-bot")   # browser-use
+```
+
+```ts
+const tools = wardenTools(myTools, { agentName: 'checkout-bot' });  // Vercel AI SDK
+```
+
+What a name unlocks:
+
+- **Its own row** in the org dashboard's Connections view (and a per-agent
+  activity drill-in), instead of blending into the framework's aggregate.
+- **Per-agent runtime control** via `prismor agents set <name>` — kill-switch
+  (`--disabled` hard-blocks every call), a mode override, and a forced IAM
+  profile. Config lives in `agents.yaml` (global `~/.prismor/` or per-project
+  `.prismor-warden/`); agents self-register on first sight.
+
+```bash
+prismor agents list                                # every named instance seen
+prismor agents set checkout-bot --mode enforce     # this bot only
+prismor agents set support-bot --disabled          # kill switch
+```
+
+Unnamed agents keep working unchanged — they report under the framework id.
 
 ## Modes
 

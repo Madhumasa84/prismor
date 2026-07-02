@@ -15,7 +15,7 @@ The OpenAI Agents SDK adapter ships from
 ## Install
 
 ```bash
-pip install prismor-warden-openai          # + the Warden runtime (immunity-agent)
+pip install prismor-warden-openai          # + the Warden runtime (prismor)
 pip install "prismor-warden-openai[sdk]"   # + the openai-agents SDK itself
 ```
 

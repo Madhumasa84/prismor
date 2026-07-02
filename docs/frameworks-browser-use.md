@@ -42,13 +42,13 @@ browser-use dispatches all actions through a single method:
 that method on the controller's registry, so there is one interception point
 regardless of which action the LLM invokes.
 
-```
-LLM decides to call go_to_url("https://webhook.site/…")
-  → Registry.execute_action("go_to_url", GoToUrlParams(url=…))
-  → Warden evaluates: event_type="network", url="https://webhook.site/…"
-  → suspicious-network rule matches → Decision(allow=False)
-  → "⛔ Prismor Warden blocked action 'go_to_url': …" returned to LLM
-  → Playwright never opens the URL
+```mermaid
+flowchart TD
+    LLM["LLM decides to call<br/>go_to_url('https://webhook.site/…')"] --> REG["Registry.execute_action('go_to_url', GoToUrlParams(url=…))"]
+    REG --> WARDEN["Warden evaluates:<br/>event_type='network', url='https://webhook.site/…'"]
+    WARDEN -->|"suspicious-network rule matches"| DENY["Decision(allow=False)"]
+    DENY --> MSG["'⛔ Prismor Warden blocked action go_to_url' returned to LLM"]
+    MSG --> SAFE["Playwright never opens the URL"]
 ```
 
 ## Per-user control (multi-tenant)

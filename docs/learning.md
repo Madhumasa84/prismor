@@ -11,26 +11,17 @@ Implementation: [`warden/learning.py`](../warden/learning.py).
 
 ## How it works
 
-```
-   session history (.prismor-warden/warden.db)
-        │
-        ├─ mine_patterns ─────────► repeated blocked / near-miss commands
-        │                            seen ≥ min-support times  →  candidate rule
-        │
-        ├─ track_false_positives ─► rules dismissed ≥ fp-threshold times
-        │                            →  "this rule may be too noisy"
-        │
-        └─ propose_rule_refinements ► tweaks to existing rules
-                 │
-                 ▼
-        prismor learn  →  report of candidates
-                 │
-      ┌──────────┴───────────┐
-      ▼                      ▼
-  --apply <id>           --reject <id>
-  append to              discard
-  .prismor-warden/
-  policy.yaml
+```mermaid
+flowchart TD
+    DB[("session history<br/>.prismor-warden/warden.db")]
+    DB --> MP["mine_patterns<br/>repeated blocked / near-miss commands<br/>seen ≥ min-support times"]
+    DB --> FP["track_false_positives<br/>rules dismissed ≥ fp-threshold times<br/>→ 'this rule may be too noisy'"]
+    DB --> RR["propose_rule_refinements<br/>tweaks to existing rules"]
+    MP --> R["prismor learn → report of candidates"]
+    FP --> R
+    RR --> R
+    R -->|"--apply &lt;id&gt;"| A["append to<br/>.prismor-warden/policy.yaml"]
+    R -->|"--reject &lt;id&gt;"| X["discard"]
 ```
 
 Three signals feed the report:

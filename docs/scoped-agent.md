@@ -18,26 +18,13 @@ Implementation: [`warden/scoped_agent.py`](../warden/scoped_agent.py).
 
 ## How it works
 
-```
-   session start
-        │
-        ▼
-   UserPromptSubmit: "fix the failing test in auth/"
-        │
-        ▼
-┌────────────────────────────────────────────────────────┐
-│  synthesize_scoped_rules(goal, available_tools, ws)    │
-│    → allowed_tools: [Read, Edit, Bash]                 │
-│    → path scope:    auth/**                            │
-│    → network:       denied                             │
-└────────────────────────────────────────────────────────┘
-        │ saved for this session id
-        ▼
-   later in the same session:
-   agent issues  WebFetch("https://evil.com")
-        │
-        ▼
-   check_scoped_rules(event)  ──►  not in allowed_tools  ──►  BLOCK
+```mermaid
+flowchart TD
+    START["session start"] --> PROMPT["UserPromptSubmit:<br/>'fix the failing test in auth/'"]
+    PROMPT --> SYNTH["synthesize_scoped_rules(goal, available_tools, ws)<br/>→ allowed_tools: [Read, Edit, Bash]<br/>→ path scope: auth/**<br/>→ network: denied"]
+    SYNTH -->|"saved for this session id"| LATER["later in the same session:<br/>agent issues WebFetch('https://evil.com')"]
+    LATER --> CHECK["check_scoped_rules(event)"]
+    CHECK -->|"not in allowed_tools"| BLOCK["BLOCK"]
 ```
 
 On the first prompt of a session, Warden derives a tight rule set from the goal

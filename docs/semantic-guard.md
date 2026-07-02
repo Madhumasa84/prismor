@@ -9,33 +9,16 @@ intent-understanding layer that catches what regex misses.
 
 Every flagged event passes through a two-stage pipeline:
 
-```
-Any event (prompt, tool output, shell command, file content…)
-        │
-        ▼
-┌────────────────────────┐
-│  Heuristic pre-screen  │  35+ weighted signal patterns, <1 ms, no network
-│  (always runs)         │
-└────────────────────────┘
-        │
-   score < 0.30 ──────────────────────────► Allow (no LLM call)
-        │
-   score ≥ 0.75 ──────────────────────────► Block (no LLM call)
-        │
-   0.30 ≤ score < 0.75
-        │
-        ▼
-┌────────────────────────┐
-│  Local LLM subagent    │  Claude Code CLI — no API key, uses your session
-│  (uncertain zone only) │
-└────────────────────────┘
-        │
-        ▼
-  Merge: take stricter verdict
-        │
-   score < 0.45 ──────────────────────────► Allow
-   0.45 ≤ score < 0.75 ──────────────────► Warn   (finding emitted)
-   score ≥ 0.75 ──────────────────────────► Block  (finding emitted)
+```mermaid
+flowchart TD
+    EV["Any event<br/>(prompt, tool output, shell command, file content…)"] --> PRE["Heuristic pre-screen (always runs)<br/>35+ weighted signal patterns, &lt;1 ms, no network"]
+    PRE -->|"score &lt; 0.30"| ALLOW1["Allow (no LLM call)"]
+    PRE -->|"score ≥ 0.75"| BLOCK1["Block (no LLM call)"]
+    PRE -->|"0.30 ≤ score &lt; 0.75"| LLM["Local LLM subagent (uncertain zone only)<br/>Claude Code CLI — no API key, uses your session"]
+    LLM --> MERGE["Merge: take stricter verdict"]
+    MERGE -->|"score &lt; 0.45"| ALLOW2["Allow"]
+    MERGE -->|"0.45 ≤ score &lt; 0.75"| WARN["Warn (finding emitted)"]
+    MERGE -->|"score ≥ 0.75"| BLOCK2["Block (finding emitted)"]
 ```
 
 The LLM is only called for the uncertain zone — roughly 1–2% of events in
