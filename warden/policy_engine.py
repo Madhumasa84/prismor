@@ -167,7 +167,7 @@ class CompiledRule:
 
     __slots__ = (
         "id", "severity", "category", "title", "event_types",
-        "fields", "patterns", "action", "enabled", "mode",
+        "fields", "patterns", "raw_patterns", "action", "enabled", "mode",
         "severity_on_write", "severity_on_manifest",
     )
 
@@ -224,11 +224,28 @@ class CompiledRule:
             effective = list(base)
 
         # Compile into a single alternation for speed. DOTALL so . matches
-        # newlines — prevents evasion via embedded newlines.
+        # newlines — prevents evasion via embedded newlines. The individual
+        # pattern strings are kept so a finding can report which one fired.
+        self.raw_patterns: List[str] = effective
         joined = "|".join(f"(?:{p})" for p in effective)
         self.patterns: re.Pattern[str] = re.compile(
             joined, re.IGNORECASE | re.DOTALL
         )
+
+    def matched_pattern(self, value: str) -> Optional[str]:
+        """Return the specific pattern that matches ``value``, if any.
+
+        Only called on the (rare) match path — the hot path stays on the single
+        pre-compiled alternation. Individual patterns are compiled lazily and
+        cached by the ``re`` module.
+        """
+        for p in self.raw_patterns:
+            try:
+                if re.search(p, value, re.IGNORECASE | re.DOTALL):
+                    return p
+            except re.error:
+                continue
+        return None
 
 
 class AllowlistEntry:
@@ -618,6 +635,9 @@ class PolicyEngine:
                 "category": rule.category,
                 "title": rule.title,
                 "evidence": _truncate(matched_evidence),
+                # Which of the rule's patterns fired — static policy text (never
+                # event content), so telemetry may carry it even when redacted.
+                "pattern": rule.matched_pattern(matched_evidence),
                 "eventIndex": index,
                 "ruleId": rule.id,
                 "action": rule.action,

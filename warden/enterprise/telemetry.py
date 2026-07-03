@@ -11,7 +11,11 @@ Two modes:
   rule id, event type, agent, verdict, a static rule title, and a *hash* of the
   matched evidence. No raw commands, file paths, URLs, prompts, file contents,
   or secrets are emitted. This is the default posture and the only mode an org
-  gets unless an admin explicitly opts in.
+  gets unless an admin explicitly opts in. The rule *pattern* that fired
+  (``matched_pattern``) is also forwarded in redacted mode: it is static policy
+  configuration (the org's own rule text), never captured user data. Caveat:
+  org-authored custom patterns are org-visible config by definition, so an
+  admin embedding something sensitive in a pattern is showing it to themselves.
 
 * **full**: additionally includes the raw evidence/content, but still scrubbed
   through the cloaking secret patterns as defense-in-depth so registered or
@@ -198,6 +202,15 @@ def build_record(
         # Hash of the matched evidence: lets the cloud count distinct hits and
         # build "top patterns" without ever seeing the underlying text.
         "evidence_hash": _hash(finding.get("evidence")),
+        # The specific rule pattern that fired. Static policy text (the org's
+        # own rule configuration), so it survives redaction — it lets the
+        # dashboard's event inspector show WHY a call was flagged without
+        # carrying any captured user content.
+        "matched_pattern": finding.get("pattern"),
+        # Guard-eval duration (ms) and on-device session position, measured by
+        # the runtime. Non-sensitive operational metadata.
+        "eval_ms": extra.get("eval_ms"),
+        "session_seq": extra.get("session_seq"),
         "redacted": not full_capture,
     }
 
@@ -234,6 +247,15 @@ def assert_redacted(record: Dict[str, Any]) -> None:
         return
     if "detail" in record:
         raise AssertionError("redacted telemetry record must not contain 'detail'")
+    # matched_pattern must be policy text, never the captured evidence itself.
+    # The evidence is hashed away; if the pattern ever equals what the hash was
+    # computed from, the redaction boundary has been miswired upstream.
+    mp = record.get("matched_pattern")
+    if isinstance(mp, str) and mp and record.get("evidence_hash"):
+        if _hash(mp) == record.get("evidence_hash"):
+            raise AssertionError(
+                "redacted telemetry matched_pattern equals the hashed evidence"
+            )
     # The title is the one free-text field that survives into a redacted record;
     # guard that it carries no path / host / URL / secret leak. (repo is allowed —
     # it's org-owned managed-repo context, not the developer's private data.)

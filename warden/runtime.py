@@ -15,6 +15,7 @@ a JSON permission object, or a raised exception).
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -209,7 +210,11 @@ def evaluate_tool_call(
 
     # Only the current event drives the real-time decision (stale prior findings
     # must not block an unrelated event — see cli.py hook-dispatch rationale).
-    findings = engine.evaluate(event, len(events) - 1, session_id=session_id, subject=subject)
+    # Timed from here through exemptions: the guard-evaluation duration reported
+    # in telemetry (excludes session persistence/analysis above).
+    _guard_t0 = time.perf_counter()
+    _session_seq = len(events) - 1
+    findings = engine.evaluate(event, _session_seq, session_id=session_id, subject=subject)
 
     # Session-scoped rules.
     try:
@@ -271,6 +276,8 @@ def evaluate_tool_call(
     except Exception as exc:
         sys.stderr.write(f"[warden] rule-exemption error: {exc}\n")
 
+    _eval_ms = int((time.perf_counter() - _guard_t0) * 1000)
+
     _dispatch_telemetry(
         engine=engine,
         findings=findings,
@@ -281,6 +288,8 @@ def evaluate_tool_call(
         mode=mode,
         session_id=session_id,
         subject=subject,
+        eval_ms=_eval_ms,
+        session_seq=_session_seq,
     )
 
     # Per-call inspected-volume heartbeat (org observability), managed repos only.
@@ -328,6 +337,8 @@ def _dispatch_telemetry(
     mode: str,
     session_id: str,
     subject: Subject,
+    eval_ms: Optional[int] = None,
+    session_seq: Optional[int] = None,
 ) -> None:
     """Forward findings to configured sinks before the blocking decision so a
     SIEM sees every event, including blocked ones. Best-effort."""
@@ -363,6 +374,10 @@ def _dispatch_telemetry(
                 "policy_scope": policy_scope,
                 "repo": repo,
                 "subject": subject.as_dict(),
+                # Guard-eval duration + on-device session position, surfaced in
+                # the org dashboard's event inspector / latency KPIs.
+                "eval_ms": eval_ms,
+                "session_seq": session_seq,
             },
             raw_event=event,
         )
