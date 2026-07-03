@@ -65,7 +65,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Build and publish prismor-warden-vercel
+      - name: Build and publish prismor
         if: env.NPM_TOKEN != ''
         working-directory: adapters/vercel-ai
         run: |

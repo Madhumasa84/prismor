@@ -1,6 +1,6 @@
 # Vercel AI SDK — Prismor Warden adapter
 
-The Vercel AI SDK adapter (`prismor-warden-vercel`) is a TypeScript package that
+The Vercel AI SDK adapter (`prismor`) is a TypeScript package that
 intercepts every tool `execute()` call before it runs. It is the reference
 implementation of the **HTTP adapter pattern**: a thin language-native client
 calls the Warden **eval-server** (a sidecar Python process) to evaluate each
@@ -37,12 +37,8 @@ The server exposes:
 
 ## Install
 
-> The npm package is not published yet — until it is, install the adapter from
-> a checkout of the repo (it has no runtime npm dependencies).
-
 ```bash
-git clone https://github.com/PrismorSec/prismor.git
-npm install ./prismor/adapters/vercel-ai
+npm install prismor
 ```
 
 ## Quick start
@@ -51,7 +47,7 @@ npm install ./prismor/adapters/vercel-ai
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { wardenTools } from "prismor-warden-vercel";
+import { wardenTools } from "prismor";
 
 const run_shell = tool({
   description: "Execute a shell command",
@@ -79,7 +75,7 @@ const result = await generateText({ model: openai("gpt-4o-mini"), tools, prompt 
 A denied call in enforce mode throws `WardenBlocked`:
 
 ```typescript
-import { WardenBlocked, wardenTools } from "prismor-warden-vercel";
+import { WardenBlocked, wardenTools } from "prismor";
 
 // In a Next.js API route:
 export async function POST(req: Request) {
