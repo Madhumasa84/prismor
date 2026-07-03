@@ -7,14 +7,12 @@ Registry entry: `id: crewai` in
 
 ## Install
 
-> The adapter packages are not on PyPI yet — until they publish, install from
-> source (the import paths below are identical either way).
-
 ```bash
-pip install "prismor @ git+https://github.com/PrismorSec/prismor.git@main"                  # Warden runtime
-pip install "prismor-warden-crewai @ git+https://github.com/PrismorSec/prismor.git@main#subdirectory=adapters/crewai"
-pip install crewai                             # + crewai itself, if not present
+pip install "prismor[crewai]"
 ```
+
+> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> works from source: `pip install "prismor[crewai] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard tools (easy path)
 

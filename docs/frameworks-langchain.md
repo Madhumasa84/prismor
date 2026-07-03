@@ -7,14 +7,12 @@ Registry entry: `id: langchain` in
 
 ## Install
 
-> The adapter packages are not on PyPI yet — until they publish, install from
-> source (the import paths below are identical either way).
-
 ```bash
-pip install "prismor @ git+https://github.com/PrismorSec/prismor.git@main"                     # Warden runtime
-pip install "prismor-warden-langchain @ git+https://github.com/PrismorSec/prismor.git@main#subdirectory=adapters/langchain"
-pip install langchain-core                        # + langchain itself, if not present
+pip install "prismor[langchain]"
 ```
+
+> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> works from source: `pip install "prismor[langchain] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard tools (easy path)
 

@@ -6,16 +6,17 @@ on your existing agent or controller object, with no changes to your tool logic.
 
 ## UX at a glance
 
-| Framework | Language | Package | Guard | Multi-tenant |
+| Framework | Language | Install | Guard | Multi-tenant |
 |---|---|---|---|---|
-| OpenAI Agents SDK | Python | `prismor-warden-openai` | `guard_agent(agent)` | `use_subject("user:alice")` |
-| LangChain / LangGraph | Python | `prismor-warden-langchain` | `guard_tools([...])` | `use_subject("user:alice")` |
-| CrewAI | Python | `prismor-warden-crewai` | `guard_tools([...])` | `use_subject("user:alice")` |
-| browser-use | Python | `prismor-warden-browser-use` | `guard_controller(controller)` | `use_subject("user:alice")` |
-| Vercel AI SDK | TypeScript | `prismor-warden-vercel` | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
+| OpenAI Agents SDK | Python | `pip install "prismor[openai-agents]"` | `guard_agent(agent)` | `use_subject("user:alice")` |
+| LangChain / LangGraph | Python | `pip install "prismor[langchain]"` | `guard_tools([...])` | `use_subject("user:alice")` |
+| CrewAI | Python | `pip install "prismor[crewai]"` | `guard_tools([...])` | `use_subject("user:alice")` |
+| browser-use | Python | `pip install "prismor[browser-use]"` | `guard_controller(controller)` | `use_subject("user:alice")` |
+| Vercel AI SDK | TypeScript | `prismor-warden-vercel` (npm, from source until published) | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
 
-> The adapter packages are not on PyPI/npm yet — each framework doc shows the
-> verified install-from-source command until they publish.
+> The Python adapters ship inside the `prismor` package (needs `>= 1.14.1`) —
+> the extra just pulls the framework itself. `prismor[frameworks]` installs all
+> four. The npm package publishes separately.
 | Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Warden-Subject` header |
 
 The Python multi-tenant pattern: guard once at startup with no bound subject,

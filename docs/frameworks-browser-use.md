@@ -12,14 +12,12 @@ Playwright touches the browser.
 
 ## Install
 
-> The adapter packages are not on PyPI yet — until they publish, install from
-> source (the import paths below are identical either way).
-
 ```bash
-pip install "prismor @ git+https://github.com/PrismorSec/prismor.git@main"                        # Warden runtime
-pip install "prismor-warden-browser-use @ git+https://github.com/PrismorSec/prismor.git@main#subdirectory=adapters/browser-use"
-pip install browser-use                              # + browser-use itself, if not present
+pip install "prismor[browser-use]"
 ```
+
+> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> works from source: `pip install "prismor[browser-use] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard a controller (easy path)
 
