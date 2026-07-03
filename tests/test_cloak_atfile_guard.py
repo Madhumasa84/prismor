@@ -26,7 +26,7 @@ _SECRETS.mkdir(parents=True)
 os.environ["PRISMOR_HOME"] = str(_HOME)
 os.environ["PRISMOR_SECRETS_DIR"] = str(_SECRETS)
 
-_GUARD = _REPO / "warden" / "cloaking" / "hooks" / "userprompt-guard.sh"
+_GUARD = _REPO / "prismor" / "runtime" / "cloaking" / "hooks" / "userprompt-guard.sh"
 _CANARY = "sk-live-CANARY-0123456789abcdef0123456789abcdef"
 (_SECRETS / "CANARY").write_text(_CANARY)
 

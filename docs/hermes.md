@@ -10,11 +10,11 @@ Prismor's secret cloaking layer is available for [Hermes Agent](https://hermes-a
 
 Hermes Agent supports two plugin discovery mechanisms for Python plugins:
 
-1. **pip entry point** — when `prismor` is pip-installed, Hermes auto-discovers the `prismor-warden-cloak` plugin via the `hermes_agent.plugins` entry-point group defined in `pyproject.toml`. No filesystem setup needed.
+1. **pip entry point** — when `prismor` is pip-installed, Hermes auto-discovers the `prismor-cloak` plugin via the `hermes_agent.plugins` entry-point group defined in `pyproject.toml`. No filesystem setup needed.
 
-2. **Filesystem install** — `prismor cloak install --agent hermes` copies the plugin files to `~/.hermes/plugins/prismor-warden-cloak/` and enables it in Hermes' `config.yaml`.
+2. **Filesystem install** — `prismor cloak install --agent hermes` copies the plugin files to `~/.hermes/plugins/prismor-cloak/` and enables it in Hermes' `config.yaml`.
 
-Both paths converge on the same `register()` function in `warden.cloaking.hermes_plugin_entry`.
+Both paths converge on the same `register()` function in `prismor.runtime.cloaking.hermes_plugin_entry`.
 
 ---
 
@@ -54,7 +54,7 @@ Claude Code:    installed
 Config:         ~/.claude/settings.json
 Events:         UserPromptSubmit, PreToolUse, PostToolUse
 Hermes Agent:   installed
-Plugin dir:     ~/.hermes/plugins/prismor-warden-cloak/
+Plugin dir:     ~/.hermes/plugins/prismor-cloak/
 Hooks:          pre_tool_call, transform_terminal_output, transform_tool_result, pre_gateway_dispatch
 Secrets dir:    ~/.prismor/secrets/
 Registered:     1 placeholder(s)
@@ -128,13 +128,13 @@ pip install prismor
         ▼
   Hermes auto-discovers
   entry_point "hermes_agent.plugins"     ◄── Prefer this
-  → warden.cloaking.hermes_plugin_entry
+  → prismor.runtime.cloaking.hermes_plugin_entry
         │
         └── If not found (e.g. dev install):
             ┌───────────────────────────┐
             │ Filesystem fallback       │
             │ ~/.hermes/plugins/        │
-            │   prismor-warden-cloak/   │
+            │   prismor-cloak/   │
             │     plugin.yaml           │
             │     __init__.py           │
             └───────────────────────────┘
@@ -146,14 +146,14 @@ Registered in `pyproject.toml`:
 
 ```toml
 [project.entry-points."hermes_agent.plugins"]
-prismor-warden-cloak = "warden.cloaking.hermes_plugin_entry:register"
+prismor-cloak = "prismor.runtime.cloaking.hermes_plugin_entry:register"
 ```
 
 ### Plugin Manifest
 
 ```yaml
-# warden/cloaking/hermes-plugin/plugin.yaml
-name: prismor-warden-cloak
+# prismor/runtime/cloaking/hermes-plugin/plugin.yaml
+name: prismor-cloak
 version: 1.0.0
 kind: standalone
 hooks:
@@ -166,16 +166,16 @@ hooks:
 
 ### Code
 
-- `warden/cloaking/hermes_plugin_entry.py` — shared `register()` function consumed by both pip discovery and filesystem install
-- `warden/cloaking/hermes_installer.py` — `install()`/`uninstall()`/`status()` for filesystem-level setup (copies plugin files, enables in Hermes config, sets env vars)
-- `warden/cloaking/hermes-plugin/__init__.py` — re-exports `register()` for the filesystem install path
-- `warden/cloaking/hermes-plugin/plugin.yaml` — plugin manifest with hook declarations
+- `prismor/runtime/cloaking/hermes_plugin_entry.py` — shared `register()` function consumed by both pip discovery and filesystem install
+- `prismor/runtime/cloaking/hermes_installer.py` — `install()`/`uninstall()`/`status()` for filesystem-level setup (copies plugin files, enables in Hermes config, sets env vars)
+- `prismor/runtime/cloaking/hermes-plugin/__init__.py` — re-exports `register()` for the filesystem install path
+- `prismor/runtime/cloaking/hermes-plugin/plugin.yaml` — plugin manifest with hook declarations
 
 ---
 
 ## Test Plan
 
-- [x] pip install → Hermes auto-discovers `prismor-warden-cloak` entry point
+- [x] pip install → Hermes auto-discovers `prismor-cloak` entry point
 - [x] `prismor cloak install --agent hermes` → filesystem install succeeds
 - [x] `prismor cloak status` → shows Hermes as `installed`
 - [x] `pre_gateway_dispatch` hook detects and auto-vaults pasted Stripe/OpenAI/AWS keys

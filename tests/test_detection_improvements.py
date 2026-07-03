@@ -14,13 +14,13 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.policies import PROMPT_INJECTION_PATTERN
-from warden.policy_engine import (
+from prismor.runtime.policies import PROMPT_INJECTION_PATTERN
+from prismor.runtime.policy_engine import (
     PolicyEngine,
     _has_invisible_chars,
     _has_suspicious_unicode,
 )
-from warden.scanner import (
+from prismor.runtime.scanner import (
     _DangerousCallVisitor,
     _ast_scan_python,
     audit_mcp_schema,

@@ -15,7 +15,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
     identity.save_identity({"device_id": "d", "org_id": "o", "user_id": "u",
                             "device_key": "prism_dev_x", "api_base": "http://x"})
     yield
@@ -53,8 +53,8 @@ def _bundle(exemption_pattern="github.com/acme/sandbox", expires=None, disable_c
 
 
 def _engine(tmp_path, monkeypatch, url, bundle):
-    from warden.enterprise import workspace_scope, remote_policy
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.enterprise import workspace_scope, remote_policy
+    from prismor.runtime.policy_engine import PolicyEngine
     monkeypatch.setattr(workspace_scope, "is_managed", lambda ws: True)
     monkeypatch.setattr(workspace_scope, "org_managed_patterns", lambda: ["github.com/acme/*"])
     monkeypatch.setattr(remote_policy, "verify_and_load", lambda: dict(bundle))
@@ -92,7 +92,7 @@ def test_expired_exemption_ignored(tmp_path, monkeypatch):
 
 
 def test_telemetry_record_tags_policy_scope(tmp_path, monkeypatch):
-    from warden.enterprise import telemetry
+    from prismor.runtime.enterprise import telemetry
     rec = telemetry.build_record(
         {"severity": "high", "category": "x", "ruleId": "r", "action": "warn", "title": "t"},
         {"type": "shell", "command": "x"},

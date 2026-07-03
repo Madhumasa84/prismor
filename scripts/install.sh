@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSL https://prismor.dev/install | sh
 
 # The `prismor` distribution owns the console entry points (prismor, immunity,
-# warden). Installing the legacy `immunity-agent` shim instead makes pipx
+# prismor). Installing the legacy `immunity-agent` shim instead makes pipx
 # refuse ("No apps associated with package") and leaves nothing on PATH.
 PACKAGE="prismor"
 

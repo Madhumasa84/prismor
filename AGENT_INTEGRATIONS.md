@@ -1,6 +1,6 @@
 # AI Coding Agent Integrations
 
-How Prismor Warden integrates with each major AI coding agent — what ships today, what's planned, and what mechanism each agent exposes for runtime security monitoring.
+How Prismor integrates with each major AI coding agent — what ships today, what's planned, and what mechanism each agent exposes for runtime security monitoring.
 
 _Last updated: 2026-06-17._
 
@@ -9,13 +9,13 @@ _Last updated: 2026-06-17._
 ## Status at a glance
 
 The coverage matrix below is generated from the integration registry
-(`warden/integrations/registry.yaml`) by `scripts/gen_integration_matrix.py`.
+(`prismor/runtime/integrations/registry.yaml`) by `scripts/gen_integration_matrix.py`.
 Per-agent capability details (sweep scan, skill scan, cloaking) live in the
 sections further down.
 
 <!-- BEGIN GENERATED: coverage-matrix (scripts/gen_integration_matrix.py) -->
 
-_Generated from `warden/integrations/registry.yaml` — do not edit by hand._
+_Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by hand._
 
 **Coding agents**
 
@@ -63,46 +63,46 @@ Legend: ✅ shipped · 🟡 roadmap · — sweep-only / not applicable. Surfaces
 - **Events hooked:** `UserPromptSubmit`, `PreToolUse`, `PostToolUse` with matcher `Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch`.
 - **Blocking:** exit 2 from hook → block; stderr → rejection reason.
 - **Sweep target:** `~/.claude/`.
-- **Cloaking:** `warden/cloaking/` installs `PreToolUse:Bash` + `PostToolUse:mcp__.*` + `UserPromptSubmit` hooks for `@@SECRET:<name>@@` substitution and scrub-on-output.
-- **Code:** `warden/hooks.py` `_merge_claude()`, `_normalize_claude()`.
+- **Cloaking:** `prismor/runtime/cloaking/` installs `PreToolUse:Bash` + `PostToolUse:mcp__.*` + `UserPromptSubmit` hooks for `@@SECRET:<name>@@` substitution and scrub-on-output.
+- **Code:** `prismor/runtime/hooks.py` `_merge_claude()`, `_normalize_claude()`.
 
 ### Cursor
 
 - **Config:** `.cursor/hooks.json` (schema-validated).
 - **Events hooked:** `beforeSubmitPrompt`, `beforeShellCommand`, `afterShellCommand`, `beforeFileWrite`, `afterFileWrite`.
 - **Sweep target:** `~/.config/Cursor/`.
-- **Code:** `warden/hooks.py` `_merge_cursor()`, `_normalize_cursor()`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_cursor()`, `_normalize_cursor()`.
 
 ### Windsurf (Codeium Cascade)
 
 - **Config:** `.windsurf/hooks.json` (project) or `~/.codeium/windsurf/hooks.json` (user).
 - **Events hooked:** `pre_user_prompt`, `pre_read_code`, `post_read_code`, `pre_write_code`, `post_write_code`, `pre_run_command`, `post_run_command`, `pre_mcp_tool_use`, `post_mcp_tool_use`, `post_cascade_response`.
 - **Sweep target:** `~/.codeium/`.
-- **Code:** `warden/hooks.py` `_merge_windsurf()`, `_normalize_windsurf()`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_windsurf()`, `_normalize_windsurf()`.
 
 ### OpenClaw
 
-- **Config:** `~/.openclaw/config.json` — registers a JS plugin scaffolded at `warden/openclaw-plugin/`.
-- **Plugin hooks:** `before_tool_call`, `message_sending`, plus an internal `message:received` hook at `~/.openclaw/hooks/prismor-warden/`.
-- **Blocking:** non-zero exit from the Warden dispatcher → plugin returns `{block: true, reason}`.
-- **Code:** `warden/hooks.py` `_merge_openclaw()`, `_normalize_openclaw()`.
+- **Config:** `~/.openclaw/config.json` — registers a JS plugin scaffolded at `prismor/runtime/openclaw-plugin/`.
+- **Plugin hooks:** `before_tool_call`, `message_sending`, plus an internal `message:received` hook at `~/.openclaw/hooks/prismor/`.
+- **Blocking:** non-zero exit from the Prismor dispatcher → plugin returns `{block: true, reason}`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_openclaw()`, `_normalize_openclaw()`.
 
 ### Hermes (NousResearch gateway)
 
 Prismor integrates with Hermes at two complementary layers:
 
 **1. Runtime hooks** (for policy enforcement and session monitoring):
-- **Config:** `~/.hermes/config.json` — registers a JS plugin scaffolded at `warden/hermes-plugin/`.
-- **Plugin hooks:** `before_tool_call`, `message_sending`, internal `message:received` hook at `~/.hermes/hooks/prismor-warden/`.
+- **Config:** `~/.hermes/config.json` — registers a JS plugin scaffolded at `prismor/runtime/hermes-plugin/`.
+- **Plugin hooks:** `before_tool_call`, `message_sending`, internal `message:received` hook at `~/.hermes/hooks/prismor/`.
 - **Session ingest:** offline analysis of `~/.hermes/sessions/*.jsonl` via `prismor ingest --input <file> --agent hermes`.
-- **Code:** `warden/hooks.py` `_merge_hermes()`, `_normalize_hermes()`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_hermes()`, `_normalize_hermes()`.
 
 **2. Secret cloaking** (for preventing secrets from entering model context):
 - **Discovery:** pip-installed Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry-point group in `pyproject.toml`. No filesystem setup needed.
-- **Alternative install:** `prismor cloak install --agent hermes` copies the plugin to `~/.hermes/plugins/prismor-warden-cloak/`.
+- **Alternative install:** `prismor cloak install --agent hermes` copies the plugin to `~/.hermes/plugins/prismor-cloak/`.
 - **Hooks installed:** `pre_tool_call` (decloak + secret guard), `post_tool_call` (audit), `transform_terminal_output` (scrub output), `transform_tool_result` (scrub tool results), `pre_gateway_dispatch` (paste guard).
 - **Auto-vaulting:** pasted secrets are detected, vaulted under `auto_<hash>` names, and re-sent as `@@SECRET:auto_xxx@@` without the agent ever seeing the raw value.
-- **Code:** `warden/cloaking/hermes_installer.py`, `warden/cloaking/hermes_plugin_entry.py`.
+- **Code:** `prismor/runtime/cloaking/hermes_installer.py`, `prismor/runtime/cloaking/hermes_plugin_entry.py`.
 - **Docs:** [docs/hermes.md](docs/hermes.md).
 
 ### GitHub Copilot CLI
@@ -112,7 +112,7 @@ Prismor integrates with Hermes at two complementary layers:
 - **Blocking:** hook emits `{"permissionDecision": "deny", "permissionDecisionReason": "..."}` on stdout. Exit-2 convention is not used — Copilot reads the JSON response instead.
 - **Static layer:** `--allow-tool` / `--deny-tool` / `--allow-all-tools` CLI flags apply before the hook fires (deny beats allow). Useful as defense-in-depth.
 - **Payload note:** `toolArgs` arrives as a JSON-encoded string; `_normalize_copilot()` parses it before evaluation.
-- **Code:** `warden/hooks.py` `_merge_copilot()`, `_strip_copilot()`, `_normalize_copilot()`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_copilot()`, `_strip_copilot()`, `_normalize_copilot()`.
 
 ### Codex (OpenAI)
 
@@ -122,7 +122,7 @@ Prismor integrates with Hermes at two complementary layers:
 - **Blocking:** exit 2 from hook → block; stderr → rejection reason. Verified end to end — a policy-blocked command (`rm package-lock.json`, matched by the `lockfile-deletion` rule) was actually denied by Codex's tool router before execution, with the file left untouched.
 - **Sweep target:** `~/.codex/`.
 - **Minimum version: `codex-cli` ≥ `0.141.0-alpha.1`.** Earlier versions, including the `0.140.0` stable release, have an upstream bug ([openai/codex#26383](https://github.com/openai/codex/issues/26383), [#26452](https://github.com/openai/codex/issues/26452)) where `codex exec` never dispatches *any* hook — not because of config shape, matcher syntax, or hook trust, but because `--dangerously-bypass-hook-trust` silently failed to propagate to the exec thread, so hooks (which require persisted trust) were dropped before dispatch even without `exec` printing an error. Fixed in [openai/codex#26434](https://github.com/openai/codex/pull/26434), merged 2026-06-16, first shipped in `rust-v0.141.0-alpha.1`. As of this writing that fix has not yet reached a stable release tag — pin to an alpha ≥ that build if you need working Codex hooks today, and watch for the next `0.141.x` (or later) stable release.
-- **Code:** `warden/hooks.py` `_merge_codex()`, `_strip_codex()`, `_normalize_codex()`.
+- **Code:** `prismor/runtime/hooks.py` `_merge_codex()`, `_strip_codex()`, `_normalize_codex()`.
 
 ---
 
@@ -130,45 +130,45 @@ Prismor integrates with Hermes at two complementary layers:
 
 Framework agents deployed in production (not coding IDEs) expose no hook-config
 files. The control point is an **in-process SDK adapter** that wraps tool
-execution and calls the shared `warden.runtime.evaluate_tool_call` pipeline — the
+execution and calls the shared `prismor.runtime.runtime.evaluate_tool_call` pipeline — the
 same policy, observe/enforce model, and session store the coding-agent hooks use.
 These adapters are also the layer that carries **per-user** attribution: one
 deployed agent serving many users tags each tool call with the calling
-`Subject` (see [`warden/principal.py`](warden/principal.py)) so policy, IAM, and
+`Subject` (see [`prismor/runtime/principal.py`](prismor/runtime/principal.py)) so policy, IAM, and
 telemetry scope to the end-user.
 
 ### OpenAI Agents SDK
 
 - **Surface:** in-process tool wrapper / guardrail (`surface: sdk`).
 - **Package:** [`adapters/openai-agents/`](adapters/openai-agents/) →
-  `prismor-warden-openai`. `warden_guard(tool, subject="user:alice")`.
-- **Blocking:** raises `WardenBlocked` before the tool runs; `mode="observe"` is log-only.
+  `prismor-openai`. `prismor_guard(tool, subject="user:alice")`.
+- **Blocking:** raises `PrismorBlocked` before the tool runs; `mode="observe"` is log-only.
 - **Per-user:** `subject` → policy + IAM (`user:<id>` / `team:<id>` profiles) + telemetry.
-- **Code:** `adapters/openai-agents/prismor_warden_openai/__init__.py`,
-  `warden/runtime.py`, `warden/principal.py`.
+- **Code:** `adapters/openai-agents/prismor_openai/__init__.py`,
+  `prismor/runtime/runtime.py`, `prismor/runtime/principal.py`.
 - **Docs:** [docs/frameworks-openai-agents.md](docs/frameworks-openai-agents.md).
 
 ### LangChain / LangGraph
 
 - **Surface:** in-process tool wrapper + optional callback handler (`surface: sdk`).
-- **Package:** [`adapters/langchain/`](adapters/langchain/) → `prismor-warden-langchain`.
-  `guard_tools([...], subject="user:alice")`; or `WardenCallbackHandler(...)` for capture.
+- **Package:** [`adapters/langchain/`](adapters/langchain/) → `prismor-langchain`.
+  `guard_tools([...], subject="user:alice")`; or `PrismorCallbackHandler(...)` for capture.
 - **Blocking:** wraps each tool's `func`/`coroutine`; denied call returns a denial
   string (or raises with `raise_on_block=True`). `mode="observe"` is log-only.
 - **Verified:** live against a LangGraph `create_react_agent` — `rm -rf /` and
   `cat .env | curl` blocked before execution, `echo` allowed.
-- **Code:** `adapters/langchain/prismor_warden_langchain/__init__.py`.
+- **Code:** `adapters/langchain/prismor_langchain/__init__.py`.
 
 ### CrewAI
 
 - **Surface:** in-process tool wrapper (`surface: sdk`).
-- **Package:** [`adapters/crewai/`](adapters/crewai/) → `prismor-warden-crewai`.
+- **Package:** [`adapters/crewai/`](adapters/crewai/) → `prismor-crewai`.
   `guard_tools([...], subject="user:alice")`.
 - **Blocking:** wraps each tool's `func`/`_run`/`run`; denied call returns a
   denial string (or raises). `mode="observe"` is log-only.
 - **Verified:** live against a `Crew` with a shell tool — `rm -rf /` blocked
   before execution, `echo` allowed.
-- **Code:** `adapters/crewai/prismor_warden_crewai/__init__.py`.
+- **Code:** `adapters/crewai/prismor_crewai/__init__.py`.
 
 ### MCP proxy — roadmap
 
@@ -179,7 +179,7 @@ and evaluates it, covering any MCP-speaking agent with no per-framework code.
 
 ## Roadmap — hook adapters planned
 
-Each agent below exposes a blocking pre-tool hook. An adapter requires (1) config-merge in `warden/hooks.py`, (2) `_normalize_*` function, (3) registration in `_SUPPORTED_AGENTS` and `warden/store.py`, (4) sweep target in `warden/sweep.py` if applicable.
+Each agent below exposes a blocking pre-tool hook. An adapter requires (1) config-merge in `prismor/runtime/hooks.py`, (2) `_normalize_*` function, (3) registration in `_SUPPORTED_AGENTS` and `prismor/runtime/store.py`, (4) sweep target in `prismor/runtime/sweep.py` if applicable.
 
 ### Gemini CLI (Google)
 
@@ -196,7 +196,7 @@ Each agent below exposes a blocking pre-tool hook. An adapter requires (1) confi
 - **Hooks:** `tool.execute.before`, `tool.execute.after`, plus `file.edited`, `file.watcher.updated`, `session.created|compacted|updated`, `message.updated|removed`, `shell.env`, `permission.asked|replied`.
 - **Handler signature:** `export const name = async ({ project, client, $, directory, worktree }) => ({ "tool.execute.before": async (input, output) => { ... } })`. `input.tool` = tool name; `output.args` is mutable — supports input rewriting as well as blocking.
 - **Blocking:** `throw new Error(reason)` inside `tool.execute.before`.
-- **Adapter work:** ship `@prismor/opencode-plugin` (or a drop-in `warden-plugin.js`) that translates the hook payload to Warden's canonical event, calls the dispatcher, and `throw`s on deny. Different shape than OpenClaw/Hermes: in-process JS, not subprocess-per-call — the shim is the only agent-side code.
+- **Adapter work:** ship `@prismor/opencode-plugin` (or a drop-in `prismor-plugin.js`) that translates the hook payload to Prismor's canonical event, calls the dispatcher, and `throw`s on deny. Different shape than OpenClaw/Hermes: in-process JS, not subprocess-per-call — the shim is the only agent-side code.
 
 ### Kiro (AWS)
 
@@ -235,7 +235,7 @@ These agents don't expose a programmable pre-tool hook. Integration is limited t
 
 ### Trae / Trae CN (ByteDance)
 
-- **Hooks:** none. MCP is the only dynamic surface — wrapping Warden as an MCP proxy is feasible but out of scope.
+- **Hooks:** none. MCP is the only dynamic surface — wrapping Prismor as an MCP proxy is feasible but out of scope.
 - **Surface:** `.trae/rules/` markdown + MCP server registration.
 - **Config dir:** `~/.trae/` (scanned by `prismor sweep`), workspace `.trae/rules/` and `.trae/agents/`.
 
@@ -251,12 +251,12 @@ These agents don't expose a programmable pre-tool hook. Integration is limited t
 
 When a new AI coding agent ships a pre-tool hook API, the checklist is:
 
-1. Add the agent name to `_SUPPORTED_AGENTS` in `warden/hooks.py`.
+1. Add the agent name to `_SUPPORTED_AGENTS` in `prismor/runtime/hooks.py`.
 2. Add a `_config_path(...)` branch returning the right project/user path.
 3. Write `_merge_<agent>(config, command, ...)` producing the hook config.
 4. Write `_strip_<agent>(config, marker)` for clean uninstall.
-5. Write `_normalize_<agent>(payload, session_id)` mapping the agent's payload to Warden's canonical `{type, session_id, agent, agent_event, ...}` shape.
-6. Add the config directory to `TOOL_DIRS` in `warden/sweep.py` if sweep applies.
+5. Write `_normalize_<agent>(payload, session_id)` mapping the agent's payload to Prismor's canonical `{type, session_id, agent, agent_event, ...}` shape.
+6. Add the config directory to `TOOL_DIRS` in `prismor/runtime/sweep.py` if sweep applies.
 7. Add MCP/skill config locations to `prismor scan` discovery.
 8. Update this file.
 

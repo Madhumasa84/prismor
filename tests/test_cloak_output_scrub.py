@@ -30,7 +30,7 @@ _SECRETS.mkdir(parents=True)
 os.environ["PRISMOR_HOME"] = str(_HOME)
 os.environ["PRISMOR_SECRETS_DIR"] = str(_SECRETS)
 
-_HOOKS = _REPO / "warden" / "cloaking" / "hooks"
+_HOOKS = _REPO / "prismor" / "runtime" / "cloaking" / "hooks"
 _DECLOAK = _HOOKS / "decloak.sh"
 _SCRUB = _HOOKS / "scrub-stream.sh"
 _READ_GUARD = _HOOKS / "read-guard.sh"
@@ -60,7 +60,7 @@ def run_hook(script: Path, payload: dict) -> dict | None:
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        env=os.environ,
+        env={**os.environ, "PRISMOR_HOME": str(_HOME), "PRISMOR_SECRETS_DIR": str(_SECRETS)},
     )
     out = proc.stdout.strip()
     return json.loads(out) if out else None
@@ -72,7 +72,7 @@ def run_scrub(stdin_text: str) -> str:
         input=stdin_text,
         capture_output=True,
         text=True,
-        env=os.environ,
+        env={**os.environ, "PRISMOR_HOME": str(_HOME), "PRISMOR_SECRETS_DIR": str(_SECRETS)},
     )
     return proc.stdout
 

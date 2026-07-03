@@ -1,15 +1,15 @@
 # Docker and Container Hardening
 
-When running AI agents in containers (Docker, Kubernetes, CI runners), Warden provides runtime monitoring but containers require additional hardening to be secure. The agent process has the same filesystem and network access as any other process running as that user.
+When running AI agents in containers (Docker, Kubernetes, CI runners), Prismor provides runtime monitoring but containers require additional hardening to be secure. The agent process has the same filesystem and network access as any other process running as that user.
 
-Warden also includes an opt-in Docker-backed command sandbox for Claude Code Bash tool calls. This is defense in depth: Warden still evaluates the original command against policy first, then rewrites allowed Bash commands to run through `prismor sandbox run`.
+Prismor also includes an opt-in Docker-backed command sandbox for Claude Code Bash tool calls. This is defense in depth: Prismor still evaluates the original command against policy first, then rewrites allowed Bash commands to run through `prismor sandbox run`.
 
 ## Prerequisites
 
-Warden requires **PyYAML** for its policy engine. Without it, all rules are silently disabled:
+Prismor requires **PyYAML** for its policy engine. Without it, all rules are silently disabled:
 
 ```bash
-# Verify before installing Warden
+# Verify before installing Prismor
 python3 -c "import yaml" || pip3 install pyyaml
 ```
 
@@ -31,7 +31,7 @@ docker run -dit \
 `--network none` is the single highest-impact mitigation. An agent tricked into exfiltrating data via curl, Python requests, DNS tunneling, or generated scripts cannot send anything if the network is disabled. If outbound access is needed, use the egress allowlist in your policy:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   egress_allowlist:
     - "*.github.com"
@@ -40,12 +40,12 @@ settings:
     - "api.anthropic.com"
 ```
 
-## Warden Bash Sandbox
+## Prismor Bash Sandbox
 
 Enable the Docker-backed sandbox per project:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 version: "1.0"
 
 settings:
@@ -74,7 +74,7 @@ prismor sandbox check
 prismor sandbox run -- "echo hello from sandbox"
 ```
 
-Install regular Warden hooks for Claude. No separate sandbox hook is needed:
+Install regular Prismor hooks for Claude. No separate sandbox hook is needed:
 
 ```bash
 prismor install-hooks --agent claude --mode enforce
@@ -83,7 +83,7 @@ prismor install-hooks --agent claude --mode enforce
 When sandboxing is enabled, the Claude `PreToolUse:Bash` hook path works in this order:
 
 1. Normalize the original Bash command.
-2. Evaluate Warden policy, scoped-agent rules, IAM, and evasion checks.
+2. Evaluate Prismor policy, scoped-agent rules, IAM, and evasion checks.
 3. If the command is allowed, rewrite it to `prismor sandbox run --encoded ...`.
 4. The sandbox runner executes the original command inside Docker with a bind-mounted workspace, dropped capabilities, no-new-privileges, resource limits, and the configured network mode.
 
@@ -91,7 +91,7 @@ When sandboxing is enabled, the Claude `PreToolUse:Bash` hook path works in this
 
 ## Known Limitations
 
-Warden monitors tool-use events (shell commands, file reads/writes, network calls). The following attack patterns cannot be detected by tool-level hooks alone:
+Prismor monitors tool-use events (shell commands, file reads/writes, network calls). The following attack patterns cannot be detected by tool-level hooks alone:
 
 | Gap                                    | Why                                                                              | Workaround                                                                          |
 | -------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -99,13 +99,13 @@ Warden monitors tool-use events (shell commands, file reads/writes, network call
 | Code generation that reads credentials | A generated `.py` file reading credentials is a file write (content not scanned) | Add `.credentials.json` to `.gitignore` and use OS keychain storage                 |
 | Symlink reads (after creation)         | File read hook sees the apparent path, not the symlink target                    | Symlink creation is detected; resolve symlinks in your hook scripts                 |
 | Multi-step social engineering          | Each step (read file, encode, send) is individually benign                       | Session-level correlation (roadmap)                                                 |
-| Project-level policy overrides         | `.prismor-warden/policy.yaml` can disable rules                                  | Make policy files read-only: `chmod 444 .prismor-warden/policy.yaml`                |
+| Project-level policy overrides         | `.prismor/policy.yaml` can disable rules                                  | Make policy files read-only: `chmod 444 .prismor/policy.yaml`                |
 | Domain allowlists inside Docker        | Docker has network modes, not domain-aware egress policy                         | `network: none` by default; use proxy/firewall integration in a future backend      |
 | Non-Claude agent command mutation      | Not every agent hook API supports safe input rewriting                           | Use `prismor sandbox run -- <cmd>` directly; hook-based sandboxing starts with Claude Bash |
 
 ## Post-Install Verification
 
-After installing Warden, verify it's working:
+After installing Prismor, verify it's working:
 
 ```bash
 # Should return BLOCK for all of these

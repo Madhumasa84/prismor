@@ -23,7 +23,7 @@ from typing import List, Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# ── ANSI colours (same palette as warden/cli.py) ─────────────────────────────
+# ── ANSI colours (same palette as prismor/runtime/cli.py) ─────────────────────────────
 _RED    = "\033[0;31m"
 _YELLOW = "\033[1;33m"
 _GREEN  = "\033[0;32m"
@@ -44,11 +44,11 @@ def _ce(text: str, colour: str) -> str:
     return text
 
 
-# ── Feed helpers (reuse existing warden modules, don't re-implement) ──────────
+# ── Feed helpers (reuse existing prismor modules, don't re-implement) ──────────
 
 def _load_feed() -> dict:
     try:
-        from warden.feed import load_feed
+        from prismor.runtime.feed import load_feed
         # load_feed resolves the bundled feed itself; _REPO_ROOT is only a
         # hint that works in a git checkout (it points at site-packages once
         # installed, where the resolver takes over).
@@ -59,7 +59,7 @@ def _load_feed() -> dict:
 
 def _check_feed(packages, feed: dict) -> list:
     try:
-        from warden.deps import check_against_feed
+        from prismor.runtime.deps import check_against_feed
         deps = [{"name": p.name, "version": "", "ecosystem": ""} for p in packages]
         return check_against_feed(deps, feed)
     except Exception:
@@ -216,11 +216,11 @@ def _exec(argv: List[str]) -> None:
 # ── Store integration ─────────────────────────────────────────────────────────
 
 def _record_to_store(event, verdicts, recommendations=None) -> None:
-    """Write scoring results to the warden store. Fail-open."""
+    """Write scoring results to the prismor store. Fail-open."""
     try:
         import uuid
         from datetime import datetime, timezone
-        from warden.store import infer_default_workspace, write_supply_chain_event
+        from prismor.runtime.store import infer_default_workspace, write_supply_chain_event
         workspace = infer_default_workspace(Path.cwd())
         rec_map = {
             spec_raw: rec.version
@@ -251,7 +251,7 @@ def run_supply(argv: Optional[List[str]] = None) -> None:
         _usage()
         return
 
-    # Add repo root to path so warden imports work when called as a script
+    # Add repo root to path so prismor imports work when called as a script
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
 
@@ -277,7 +277,7 @@ def run_supply(argv: Optional[List[str]] = None) -> None:
     from supplychain.scoring.engine import RiskScorer, load_allowlist
 
     try:
-        from warden.store import infer_default_workspace
+        from prismor.runtime.store import infer_default_workspace
         workspace = infer_default_workspace(Path.cwd())
     except Exception:
         workspace = Path.cwd()
@@ -288,7 +288,7 @@ def run_supply(argv: Optional[List[str]] = None) -> None:
         meta = fetch_metadata(spec, event.ecosystem)
         verdicts.append(scorer.score(spec, meta, event))
 
-    # Cross-check against the existing Warden advisory feed
+    # Cross-check against the existing Prismor advisory feed
     feed = _load_feed()
     feed_hits = _check_feed(event.packages, feed)
 
@@ -318,7 +318,7 @@ def run_supply(argv: Optional[List[str]] = None) -> None:
             f"  {_c('Blocked:', _RED)} {names}\n"
             f"{suggest_line}"
             f"  To override: add to supply_chain.allowlist in "
-            f".prismor-warden/policy.yaml\n"
+            f".prismor/policy.yaml\n"
         )
         sys.exit(1)
 
@@ -368,7 +368,7 @@ def _usage() -> None:
 
 
 # Back-compat shim — kept so `python -m supplychain.cli` keeps working for any
-# external caller. New code should use `warden.immunity_cli:main` instead.
+# external caller. New code should use `prismor.runtime.immunity_cli:main` instead.
 def main() -> None:
     run_supply(sys.argv[1:])
 

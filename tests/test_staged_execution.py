@@ -16,11 +16,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.learning import detect_staged_execution
-from warden.store import initialize_database, get_db_path
-from warden.policy_engine import PolicyEngine
+from prismor.runtime.learning import detect_staged_execution
+from prismor.runtime.store import initialize_database, get_db_path
+from prismor.runtime.policy_engine import PolicyEngine
 
-# Built up so Warden's own secret-guard / smoke tooling doesn't trip on literals.
+# Built up so Prismor's own secret-guard / smoke tooling doesn't trip on literals.
 _SH = "ba" + "sh"
 _SH2 = "s" + "h"
 

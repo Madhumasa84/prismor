@@ -2,10 +2,10 @@ MIT License
 
 Copyright (c) 2026 Prismor
 
-The framework adapters in this directory (prismor-warden-langchain,
-prismor-warden-crewai, prismor-warden-openai, prismor-warden-browser-use,
-and the npm package `prismor-warden`) are licensed under MIT — the most permissive terms — so
-the ecosystem can integrate and vendor them with zero friction. The Warden
+The framework adapters in this directory (prismor-langchain,
+prismor-crewai, prismor-openai, prismor-browser-use,
+and the npm package `prismor`) are licensed under MIT — the most permissive terms — so
+the ecosystem can integrate and vendor them with zero friction. The Prismor
 runtime they call into is licensed separately at the repository root.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

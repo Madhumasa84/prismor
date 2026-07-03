@@ -2,7 +2,7 @@
 
 Drives the adapters with fake tool objects that mimic each framework's shape
 (a structured tool with ``.func``; a CrewAI BaseTool-style object with ``._run``)
-against the real Warden policy pipeline.
+against the real Prismor policy pipeline.
 """
 import sys
 from pathlib import Path
@@ -15,14 +15,14 @@ for _pkg in ("langchain", "crewai"):
     if str(_src) not in sys.path:
         sys.path.insert(0, str(_src))
 
-from prismor.warden.langchain import (  # noqa: E402
-    WardenBlocked as LCBlocked,
+from prismor.langchain import (  # noqa: E402
+    PrismorBlocked as LCBlocked,
     guard_tools as lc_guard,
-    warden_guard_tool as lc_guard_one,
+    prismor_guard_tool as lc_guard_one,
 )
-from prismor.warden.crewai import (  # noqa: E402
+from prismor.crewai import (  # noqa: E402
     guard_tools as crew_guard,
-    warden_guard_tool as crew_guard_one,
+    prismor_guard_tool as crew_guard_one,
 )
 
 
@@ -101,7 +101,7 @@ def test_crewai_basetool_run_blocks(tmp_path):
 
 
 def test_crewai_per_user_iam(tmp_path):
-    iam = tmp_path / ".prismor-warden"
+    iam = tmp_path / ".prismor"
     iam.mkdir(parents=True, exist_ok=True)
     (iam / "iam.yaml").write_text(
         "agents:\n  user:bob:\n    allowed_tools: [Read]\n    deny_tools: [Bash]\n"

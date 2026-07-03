@@ -34,26 +34,26 @@ def _git_repo(tmp_path, url):
 
 
 def _enroll():
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
     identity.save_identity({"device_id": "d", "org_id": "o", "user_id": "u",
                             "device_key": "prism_dev_x", "org_name": "Acme", "api_base": "http://x"})
 
 
 def test_git_remote_detection(tmp_path):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     assert ws.detect_git_remote(_git_repo(tmp_path, "https://github.com/acme/payments.git")) == "github.com/acme/payments"
     assert ws.detect_git_remote(_git_repo(tmp_path, "git@github.com:Acme/Payments.git")) == "github.com/acme/payments"
     assert ws.detect_git_remote(tmp_path / "not-a-repo") is None
 
 
 def test_not_enrolled_is_local(tmp_path):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     info = ws.resolve_scope(_git_repo(tmp_path, "https://github.com/acme/x"))
     assert info["scope"] == "local" and info["reason"] == "not_enrolled"
 
 
 def test_no_patterns_manages_everything(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: [])
     info = ws.resolve_scope(_git_repo(tmp_path, "https://github.com/someone/sideproject"))
@@ -61,7 +61,7 @@ def test_no_patterns_manages_everything(tmp_path, monkeypatch):
 
 
 def test_dev_can_opt_out_personal_when_no_patterns(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: [])
     repo = _git_repo(tmp_path, "https://github.com/me/hobby")
@@ -70,7 +70,7 @@ def test_dev_can_opt_out_personal_when_no_patterns(tmp_path, monkeypatch):
 
 
 def test_org_claimed_repo_is_managed_and_cannot_downgrade(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["github.com/acme/*"])
     repo = _git_repo(tmp_path, "https://github.com/acme/payments")
@@ -81,7 +81,7 @@ def test_org_claimed_repo_is_managed_and_cannot_downgrade(tmp_path, monkeypatch)
 
 
 def test_non_claimed_repo_is_personal_when_patterns_set(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["github.com/acme/*"])
     info = ws.resolve_scope(_git_repo(tmp_path, "https://github.com/me/sideproject"))
@@ -89,7 +89,7 @@ def test_non_claimed_repo_is_personal_when_patterns_set(tmp_path, monkeypatch):
 
 
 def test_dev_opt_in_managed(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["github.com/acme/*"])
     repo = _git_repo(tmp_path, "https://github.com/me/work-related")
@@ -98,7 +98,7 @@ def test_dev_opt_in_managed(tmp_path, monkeypatch):
 
 
 def test_hostless_pattern_matches(tmp_path, monkeypatch):
-    from warden.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["acme/*"])
     assert ws.is_managed(_git_repo(tmp_path, "https://github.com/acme/svc")) is True
@@ -107,8 +107,8 @@ def test_hostless_pattern_matches(tmp_path, monkeypatch):
 def test_policy_engine_skips_remote_for_personal(tmp_path, monkeypatch):
     """The org policy overlay (and its telemetry sink) must NOT be merged for a
     personal workspace."""
-    from warden.enterprise import workspace_scope as ws
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.enterprise import workspace_scope as ws
+    from prismor.runtime.policy_engine import PolicyEngine
     _enroll()
     monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["github.com/acme/*"])
     personal = _git_repo(tmp_path, "https://github.com/me/hobby")

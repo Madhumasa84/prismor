@@ -28,7 +28,7 @@ signature.bin
 *.bin
 tmp/
 temp/
-.prismor-warden/
+.prismor/
 
 # Generated hook configs (created by install-hooks, user-specific paths)
 .claude/settings.json
@@ -36,8 +36,8 @@ temp/
 .windsurf/hooks.json
 
 # Scaffolded plugin packages (created by install-hooks --agent openclaw/hermes)
-warden/openclaw-plugin/
-warden/hermes-plugin/
+prismor/runtime/openclaw-plugin/
+prismor/runtime/hermes-plugin/
 
 # IDEs and OS files
 .vscode/

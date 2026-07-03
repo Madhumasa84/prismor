@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the coverage matrix in AGENT_INTEGRATIONS.md from the registry.
 
-The registry (``warden/integrations/registry.yaml``) is the source of truth;
+The registry (``prismor/runtime/integrations/registry.yaml``) is the source of truth;
 the prose in AGENT_INTEGRATIONS.md is hand-written, but the coverage tables are
 generated between marker comments so they never drift from the registry.
 
@@ -10,7 +10,7 @@ Usage:
     python3 scripts/gen_integration_matrix.py --check    # CI: fail if out of date
 
 Mirrors the marker-based in-place edit approach used by
-``warden/cloaking/installer.py`` for settings.json.
+``prismor/runtime/cloaking/installer.py`` for settings.json.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from warden.integrations.registry import Integration, load_registry  # noqa: E402
+from prismor.runtime.integrations.registry import Integration, load_registry  # noqa: E402
 
 _DOC_PATH = _REPO_ROOT / "AGENT_INTEGRATIONS.md"
 _BEGIN = "<!-- BEGIN GENERATED: coverage-matrix (scripts/gen_integration_matrix.py) -->"
@@ -45,7 +45,7 @@ def render_matrix() -> str:
     lines = [
         _BEGIN,
         "",
-        "_Generated from `warden/integrations/registry.yaml` — do not edit by hand._",
+        "_Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by hand._",
         "",
         "**Coding agents**",
         "",

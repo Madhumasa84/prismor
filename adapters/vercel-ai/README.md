@@ -1,8 +1,8 @@
-# prismor-warden
+# prismor
 
-Prismor Warden adapter for the [Vercel AI SDK](https://sdk.vercel.ai).
+Prismor adapter for the [Vercel AI SDK](https://sdk.vercel.ai).
 
-Wraps tool `execute` functions to call the Warden HTTP eval-server before
+Wraps tool `execute` functions to call the Prismor HTTP eval-server before
 the tool body runs. Works with any framework that uses the Vercel AI SDK —
 Next.js, Remix, Node.js, edge runtimes.
 
@@ -17,7 +17,7 @@ immunity eval-server --port 7071 --workspace /path/to/project
 ## Install
 
 ```bash
-npm install prismor-warden
+npm install prismor
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ npm install prismor-warden
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { wardenTools } from "prismor-warden";
+import { prismorTools } from "prismor";
 
 const run_shell = tool({
   description: "Run a shell command",
@@ -37,7 +37,7 @@ const run_shell = tool({
 });
 
 // Wrap all tools — every execute() is now policy-checked
-const tools = wardenTools({ run_shell }, { subject: `user:${userId}` });
+const tools = prismorTools({ run_shell }, { subject: `user:${userId}` });
 
 const result = await generateText({
   model: openai("gpt-4o-mini"),
@@ -46,15 +46,15 @@ const result = await generateText({
 });
 ```
 
-A blocked call throws `WardenBlocked`. In a Next.js API route:
+A blocked call throws `PrismorBlocked`. In a Next.js API route:
 
 ```typescript
-import { WardenBlocked } from "prismor-warden";
+import { PrismorBlocked } from "prismor";
 
 try {
   const result = await generateText({ model, tools, prompt });
 } catch (e) {
-  if (e instanceof WardenBlocked) {
+  if (e instanceof PrismorBlocked) {
     return Response.json({ error: e.message }, { status: 403 });
   }
   throw e;
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
   const { prompt } = await req.json();
   const session = await getSession(req);
 
-  const tools = wardenTools(myTools, {
+  const tools = prismorTools(myTools, {
     subject: `user:${session.userId}`,
     mode: "enforce",
   });

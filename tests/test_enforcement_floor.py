@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.policy_engine import PolicyEngine, _NON_OVERRIDABLE_RULE_IDS, _CORE_BLOCK_CATEGORIES
-from warden.hooks import should_block
+from prismor.runtime.policy_engine import PolicyEngine, _NON_OVERRIDABLE_RULE_IDS, _CORE_BLOCK_CATEGORIES
+from prismor.runtime.hooks import should_block
 
 PRE = {"agent_event": "PreToolUse"}
 

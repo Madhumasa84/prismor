@@ -6,8 +6,8 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-REGISTRY="warden/integrations/registry.yaml"
-SCHEMA="warden/integrations/registry.schema.json"
+REGISTRY="prismor/runtime/integrations/registry.yaml"
+SCHEMA="prismor/runtime/integrations/registry.schema.json"
 
 if [ ! -f "$REGISTRY" ]; then
     echo "Error: registry not found at $REGISTRY"
@@ -30,7 +30,7 @@ try:
     jsonschema.validate(data, schema)
     print("  jsonschema: OK")
 except ImportError:
-    from warden.integrations.registry import (
+    from prismor.runtime.integrations.registry import (
         BLOCKING, KINDS, STATUSES, SURFACES, load_registry,
     )
     items = load_registry()

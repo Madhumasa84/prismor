@@ -1,24 +1,24 @@
-# prismor-warden-langchain
+# prismor-langchain
 
-Prismor Warden adapter for **LangChain / LangGraph**. Every tool invocation is
-routed through Warden's shared policy pipeline (`warden.runtime.evaluate_tool_call`)
+Prismor adapter for **LangChain / LangGraph**. Every tool invocation is
+routed through Prismor's shared policy pipeline (`prismor.runtime.runtime.evaluate_tool_call`)
 before the tool runs — the same engine, observe/enforce model, and per-user
 attribution a local coding agent uses.
 
 This is the in-process **SDK adapter** surface from the
-[integration registry](../../warden/integrations/registry.yaml) (`id: langchain`).
+[integration registry](../../prismor/runtime/integrations/registry.yaml) (`id: langchain`).
 
 ## Install
 
 ```bash
-pip install prismor-warden-langchain      # + the Warden runtime (immunity-agent)
+pip install prismor-langchain      # + the Prismor runtime (immunity-agent)
 ```
 
 ## Use
 
 ```python
 from langgraph.prebuilt import create_react_agent
-from prismor.warden.langchain import guard_tools
+from prismor.langchain import guard_tools
 
 tools = guard_tools([run_shell, fetch_url], subject="user:alice", mode="enforce")
 agent = create_react_agent(model, tools)
@@ -31,17 +31,17 @@ stop. `mode="observe"` is log-only.
 
 ### Per-user control
 
-`subject` accepts a `Subject`, a `WARDEN_SUBJECT`-style string (`"user:alice"`),
-or `None` (resolved from `WARDEN_SUBJECT` / the enrolled device at call time).
+`subject` accepts a `Subject`, a `PRISMOR_SUBJECT`-style string (`"user:alice"`),
+or `None` (resolved from `PRISMOR_SUBJECT` / the enrolled device at call time).
 It is threaded into policy evaluation, IAM profile selection
 (`user:<id>` / `team:<id>`), and telemetry.
 
 ### Observability handler
 
 ```python
-from prismor.warden.langchain import WardenCallbackHandler
+from prismor.langchain import PrismorCallbackHandler
 
-agent.invoke({...}, config={"callbacks": [WardenCallbackHandler(subject="user:alice")]})
+agent.invoke({...}, config={"callbacks": [PrismorCallbackHandler(subject="user:alice")]})
 ```
 
 Captures and evaluates every tool call via `on_tool_start` even for tools you did
@@ -61,7 +61,7 @@ locally and silently ships nothing:
    switch that turns findings into uploads:
 
    ```yaml
-   # .prismor-warden/policy.yaml
+   # .prismor/policy.yaml
    settings:
      outputs:
        - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest

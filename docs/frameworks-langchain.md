@@ -1,9 +1,9 @@
 # LangChain / LangGraph integration
 
-Prismor Warden adapter for LangChain and LangGraph. Ships from
-[`adapters/langchain/`](../adapters/langchain/) as `prismor-warden-langchain`.
+Prismor adapter for LangChain and LangGraph. Ships from
+[`adapters/langchain/`](../adapters/langchain/) as `prismor-langchain`.
 Registry entry: `id: langchain` in
-[`warden/integrations/registry.yaml`](../warden/integrations/registry.yaml).
+[`prismor/runtime/integrations/registry.yaml`](../prismor/runtime/integrations/registry.yaml).
 
 ## Install
 
@@ -18,7 +18,7 @@ pip install "prismor[langchain]"
 
 ```python
 from langchain_core.tools import tool
-from prismor.warden.langchain import guard_tools
+from prismor.langchain import guard_tools
 
 @tool
 def run_shell(command: str) -> str:
@@ -41,35 +41,35 @@ tool definitions.
 ## Guard a single tool
 
 ```python
-from prismor.warden.langchain import warden_guard_tool
+from prismor.langchain import prismor_guard_tool
 
-guarded = warden_guard_tool(run_shell, mode="enforce", subject="user:alice")
+guarded = prismor_guard_tool(run_shell, mode="enforce", subject="user:alice")
 ```
 
 ## Callback handler (alternative)
 
 If you already use LangChain callbacks or need to guard an agent executor without
-modifying its tool list, use `WardenCallbackHandler`:
+modifying its tool list, use `PrismorCallbackHandler`:
 
 ```python
-from prismor.warden.langchain import WardenCallbackHandler
+from prismor.langchain import PrismorCallbackHandler
 
-handler = WardenCallbackHandler(mode="enforce")
+handler = PrismorCallbackHandler(mode="enforce")
 agent_executor.invoke({"input": prompt}, config={"callbacks": [handler]})
 ```
 
 The handler fires on `on_tool_start` — before the tool executes. It raises
-`WardenBlocked` in enforce mode, which aborts the tool call and surfaces as an
+`PrismorBlocked` in enforce mode, which aborts the tool call and surfaces as an
 error in the agent's output.
 
 > Note: `guard_tools` (direct wrapping) blocks before the tool body runs and the
-> model recovers gracefully. `WardenCallbackHandler` raises an exception that
+> model recovers gracefully. `PrismorCallbackHandler` raises an exception that
 > interrupts execution — use it when you can't modify the tool list.
 
 ## Per-user control (multi-tenant)
 
 ```python
-from prismor.warden.langchain import guard_tools, use_subject
+from prismor.langchain import guard_tools, use_subject
 
 tools = guard_tools([run_shell, read_file])   # once, at startup — no bound subject
 agent = create_react_agent(llm, tools)
@@ -83,7 +83,7 @@ The `use_subject` context manager sets the subject for every tool call that runs
 inside the block. Thread-safe and async-safe (contextvar-backed) — concurrent
 requests each see their own subject.
 
-Per-user IAM example (`.prismor-warden/iam.yaml`):
+Per-user IAM example (`.prismor/iam.yaml`):
 
 ```yaml
 agents:
@@ -102,7 +102,7 @@ Works identically — guard the tools before passing them to the graph:
 
 ```python
 from langgraph.prebuilt import create_react_agent
-from prismor.warden.langchain import guard_tools, use_subject
+from prismor.langchain import guard_tools, use_subject
 
 tools = guard_tools([run_shell, search])
 graph = create_react_agent(llm, tools)
@@ -119,7 +119,7 @@ with use_subject("user:alice"):
 | Override with `event_type="network"` | `network` | `url` | `suspicious-network`, `secret-in-url-params` |
 | Override with `event_type="file_write"` | `file_write` | `path` | path-based rules |
 
-Pass `event_type` and `command_builder` to `warden_guard_tool` for tools whose
+Pass `event_type` and `command_builder` to `prismor_guard_tool` for tools whose
 risk is a URL or path rather than a shell command.
 
 ## Reference
@@ -127,10 +127,10 @@ risk is a URL or path rather than a shell command.
 | Symbol | Purpose |
 |---|---|
 | `guard_tools(tools, **kwargs)` | Guard a list of LangChain tools in one call |
-| `warden_guard_tool(tool, **kwargs)` | Guard a single tool |
-| `WardenCallbackHandler(**kwargs)` | Callback-based guard (for agent executors) |
+| `prismor_guard_tool(tool, **kwargs)` | Guard a single tool |
+| `PrismorCallbackHandler(**kwargs)` | Callback-based guard (for agent executors) |
 | `use_subject(value)` | Per-request subject contextmanager |
-| `WardenBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
+| `PrismorBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
 
 All functions accept: `subject`, `workspace`, `agent`, `mode`, `session_id`,
 `event_type`, `raise_on_block`. See [`adapters/langchain/`](../adapters/langchain/)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from warden.deps import _reachable_lockfile_names, check_lockfile_integrity
+from prismor.runtime.deps import _reachable_lockfile_names, check_lockfile_integrity
 
 
 def _write_pkg(ws: Path, dependencies: dict) -> None:
@@ -140,7 +140,7 @@ def test_reachable_names_helper_returns_none_without_dependency_metadata() -> No
 def test_audit_pass_message_does_not_imply_cve_freedom(tmp_path: Path) -> None:
     """The audit's lockfile-presence PASS line must not read as a
     vulnerability-free verdict — it only verifies lockfiles exist."""
-    from warden.audit import _check_lockfile_presence
+    from prismor.runtime.audit import _check_lockfile_presence
 
     _write_pkg(tmp_path, {"express": "4.18.2"})
     _write_lock(tmp_path, {

@@ -1,4 +1,4 @@
-"""Tests for the per-tool-call volume heartbeat (warden/enterprise/heartbeat.py).
+"""Tests for the per-tool-call volume heartbeat (prismor/runtime/enterprise/heartbeat.py).
 
 Invariants:
   * Not enrolled → record_call is a no-op (zero files, zero cost).
@@ -25,7 +25,7 @@ def _isolated_home(tmp_path, monkeypatch):
 
 
 def _enroll(api_base="http://127.0.0.1:1"):
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
     identity.save_identity({
         "device_id": "d1", "org_id": "o1", "user_id": "u1",
         "device_key": "prism_dev_x", "api_base": api_base,
@@ -33,17 +33,17 @@ def _enroll(api_base="http://127.0.0.1:1"):
 
 
 def test_record_call_noop_when_not_enrolled():
-    from warden.enterprise import heartbeat
+    from prismor.runtime.enterprise import heartbeat
     heartbeat.record_call(agent="claude", session_id="s1")
     assert not heartbeat._counter_path().exists()
 
 
 def test_calls_accumulate_and_flush_debounces(monkeypatch):
-    from warden.enterprise import heartbeat
+    from prismor.runtime.enterprise import heartbeat
     _enroll()
 
     sent = []
-    monkeypatch.setattr("warden.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
+    monkeypatch.setattr("prismor.runtime.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
 
     for _ in range(5):
         heartbeat.record_call(agent="claude", session_id="s1")
@@ -71,11 +71,11 @@ def test_calls_accumulate_and_flush_debounces(monkeypatch):
 
 def test_per_instance_keying(monkeypatch):
     """Two named agents + one unnamed on the same framework → three records."""
-    from warden.enterprise import heartbeat
+    from prismor.runtime.enterprise import heartbeat
     _enroll()
 
     sent = []
-    monkeypatch.setattr("warden.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
+    monkeypatch.setattr("prismor.runtime.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
 
     for _ in range(4):
         heartbeat.record_call(agent="openai-agents", agent_name="checkout-bot", session_id="s1")
@@ -97,7 +97,7 @@ def test_per_instance_keying(monkeypatch):
 
 def test_v1_file_migrates_to_framework_key(monkeypatch):
     """A pre-existing v1 flat counter file is read as a framework-level key."""
-    from warden.enterprise import heartbeat
+    from prismor.runtime.enterprise import heartbeat
     _enroll()
     # Simulate a v1 file left by an older runtime.
     heartbeat._counter_path().parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +106,7 @@ def test_v1_file_migrates_to_framework_key(monkeypatch):
     ))
 
     sent = []
-    monkeypatch.setattr("warden.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
+    monkeypatch.setattr("prismor.runtime.sinks.upload_telemetry", lambda recs, **kw: sent.extend(recs))
     assert heartbeat.maybe_flush(now=time.time() + heartbeat.FLUSH_INTERVAL + 1) is True
     assert len(sent) == 1
     assert sent[0]["agent"] == "cursor" and sent[0]["count"] == 7
@@ -116,7 +116,7 @@ def test_v1_file_migrates_to_framework_key(monkeypatch):
 def test_key_cap_folds_into_framework_key():
     """More than MAX_COUNTER_KEYS instances on one device fold into the
     framework key so volume is preserved past the cap."""
-    from warden.enterprise import heartbeat
+    from prismor.runtime.enterprise import heartbeat
     _enroll()
     for i in range(heartbeat.MAX_COUNTER_KEYS + 20):
         heartbeat.record_call(agent="langchain", agent_name=f"bot-{i}", session_id="s")
@@ -130,7 +130,7 @@ def test_key_cap_folds_into_framework_key():
 
 
 def test_failed_flush_lands_in_spool():
-    from warden.enterprise import heartbeat, telemetry_spool
+    from prismor.runtime.enterprise import heartbeat, telemetry_spool
     _enroll(api_base="http://127.0.0.1:1")  # dead endpoint
 
     for _ in range(3):

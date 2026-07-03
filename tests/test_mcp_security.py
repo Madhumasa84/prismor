@@ -1,7 +1,7 @@
 """End-to-end test for the lightweight HTTPS-MCP security features.
 
 Covers the three additions inspired by enkrypt's secure-mcp-gateway, delivered
-through Warden's existing hook + policy model (no proxy):
+through Prismor's existing hook + policy model (no proxy):
 
   A. Transport-aware static scan  (scanner.audit_mcp_schema)
   B. Runtime egress mapping        (hooks.normalize_payload -> network event)
@@ -19,9 +19,9 @@ from pathlib import Path
 # Allow running as a plain script from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from warden import hooks
-from warden.scanner import audit_mcp_schema
-from warden.policy_engine import PolicyEngine
+from prismor.runtime import hooks
+from prismor.runtime.scanner import audit_mcp_schema
+from prismor.runtime.policy_engine import PolicyEngine
 
 _passed = 0
 _failed = 0
@@ -102,8 +102,8 @@ check("action is configurable to block", actions_block == {"block"}, actions_blo
 
 # The action is sourced from the mcp_transport_action policy setting.
 cfg_ws = Path(tempfile.mkdtemp(prefix="mcp-cfg-test-"))
-(cfg_ws / ".prismor-warden").mkdir(parents=True, exist_ok=True)
-(cfg_ws / ".prismor-warden" / "policy.yaml").write_text(
+(cfg_ws / ".prismor").mkdir(parents=True, exist_ok=True)
+(cfg_ws / ".prismor" / "policy.yaml").write_text(
     'version: "1.0"\nsettings:\n  mcp_transport_action: block\nrules: []\nallowlists: []\n',
     encoding="utf-8",
 )

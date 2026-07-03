@@ -1,4 +1,4 @@
-"""Tests for org (remote) per-agent control merge (warden/agents.py) and the
+"""Tests for org (remote) per-agent control merge (prismor/runtime/agents.py) and the
 end-to-end kill-switch through evaluate_tool_call.
 
 The org controls arrive in the verified signed policy's settings.agent_controls
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from warden import agents
+from prismor.runtime import agents
 
 
 @pytest.fixture(autouse=True)
@@ -74,8 +74,8 @@ def test_unregistered_agent_is_permissive(tmp_path):
 def test_remote_killswitch_blocks_via_evaluate_tool_call(tmp_path, monkeypatch):
     """A managed workspace whose signed policy disables 'checkout-bot' → every
     tool call from that instance is blocked, even a benign one."""
-    from warden import runtime
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime import runtime
+    from prismor.runtime.policy_engine import PolicyEngine
 
     # Force the engine to look managed and carry the org control, without a real
     # enrolled device / signed policy.
@@ -102,8 +102,8 @@ def test_remote_killswitch_blocks_via_evaluate_tool_call(tmp_path, monkeypatch):
 def test_unmanaged_workspace_ignores_remote_controls(tmp_path, monkeypatch):
     """A personal (unmanaged) workspace never carries agent_controls, so a
     remote pause has no effect there."""
-    from warden import runtime
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime import runtime
+    from prismor.runtime.policy_engine import PolicyEngine
 
     real_init = PolicyEngine.__init__
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from warden.enterprise import identity, telemetry
+from prismor.runtime.enterprise import identity, telemetry
 
 
 # ── identity ────────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ def test_verdict_mapping():
 
 def test_prismor_sink_noop_when_not_enrolled(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISMOR_HOME", str(tmp_path))
-    from warden import sinks
+    from prismor.runtime import sinks
     # Should not raise and should not attempt any network call.
     sinks.dispatch(
         [SECRET_FINDING],
@@ -176,7 +176,7 @@ def test_prismor_sink_uploads_redacted(tmp_path, monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
 
-    from warden import sinks
+    from prismor.runtime import sinks
     sinks.dispatch([SECRET_FINDING], [{"type": "prismor"}],
                    extra={"agent": "claude", "session_id": "s1"},
                    raw_event=SECRET_EVENT)

@@ -1,4 +1,4 @@
-"""Tests for Docker-backed Warden sandbox support."""
+"""Tests for Docker-backed Prismor sandbox support."""
 
 import os
 import sys
@@ -8,9 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden import sandbox
-from warden.cli import build_parser
-from warden.policy_engine import PolicyEngine, validate_policy
+from prismor.runtime import sandbox
+from prismor.runtime.cli import build_parser
+from prismor.runtime.policy_engine import PolicyEngine, validate_policy
 
 
 class TestSandboxConfig(unittest.TestCase):

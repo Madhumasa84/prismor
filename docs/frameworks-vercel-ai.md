@@ -1,19 +1,19 @@
-# Vercel AI SDK — Prismor Warden adapter
+# Vercel AI SDK — Prismor adapter
 
 The Vercel AI SDK adapter (`prismor`) is a TypeScript package that
 intercepts every tool `execute()` call before it runs. It is the reference
 implementation of the **HTTP adapter pattern**: a thin language-native client
-calls the Warden **eval-server** (a sidecar Python process) to evaluate each
+calls the Prismor **eval-server** (a sidecar Python process) to evaluate each
 tool call against policy, returning a JSON decision in milliseconds.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    LLM["LLM decides to call a tool"] --> WRAP["wardenTool / wardenTools<br/>wraps tool.execute()"]
+    LLM["LLM decides to call a tool"] --> WRAP["prismorTool / prismorTools<br/>wraps tool.execute()"]
     WRAP -->|"POST /v1/evaluate"| SRV["prismor eval-server (Python)<br/>evaluate_tool_call() · policy engine + IAM · telemetry / findings"]
     SRV -->|"{ allow, reason, subject }"| DEC{allow?}
-    DEC -->|"false + enforce"| BLOCK["throw WardenBlocked<br/>(tool body never runs)"]
+    DEC -->|"false + enforce"| BLOCK["throw PrismorBlocked<br/>(tool body never runs)"]
     DEC -->|true| RUN["call original execute()"]
 ```
 
@@ -28,7 +28,7 @@ repo or any machine with `prismor` installed):
 ```bash
 prismor eval-server --port 7071 --workspace /path/to/project
 # or directly:
-python3 -m warden.eval_server --port 7071 --workspace .
+python3 -m prismor.runtime.eval_server --port 7071 --workspace .
 ```
 
 The server exposes:
@@ -38,7 +38,7 @@ The server exposes:
 ## Install
 
 ```bash
-npm install prismor-warden
+npm install prismor
 ```
 
 ## Quick start
@@ -47,7 +47,7 @@ npm install prismor-warden
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { wardenTools } from "prismor-warden";
+import { prismorTools } from "prismor";
 
 const run_shell = tool({
   description: "Execute a shell command",
@@ -62,7 +62,7 @@ const fetch_url = tool({
 });
 
 // Wrap all tools — every execute() is now policy-checked before it runs
-const tools = wardenTools(
+const tools = prismorTools(
   { run_shell, fetch_url },
   { subject: `user:${userId}` }
 );
@@ -72,21 +72,21 @@ const result = await generateText({ model: openai("gpt-4o-mini"), tools, prompt 
 
 ## Blocking dangerous calls
 
-A denied call in enforce mode throws `WardenBlocked`:
+A denied call in enforce mode throws `PrismorBlocked`:
 
 ```typescript
-import { WardenBlocked, wardenTools } from "prismor-warden";
+import { PrismorBlocked, prismorTools } from "prismor";
 
 // In a Next.js API route:
 export async function POST(req: Request) {
   const { prompt, userId } = await req.json();
-  const tools = wardenTools(myTools, { subject: `user:${userId}` });
+  const tools = prismorTools(myTools, { subject: `user:${userId}` });
 
   try {
     const result = await generateText({ model, tools, prompt });
     return Response.json({ text: result.text });
   } catch (e) {
-    if (e instanceof WardenBlocked) {
+    if (e instanceof PrismorBlocked) {
       return Response.json({ error: e.message }, { status: 403 });
     }
     throw e;
@@ -101,7 +101,7 @@ it is resolved to per-user IAM policies and attributed in telemetry:
 
 ```typescript
 // Each incoming request gets its own subject — no shared state
-const tools = wardenTools(myTools, {
+const tools = prismorTools(myTools, {
   subject: `user:${session.userId}`,
   mode: "enforce",
   workspace: "/path/to/project",
@@ -137,15 +137,15 @@ Set it per-tool when wrapping individually:
 
 ```typescript
 const tools = {
-  ...wardenTool("run_shell", run_shell, { eventType: "shell" }),
-  ...wardenTool("fetch_url", fetch_url, { eventType: "network" }),
+  ...prismorTool("run_shell", run_shell, { eventType: "shell" }),
+  ...prismorTool("fetch_url", fetch_url, { eventType: "network" }),
 };
 ```
 
-Or set a default for all tools when using `wardenTools`:
+Or set a default for all tools when using `prismorTools`:
 
 ```typescript
-const tools = wardenTools(myTools, { eventType: "network" });
+const tools = prismorTools(myTools, { eventType: "network" });
 ```
 
 ## Fail-open design
@@ -157,7 +157,7 @@ container to minimise downtime.
 
 ```typescript
 // Adapter behaviour when eval-server is down:
-// console.warn("[prismor-warden] eval-server returned 503 — failing open")
+// console.warn("[prismor] eval-server returned 503 — failing open")
 // → tool.execute() is called normally
 ```
 
@@ -165,10 +165,10 @@ container to minimise downtime.
 
 ```typescript
 // Observe: log findings, never block (safe rollout)
-const tools = wardenTools(myTools, { mode: "observe" });
+const tools = prismorTools(myTools, { mode: "observe" });
 
 // Enforce: block denied calls before execution (default)
-const tools = wardenTools(myTools, { mode: "enforce" });
+const tools = prismorTools(myTools, { mode: "enforce" });
 ```
 
 Start in `observe` to understand your agent's blast radius without disrupting
@@ -207,7 +207,7 @@ See `examples/multilang/` for the full runnable examples for each language.
 }
 ```
 
-Subject can also be passed via `X-Warden-Subject` header (takes precedence over body field).
+Subject can also be passed via `X-Prismor-Subject` header (takes precedence over body field).
 
 **Response:**
 ```json
@@ -233,4 +233,4 @@ Subject can also be passed via `X-Warden-Subject` header (takes precedence over 
 - [Framework adapters overview](frameworks-overview.md) — comparison table, hook points, IAM quick-start
 - [CLI reference — eval-server](cli-reference.md#eval-server)
 - [IAM](iam.md) — per-user permission profiles
-- [Warden policy engine](warden.md) — policy YAML, rule schema, observe vs enforce
+- [Prismor policy engine](prismor-runtime.md) — policy YAML, rule schema, observe vs enforce

@@ -1,11 +1,11 @@
 # Learning (Adaptive Rules)
 
-Warden logs every session. The learning engine mines that history to **propose
+Prismor logs every session. The learning engine mines that history to **propose
 new rules, flag false positives, and catch evasion** — turning the patterns you
 actually see into policy you can accept with one command. Nothing is applied
 automatically: it surfaces candidates and you decide.
 
-Implementation: [`warden/learning.py`](../warden/learning.py).
+Implementation: [`prismor/runtime/learning.py`](../prismor/runtime/learning.py).
 
 ---
 
@@ -13,14 +13,14 @@ Implementation: [`warden/learning.py`](../warden/learning.py).
 
 ```mermaid
 flowchart TD
-    DB[("session history<br/>.prismor-warden/warden.db")]
+    DB[("session history<br/>.prismor/prismor.db")]
     DB --> MP["mine_patterns<br/>repeated blocked / near-miss commands<br/>seen ≥ min-support times"]
     DB --> FP["track_false_positives<br/>rules dismissed ≥ fp-threshold times<br/>→ 'this rule may be too noisy'"]
     DB --> RR["propose_rule_refinements<br/>tweaks to existing rules"]
     MP --> R["prismor learn → report of candidates"]
     FP --> R
     RR --> R
-    R -->|"--apply &lt;id&gt;"| A["append to<br/>.prismor-warden/policy.yaml"]
+    R -->|"--apply &lt;id&gt;"| A["append to<br/>.prismor/policy.yaml"]
     R -->|"--reject &lt;id&gt;"| X["discard"]
 ```
 
@@ -44,7 +44,7 @@ command.
 Auto-applying mined rules would let noise and one-off commands ossify into
 policy. The learning engine instead proposes; you review confidence, support
 count, and a sample before accepting. Accepted rules are appended to your
-project's `.prismor-warden/policy.yaml`, so they're version-controlled and
+project's `.prismor/policy.yaml`, so they're version-controlled and
 shareable like any other rule.
 
 ---
@@ -69,7 +69,7 @@ prismor learn --reject <id>        # discard a candidate
 | `--min-support` | 3 | Minimum occurrences before a pattern becomes a candidate. |
 | `--fp-threshold` | 5 | Dismissal count at which a rule is flagged as a false positive. |
 | `--candidates` | — | List pending candidates instead of re-mining. |
-| `--apply <id>` | — | Accept a candidate into `.prismor-warden/policy.yaml`. |
+| `--apply <id>` | — | Accept a candidate into `.prismor/policy.yaml`. |
 | `--reject <id>` | — | Reject a candidate. |
 | `--json` | — | Emit raw JSON. |
 
@@ -86,7 +86,7 @@ prismor learn --reject <id>        # discard a candidate
 After applying, validate and re-check:
 
 ```bash
-prismor policy validate .prismor-warden/policy.yaml
+prismor policy validate .prismor/policy.yaml
 prismor policy show
 ```
 
@@ -94,6 +94,6 @@ prismor policy show
 
 ## See also
 
-- [Warden](warden.md) — the policy engine candidates are applied to
+- [Prismor](prismor-runtime.md) — the policy engine candidates are applied to
 - [Dashboard](dashboard.md) — browse the session history learning draws from
 - [CLI Reference](cli-reference.md) — all commands at a glance

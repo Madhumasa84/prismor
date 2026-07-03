@@ -1,8 +1,8 @@
 /**
- * Node.js — real OpenAI function-calling + Warden eval-server interception.
+ * Node.js — real OpenAI function-calling + Prismor eval-server interception.
  *
  * Demonstrates: eval-server speaks to ANY Node.js code; no framework adapter needed.
- * The wardenCheck helper replicates what the TypeScript adapter (wardenTool) does.
+ * The prismorCheck helper replicates what the TypeScript adapter (prismorTool) does.
  */
 import OpenAI from "openai";
 
@@ -14,8 +14,8 @@ if (!OPENAI_API_KEY) { console.error("OPENAI_API_KEY not set"); process.exit(1);
 
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// ── warden helper (same logic as wardenTool from src/index.ts) ────────────────
-async function wardenCheck(toolName, args, { subject = "", mode = "enforce" } = {}) {
+// ── prismor helper (same logic as prismorTool from src/index.ts) ────────────────
+async function prismorCheck(toolName, args, { subject = "", mode = "enforce" } = {}) {
   try {
     const res = await fetch(`${EVAL_URL}/v1/evaluate`, {
       method: "POST",
@@ -98,7 +98,7 @@ async function agentTurn(prompt, opts = {}) {
     const args = JSON.parse(tc.function.arguments);
     console.log(`  tool_call: ${name}(${JSON.stringify(args)})`);
 
-    const decision = await wardenCheck(name, args, opts);
+    const decision = await prismorCheck(name, args, opts);
     if (!decision.allow && (opts.mode ?? "enforce") === "enforce") {
       console.log(`  ⛔ BLOCKED  [${decision.reason?.slice(0, 70)}]`);
     } else {
@@ -110,7 +110,7 @@ async function agentTurn(prompt, opts = {}) {
 
 // ── test cases ─────────────────────────────────────────────────────────────────
 console.log("╔══════════════════════════════════════════════════════╗");
-console.log("║  Node.js + OpenAI function calling + Warden eval     ║");
+console.log("║  Node.js + OpenAI function calling + Prismor eval     ║");
 console.log("╚══════════════════════════════════════════════════════╝");
 
 // 1. Safe: list files → should allow

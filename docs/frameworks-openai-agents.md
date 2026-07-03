@@ -1,15 +1,15 @@
 # OpenAI Agents SDK integration
 
-Prismor Warden controls tool use in **production framework agents**, not just
+Prismor controls tool use in **production framework agents**, not just
 coding agents. Framework agents (OpenAI Agents SDK, CrewAI, LangChain) expose no
 hook-config files, so the control point is an **in-process SDK adapter**: a thin
 wrapper around tool execution that routes every call through the same
-`warden.runtime.evaluate_tool_call` pipeline a local coding-agent hook uses.
+`prismor.runtime.runtime.evaluate_tool_call` pipeline a local coding-agent hook uses.
 
 The OpenAI Agents SDK adapter ships from
 [`adapters/openai-agents/`](../adapters/openai-agents/) as the
-`prismor-warden-openai` distribution. Registry entry:
-[`warden/integrations/registry.yaml`](../warden/integrations/registry.yaml)
+`prismor-openai` distribution. Registry entry:
+[`prismor/runtime/integrations/registry.yaml`](../prismor/runtime/integrations/registry.yaml)
 (`id: openai-agents`).
 
 ## Install
@@ -25,7 +25,7 @@ pip install "prismor[openai-agents]"
 
 ```python
 from agents import Agent, function_tool
-from prismor.warden.openai import guard_agent
+from prismor.openai import guard_agent
 
 @function_tool
 def run_shell(command: str) -> str:
@@ -36,7 +36,7 @@ guard_agent(agent)          # every tool now policy-checked
 ```
 
 To guard a single tool or a plain callable, use
-`warden_guard(tool, subject="user:alice")`. A denied call raises `WardenBlocked`
+`prismor_guard(tool, subject="user:alice")`. A denied call raises `PrismorBlocked`
 (or, with `raise_on_block=False`, returns the `Decision`); `guard_agent` defaults
 to returning a denial string to the model so the run recovers gracefully.
 `mode="observe"` is log-only — findings are still recorded, the call proceeds.
@@ -48,7 +48,7 @@ tool call is attributed to the end-user, not the host device. Guard the agent
 once with no bound subject, then set the user per request:
 
 ```python
-from prismor.warden.openai import use_subject
+from prismor.openai import use_subject
 
 guard_agent(agent)                       # once, at startup
 
@@ -58,8 +58,8 @@ with use_subject("user:alice"):          # in your per-request handler
 
 `subject` / `use_subject` accept a `Subject`, a string (`"user:alice"`,
 `"user=alice;team=data"`), or `None`. Resolution order: explicit arg →
-`use_subject` context → `WARDEN_SUBJECT` → device identity → anonymous (see
-[`warden/principal.py`](../warden/principal.py)). The subject is threaded into
+`use_subject` context → `PRISMOR_SUBJECT` → device identity → anonymous (see
+[`prismor/runtime/principal.py`](../prismor/runtime/principal.py)). The subject is threaded into
 policy evaluation, **IAM** profile selection (`user:<id>` / `team:<id>` profiles
 in `iam.yaml`), and telemetry — same agent, different rules per user, no code
 changes.
@@ -71,11 +71,11 @@ changes.
 
 | Concern | Mechanism | Code |
 |---|---|---|
-| Interception | wrap the callable | `warden_guard(tool)` |
+| Interception | wrap the callable | `prismor_guard(tool)` |
 | Canonical event | `{type, agent, command/path/url, metadata}` | `build_event()` |
-| Decision | `evaluate_tool_call(...) → Decision` | [`warden/runtime.py`](../warden/runtime.py) |
-| Block | raise `WardenBlocked` | adapter wrapper |
-| Per-user | `Subject` | [`warden/principal.py`](../warden/principal.py) |
+| Decision | `evaluate_tool_call(...) → Decision` | [`prismor/runtime/runtime.py`](../prismor/runtime/runtime.py) |
+| Block | raise `PrismorBlocked` | adapter wrapper |
+| Per-user | `Subject` | [`prismor/runtime/principal.py`](../prismor/runtime/principal.py) |
 
 By default events are emitted as `type: shell`, so `destructive-command`,
 `secret-exfiltration`, and the rest of the policy apply to tool arguments. For
@@ -87,9 +87,9 @@ tools whose risk is a path, URL, or output, pass `event_type="file_write"` /
 | Symbol | Purpose |
 |---|---|
 | `guard_agent(agent_obj, **kwargs)` | Guard all FunctionTools on an Agent in one call |
-| `warden_guard(tool, **kwargs)` | Guard a single tool or callable |
+| `prismor_guard(tool, **kwargs)` | Guard a single tool or callable |
 | `use_subject(value)` | Per-request subject contextmanager |
-| `WardenBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
+| `PrismorBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
 | `build_event(...)` | Build a canonical event dict for custom hook points |
 
 All functions accept: `subject`, `workspace`, `agent`, `mode`, `session_id`,
@@ -98,7 +98,7 @@ All functions accept: `subject`, `workspace`, `agent`, `mode`, `session_id`,
 
 ## Other frameworks
 
-- [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools([...])`, `WardenCallbackHandler`
+- [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools([...])`, `PrismorCallbackHandler`
 - [CrewAI](frameworks-crewai.md) — `guard_tools([...])`, BaseTool and structured tool support
 - [browser-use](frameworks-browser-use.md) — `guard_controller(controller)`, network/file/shell event mapping
 - [All frameworks — UX overview](frameworks-overview.md)

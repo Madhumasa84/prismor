@@ -2,12 +2,12 @@
 
 ### Added
 
-- **`prismor.warden.*` namespace imports for framework adapters** — the Python adapters are now importable as `from prismor.warden.openai import guard_agent`, `from prismor.warden import langchain`, `prismor.warden.crewai`, and `prismor.warden.browser_use` (PEP 420 namespace packages; adapter distributions bumped to 0.2.0). The old flat `prismor_warden_*` module names keep working as aliases of the same module objects.
+- **`prismor.*` namespace imports for framework adapters** — the Python adapters are now importable as `from prismor.openai import guard_agent`, `from prismor.langchain import guard_tool`, `prismor.crewai`, and `prismor.browser_use` (PEP 420 namespace packages; adapter distributions bumped to 0.2.0). The old flat `prismor_*` module names keep working as aliases of the same module objects.
 
 ### Fixed
 
 - Adapter distributions now depend on `prismor>=1.13.0` instead of the deprecated `immunity-agent` package name.
-- The wheel now bundles the framework docs (`frameworks-*.md`), `sdk-integration.md`, and `connecting-to-the-platform.md` under `warden/data/docs/`, so links from the installed skill's `SKILL.md` resolve.
+- The wheel now bundles the framework docs (`frameworks-*.md`), `sdk-integration.md`, and `connecting-to-the-platform.md` under `prismor/runtime/data/docs/`, so links from the installed skill's `SKILL.md` resolve.
 - Post-install banner and `scripts/init.sh` no longer reference the old `immunity-agent` name/repo; `package.json` metadata updated to `prismor`.
 
 ## [1.13.0] — 2026-06-29
@@ -16,7 +16,7 @@ First release published to PyPI under the new **`prismor`** package name. `immun
 
 ### Changed
 
-- **`prismor` is the canonical PyPI package** — `pip install prismor` is the supported install path going forward. The package ships the full Warden runtime, supply-chain engine, and CLI (`prismor`, with `immunity` kept as a deprecated alias).
+- **`prismor` is the canonical PyPI package** — `pip install prismor` is the supported install path going forward. The package ships the full Prismor runtime, supply-chain engine, and CLI (`prismor`, with `immunity` kept as a deprecated alias).
 
 ### Deprecated
 
@@ -40,7 +40,7 @@ Setup wizard slimmed to 4 steps, live version banner, and removal of the securit
 
 - **Setup wizard is now 4 steps** — the detection-rules toggle step is gone; all rules ship enabled by default. The wizard flows mode → agents → cloak → scope.
 - **Version banner reads the live package version** — the banner now reflects `__version__` (mirrored in `scripts/setup.py` with a file-parse fallback) instead of a hardcoded value.
-- **Cloak install no longer shells out to the deprecated `warden` binary** — the "`warden` is deprecated" warning no longer appears during setup.
+- **Cloak install no longer shells out to the deprecated `prismor` binary** — the "`prismor` is deprecated" warning no longer appears during setup.
 
 ### Removed
 
@@ -52,7 +52,7 @@ Setup wizard install-scope control and CLI help/rules-list polish.
 
 ### Added
 
-- **Install-scope step in `prismor setup`** — a new wizard step lets you choose between installing Warden hooks for the current workspace only (`.claude/settings.json`) or globally for every project (`~/.claude/settings.json`). The chosen scope now flows through hook and cloak installation (previously hard-coded to `project`). Exposed on `run_non_interactive` via `scope=`.
+- **Install-scope step in `prismor setup`** — a new wizard step lets you choose between installing Prismor hooks for the current workspace only (`.claude/settings.json`) or globally for every project (`~/.claude/settings.json`). The chosen scope now flows through hook and cloak installation (previously hard-coded to `project`). Exposed on `run_non_interactive` via `scope=`.
 
 ### Changed
 
@@ -65,7 +65,7 @@ CLI UX consolidation, Codex agent support, and supply-chain enforcement hardenin
 
 ### Added
 
-- **Codex (OpenAI) agent support** — `--agent codex` wires Warden hooks into Codex CLI (`.codex/hooks.json`) for real-time monitoring.
+- **Codex (OpenAI) agent support** — `--agent codex` wires Prismor hooks into Codex CLI (`.codex/hooks.json`) for real-time monitoring.
 - **`prismor status --all`** — global overview across every registered workspace (the old `prismor dashboard` text view), with `--days N` to set the activity window.
 - **Bundled Claude skill** — `prismor setup` now installs the `immunity-agent` skill (SKILL.md + docs) into `<workspace>/.claude/skills/immunity-agent/` for Claude Code, so the agent learns to drive the CLI. The skill ships inside the wheel.
 
@@ -74,7 +74,7 @@ CLI UX consolidation, Codex agent support, and supply-chain enforcement hardenin
 - **`prismor dashboard` opens the web dashboard** — it now starts the local server *and* opens a browser tab (`--no-open` for headless). `prismor serve` is kept as a deprecated alias of `dashboard --no-open`.
 - **`prismor info` → real alias of `status`** — the duplicate workspace-info renderer is gone; `info` now delegates to `status`.
 - **Complete, introspection-driven `prismor help`** — every command is listed (previously `sandbox`/`learn` were omitted), grouped, with each domain's sub-actions and each command's mode flags (`sweep --redact/--clean/…`, `audit --fix`, `status --all`) shown inline. Generated from the live parser so it can't drift.
-- **`prismor warden` (bare) no longer dumps the argparse usage wall** — it prints a one-line deprecation pointer to `prismor help`. `prismor warden <cmd>` still warns and forwards.
+- **`prismor` (bare) no longer dumps the argparse usage wall** — it prints a one-line deprecation pointer to `prismor help`. `prismor <cmd>` still warns and forwards.
 - **Install banner relabeled** — `Hooks` / `Skill` / `Guardrails` (was the conflated "Skills").
 
 ### Fixed
@@ -94,7 +94,7 @@ Enterprise audit hardening and branding rename.
 
 ### Changed
 
-- **Rebrand to "Prismor Immunity Agent"** — replaces "Prismor Warden" / "PRISMOR IMMUNITY" labels across the CLI, setup wizard, hooks, dashboard, and tests; `--version` string updated.
+- **Rebrand to "Prismor Immunity Agent"** — replaces "Prismor" / "PRISMOR IMMUNITY" labels across the CLI, setup wizard, hooks, dashboard, and tests; `--version` string updated.
 - **Dashboard `--days` window + sparklines** — `prismor dashboard` accepts `--days N` (default 7) to filter session data; adds per-workspace and global sparkline bars showing the daily findings trend. Web dashboard gains a Period dropdown (7/14/30/90 days).
 
 ### Docs
@@ -123,9 +123,9 @@ Hermes Agent secret cloaking plugin. Secret prevention now works natively inside
 
 ### Added
 
-- **Hermes Agent cloaking plugin** (`warden/cloaking/hermes_plugin_entry.py`) — shared `register()` function consumed by both Hermes' pip entry-point discovery and filesystem install. Five hooks: `pre_tool_call` (decloak + secret guard), `post_tool_call` (audit), `transform_terminal_output` (scrub), `transform_tool_result` (scrub), `pre_gateway_dispatch` (paste guard).
-- **Hermes installer** (`warden/cloaking/hermes_installer.py`) — `install()`/`uninstall()`/`status()` for filesystem-level setup. Copies plugin files to `~/.hermes/plugins/prismor-warden-cloak/`, enables it in Hermes config, and sets `PRISMOR_SECRETS_DIR` env var.
-- **`pyproject.toml` entry point** — registers `prismor-warden-cloak` under `[project.entry-points."hermes_agent.plugins"]` for auto-discovery when immunity-agent is pip-installed.
+- **Hermes Agent cloaking plugin** (`prismor/runtime/cloaking/hermes_plugin_entry.py`) — shared `register()` function consumed by both Hermes' pip entry-point discovery and filesystem install. Five hooks: `pre_tool_call` (decloak + secret guard), `post_tool_call` (audit), `transform_terminal_output` (scrub), `transform_tool_result` (scrub), `pre_gateway_dispatch` (paste guard).
+- **Hermes installer** (`prismor/runtime/cloaking/hermes_installer.py`) — `install()`/`uninstall()`/`status()` for filesystem-level setup. Copies plugin files to `~/.hermes/plugins/prismor-cloak/`, enables it in Hermes config, and sets `PRISMOR_SECRETS_DIR` env var.
+- **`pyproject.toml` entry point** — registers `prismor-cloak` under `[project.entry-points."hermes_agent.plugins"]` for auto-discovery when immunity-agent is pip-installed.
 - **`prismor cloak install --agent hermes`** — new `--agent` flag on `cloak install`/`uninstall`/`status` supports `claude`, `hermes`, or `all`. Installs for both agents in one command.
 - **`prismor cloak status`** — now shows both Claude Code and Hermes Agent state separately.
 - **Auto-vaulting for pasted secrets** — `pre_gateway_dispatch` detects raw secrets in user prompts, vaults them under deterministic `auto_<sha256_prefix>` names, and re-sends the sanitized prompt with `@@SECRET:auto_xxx@@`. Bypass with `!!allow` prefix.
@@ -133,10 +133,10 @@ Hermes Agent secret cloaking plugin. Secret prevention now works natively inside
 
 ### Packaging
 
-- Hermes plugin files (`plugin.yaml`, `__init__.py`) are force-included in the wheel under `warden/data/cloaking/hermes-plugin/` for filesystem install.
+- Hermes plugin files (`plugin.yaml`, `__init__.py`) are force-included in the wheel under `prismor/runtime/data/cloaking/hermes-plugin/` for filesystem install.
 # Changelog
 
-All notable changes to Immunity Agent (Prismor Warden) are documented here.
+All notable changes to Immunity Agent (Prismor) are documented here.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/)
 and the project uses [Semantic Versioning](https://semver.org/).
 
@@ -150,16 +150,16 @@ host Python. Also ships the hybrid semantic prompt-injection defense from
 ### Fixed
 
 - **`scripts/init.sh` — honest install status.** The git-clone path printed
-  `Warden: hooks installed` unconditionally, even when every `install-hooks`
+  `Prismor: hooks installed` unconditionally, even when every `install-hooks`
   call failed (errors were swallowed by `2>/dev/null`). The final banner is
   now driven by a real success counter: zero hooks installed → loud
   `Initialization FAILED` and exit 1, with the underlying error surfaced
   instead of hidden.
 - **`immunity-agent.pth` — crash-proof startup hook.** The shipped `.pth`
-  ran `import warden._post_install` at every Python interpreter startup. If
-  `warden` was ever unimportable (e.g. an editable install whose source dir
+  ran `import prismor.runtime._post_install` at every Python interpreter startup. If
+  `prismor` was ever unimportable (e.g. an editable install whose source dir
   was later deleted), this printed a traceback on *every* `python3`
-  invocation machine-wide and poisoned the `warden` namespace so the cloned
+  invocation machine-wide and poisoned the `prismor` namespace so the cloned
   CLI also failed. Now wrapped in `try/except` so it can never raise.
 - **`scripts/init.sh` — `immunity` on PATH.** The git-clone path never added
   the CLI to PATH, so the next documented command (`prismor cloak add`) was
@@ -177,13 +177,13 @@ Hybrid semantic prompt-injection defense.
 
 ### Added
 
-- **`warden/semantic_guard.py`** — heuristic semantic-injection detector with
+- **`prismor/runtime/semantic_guard.py`** — heuristic semantic-injection detector with
   35+ weighted regex signals covering authority claims, compliance pretexts,
   friction-reduction manipulation, roleplay/jailbreak framing, instruction
-  override, credential exfiltration, Warden self-bypass, nested file-injection
+  override, credential exfiltration, Prismor self-bypass, nested file-injection
   markers, and indirect privilege escalation. Optional Claude API mode (no
   API key required for the default path).
-- **`warden/semantic_guard_v2.py`** — hybrid guard with uncertain-zone
+- **`prismor/runtime/semantic_guard_v2.py`** — hybrid guard with uncertain-zone
   escalation. Pipeline: heuristic pre-screen → if score in `[low, high)`,
   escalate to a local Claude Code CLI subagent (no API key needed); merge
   the stricter verdict. Falls back to heuristic-only when the CLI is absent.
@@ -191,7 +191,7 @@ Hybrid semantic prompt-injection defense.
   `default_policy.yaml`. Emits `prompt_injection_semantic` findings alongside
   regex findings; participates in session taint marking. Off by default;
   zero overhead unless enabled per-project.
-- **`warden semantic-check`** CLI subcommand — ad-hoc analyzer for tuning
+- **`prismor semantic-check`** CLI subcommand — ad-hoc analyzer for tuning
   policies and debugging false positives. Supports `--mode hybrid|heuristic|api`
   and `--json` output.
 - **`tests/test_semantic_guard.py`** — 15 unit tests covering heuristic
@@ -206,7 +206,7 @@ attack recall improves 8% → 72%; the LLM subagent is invoked on 1.8% of
 events (15/826). Enable per-project with:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   semantic_guard:
     enabled: true
@@ -218,7 +218,7 @@ Expanded IOC coverage and prompt injection defense.
 
 ### Added
 
-- **Prompt injection defense** (`warden/sanitizer.py`, `warden/policy_engine.py`):
+- **Prompt injection defense** (`prismor/runtime/sanitizer.py`, `prismor/runtime/policy_engine.py`):
   - `sanitizer.py` — structural HTML detector catching injections hidden in HTML
     comments, CSS-invisible elements (`display:none`, `visibility:hidden`,
     `font-size:0`, transparent color), `aria-hidden` elements, and zero-width
@@ -277,9 +277,9 @@ data from all registered workspaces.
 
 ### Added
 
-- **`prismor serve` command** (`warden/server.py`, `warden/dashboard.html`).
+- **`prismor serve` command** (`prismor/runtime/server.py`, `prismor/runtime/dashboard.html`).
   Starts a local HTTP server (default `127.0.0.1:7070`) serving a
-  self-contained Prismor Warden dashboard. Accepts `--host` and `--port` flags.
+  self-contained Prismor dashboard. Accepts `--host` and `--port` flags.
 - **Dashboard UI** with severity breakdown strip (critical/high/medium/low
   counts), recent sessions table with risk-score bars, and a findings drilldown
   with agent/severity/category filters, free-text search, and expandable
@@ -291,7 +291,7 @@ data from all registered workspaces.
 - **Live event feed** with verdict (blocked/allowed) and agent filter controls;
   auto-poll pauses when user has active filters or is past page 1.
 - **`get_sessions_page()`, `get_findings_page()`, `get_events_page()`** added
-  to `warden/store.py`; `get_aggregate_stats()` extended with
+  to `prismor/runtime/store.py`; `get_aggregate_stats()` extended with
   `severityBreakdown`, `recentSessions`, and `recentFindings`.
 
 ### Fixed
@@ -309,14 +309,14 @@ and correctness fixes from code review.
 
 ### Added
 
-- **Scoped Agent** (`warden/scoped_agent.py`). On `UserPromptSubmit`, Warden
+- **Scoped Agent** (`prismor/runtime/scoped_agent.py`). On `UserPromptSubmit`, Prismor
   calls the Anthropic API (Haiku) to synthesise a minimal, task-specific rule
   set from the user's goal — restricting tools, file paths, and network access
   to only what the task genuinely requires. Falls back to keyword-based static
   heuristics when no API key is present. Scoped rules are stored as JSON
-  sidecar files in `.prismor-warden/scoped/` and enforced alongside
+  sidecar files in `.prismor/scoped/` and enforced alongside
   `policy.yaml` for the duration of that session only.
-- **Session-Based Learning** (`warden/learning.py`). Mines historical session
+- **Session-Based Learning** (`prismor/runtime/learning.py`). Mines historical session
   data for recurring uncovered command patterns, tracks false positives from
   dismissed findings, and detects evasion attempts where structurally similar
   commands (e.g. backtick vs `$()` substitution) bypass existing rules.
@@ -344,9 +344,9 @@ and correctness fixes from code review.
   now uses `c.get('id', c['rule'].get('id', '?'))` so freshly-mined
   candidates (not yet persisted to the DB) display correctly.
 - **Misleading scoped-rules display text**: the rules box now correctly states
-  that rules persist in `.prismor-warden/scoped/` rather than claiming they
+  that rules persist in `.prismor/scoped/` rather than claiming they
   are not saved.
-- **Removed dead `get_scoped_dir()` from `warden/store.py`**: the function
+- **Removed dead `get_scoped_dir()` from `prismor/runtime/store.py`**: the function
   was unreachable and pointed to a different path than `scoped_agent._scoped_dir`.
 
 ## [1.1.0] — 2026-04-24
@@ -361,33 +361,33 @@ ergonomics features enterprise buyers expect. Continues from `1.0.2`.
   realistic fake credentials (AWS, SSH, `.env`, generic) at arbitrary paths;
   any read raises a `CRITICAL` finding and optionally POSTs a signed payload
   to a user-provided webhook. First AI-agent-specific canarytoken
-  implementation we're aware of. (`warden/canary.py`)
+  implementation we're aware of. (`prismor/runtime/canary.py`)
 - **MCP schema auditor** — `prismor scan` now statically analyses MCP tool
   schemas for over-broad allowlists (`"*"`, `"/**"`), risky description
   language (`bypass`, `all files`, `sudo`), `any`-typed parameters on
   execution-capable tools, missing input schemas, and servers that combine
   execution with filesystem + network access in a single surface.
-  (`warden/scanner.py::audit_mcp_schema`)
+  (`prismor/runtime/scanner.py::audit_mcp_schema`)
 - **Lockfile integrity audit** — `prismor deps` now detects non-registry
   sources (`git+`, `file:`) in `package-lock.json`, missing `integrity:`
   hashes, and lockfile-injection (direct deps in the lockfile that aren't
-  declared in `package.json`). (`warden/deps.py::check_lockfile_integrity`)
+  declared in `package.json`). (`prismor/runtime/deps.py::check_lockfile_integrity`)
 - **Agent instruction-file tamper detection** — new `agent-instruction-tampering`
   rule covers `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`,
   `.github/copilot-instructions.md`. Previously only `.claude/settings.json`
-  was protected. (`warden/default_policy.yaml`)
+  was protected. (`prismor/runtime/default_policy.yaml`)
 - **Unicode / homoglyph path detection** — flags paths and commands that mix
   ASCII letters with Cyrillic, Greek, Latin-extended confusables, fullwidth
   letters, and zero-width joiners (e.g. `cat .еnv` where `е` is U+0435).
-  (`warden/policy_engine.py::_has_suspicious_unicode`)
+  (`prismor/runtime/policy_engine.py::_has_suspicious_unicode`)
 - **Telemetry sinks** — new `settings.outputs` section in `policy.yaml`
   forwards findings to webhook, syslog (UDP/TCP), and file sinks. File sink
   supports both JSON and ArcSight CEF formats for SIEM ingest. Env-var
-  interpolation (`${SIEM_TOKEN}`) for secret headers. (`warden/sinks.py`)
+  interpolation (`${SIEM_TOKEN}`) for secret headers. (`prismor/runtime/sinks.py`)
 - **Declarative policy tests** — `prismor policy test` runs
-  `.prismor-warden/policy-tests.yaml` cases (`{input, expect: block|warn|pass}`)
+  `.prismor/policy-tests.yaml` cases (`{input, expect: block|warn|pass}`)
   and ships a bundled OWASP LLM Top 10 + Agentic Top 10 + MITRE ATLAS
-  starter pack (28 cases). (`warden/policy_test.py`,
+  starter pack (28 cases). (`prismor/runtime/policy_test.py`,
   `templates/policy-tests-owasp.yaml`)
 - **`prismor check --explain`** — shows matched rule's category, action,
   event types, field list, and full regex pattern.

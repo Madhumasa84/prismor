@@ -1,6 +1,6 @@
 # Skill Scanner
 
-MCP servers and skills extend what your agent can do, but they also extend the attack surface. Studies have found that a significant percentage of community skills contain malicious patterns. Warden's skill scanner checks every MCP server and skill config installed on your machine before you use them.
+MCP servers and skills extend what your agent can do, but they also extend the attack surface. Studies have found that a significant percentage of community skills contain malicious patterns. Prismor's skill scanner checks every MCP server and skill config installed on your machine before you use them.
 
 ```bash
 prismor scan                    # scan all agents (Claude, Cursor, Windsurf, OpenClaw, Hermes)
@@ -20,7 +20,7 @@ The scanner automatically discovers configs from:
 | OpenClaw    | `~/.openclaw/config.json`, `~/.openclaw/skills.json`               |
 | Hermes      | `~/.hermes/config.json`, `~/.hermes/skills.json`, `~/.hermes/plugins.json` |
 
-Each MCP server and skill entry is evaluated against Warden's policy rules. Findings are sorted by severity (critical first) so the most dangerous issues are always at the top.
+Each MCP server and skill entry is evaluated against Prismor's policy rules. Findings are sorted by severity (critical first) so the most dangerous issues are always at the top.
 
 ## Remote MCP transport checks
 
@@ -37,7 +37,7 @@ MCP servers increasingly run over the network (`http`, `sse`, `streamable-http`)
 
 ### Configuring the action
 
-By default these findings are warnings. Set them to block (to fail CI via `prismor scan --sarif`, or to block in enforce mode) in your project's `.prismor-warden/policy.yaml`:
+By default these findings are warnings. Set them to block (to fail CI via `prismor scan --sarif`, or to block in enforce mode) in your project's `.prismor/policy.yaml`:
 
 ```yaml
 settings:
@@ -46,7 +46,7 @@ settings:
 
 ## Hermes gateway
 
-Hermes stores per-session JSONL transcripts at `~/.hermes/sessions/` and a queryable SQLite index with FTS5 at `~/.hermes/state.db`. Warden hooks intercept tool calls at the gateway layer before the transcript is written. The session store can also be ingested offline for retrospective analysis:
+Hermes stores per-session JSONL transcripts at `~/.hermes/sessions/` and a queryable SQLite index with FTS5 at `~/.hermes/state.db`. Prismor hooks intercept tool calls at the gateway layer before the transcript is written. The session store can also be ingested offline for retrospective analysis:
 
 ```bash
 prismor ingest --input ~/.hermes/sessions/<id>.jsonl --agent hermes

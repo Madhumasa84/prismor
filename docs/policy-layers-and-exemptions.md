@@ -59,7 +59,7 @@ core block categories) survives every layer — an exemption literally cannot le
 
 ## What's built (runtime — tested, no control plane needed)
 
-`prismor/warden`:
+`prismor`:
 - `policy_engine._match_exemption` — for a managed workspace, finds the granted,
   non-expired exemption matching the repo from the signed bundle's
   `settings.repo_exemptions`, and applies its `overlay` via `_apply_override`
