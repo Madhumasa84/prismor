@@ -17,7 +17,9 @@ prismor cloak add stripe_key    # value read from stdin, never argv
 From that point on, the model refers to the secret as `@@SECRET:stripe_key@@`. When the agent emits a tool call containing that placeholder, Warden's `PreToolUse` hook:
 
 1. Substitutes the placeholder with the real value in the command that is actually executed locally.
-2. Wraps the command so its captured stdout/stderr passes through a `sed` filter that scrubs the real value *back* to the placeholder before Claude Code records it.
+2. Wraps the command so its captured stdout/stderr passes through `scrub-stream.sh`, which masks the real value *back* to the placeholder before Claude Code records it.
+
+The wrap in step 2 is applied to **every** `Bash` command once any secret is registered — not only commands that referenced a placeholder. So a value a command reads out of a file (`grep KEY .env`, `source .env; echo $KEY`, `cat config`, an HTTP response body) is masked too, closing the leak path where a raw secret enters context without ever passing through a placeholder. The scrubber reads the vault itself at runtime, so no secret value is embedded in the wrapped command string.
 
 Result: the real secret is resident only inside the hook process and the local subprocess. The model, the JSONL transcript (`~/.claude/projects/<cwd>/*.jsonl`), and every upstream API request see only the placeholder.
 
@@ -52,7 +54,8 @@ This merges four hook entries into `.claude/settings.json` (preserving any Warde
 | Event | Matcher | Script | Purpose |
 |---|---|---|---|
 | `PreToolUse` | `Bash\|Write\|Edit\|MultiEdit\|mcp__.*` | `secret-guard.sh` | Detect raw secrets in tool input, vault + deny |
-| `PreToolUse` | `Bash` | `decloak.sh` | Substitute placeholders, wrap with `sed` |
+| `PreToolUse` | `Read` | `read-guard.sh` | Deny a Read of a file that holds a registered secret |
+| `PreToolUse` | `Bash` | `decloak.sh` | Substitute placeholders, wrap output through `scrub-stream.sh` |
 | `PostToolUse` | `mcp__.*` | `recloak-mcp.sh` | Scrub real values from MCP responses |
 | `UserPromptSubmit` | — | `userprompt-guard.sh` | Soft-block + auto-cloak pasted secrets |
 | `Stop` (opt) | — | `sweep-on-stop.sh` | Dry-run sweep for residue (off by default) |
@@ -184,7 +187,7 @@ Enumerated honestly so you know what to layer on top:
 1. **Hand-typed secrets shorter than ~16 chars.** No prefix, too short for entropy heuristics, indistinguishable from benign text.
 2. **Secrets generated mid-turn** (`openssl rand`, `aws iam create-access-key`, `ssh-keygen`). The `sed`-wrap scrubber only knows about values already in `$PRISMOR_SECRETS_DIR`, so a freshly minted value flows through the *generating* command's output unscrubbed. `secret-guard.sh` does catch it on the *next* tool call if the value matches a known pattern (e.g. a generated `AKIA…` reused in a later command) — but a value with no recognizable shape still slips through.
 3. **The secrets directory itself**, if committed, synced, or backed up without exclusion. Treat it as a single point of failure.
-4. **Built-in `Read` of secret-bearing files.** `PostToolUse` can only rewrite MCP tool output, not built-in Read. Add a `permissions.deny` rule under `Read(./secrets/**)` in your Claude settings to close this gap, and route secret access through the placeholder syntax instead.
+4. **Built-in `Read` of secret-bearing files.** `PostToolUse` can only rewrite MCP tool output, not built-in Read, so a Read cannot be scrubbed after the fact. `read-guard.sh` (a `PreToolUse:Read` hook, on by default) closes this by *denying* a Read whose target file contains a registered secret and directing the model to the `@@SECRET:name@@` placeholder instead. Disable with `prismor cloak install --no-read-guard` if a deny is too strict for your workflow.
 5. **Assistant-side narration.** If the model already saw a real value (through paste, Read, or a command that bypassed the wrapper), it can echo the value in prose. Hooks cannot filter assistant text. Use `/clear` immediately after any suspected leak.
 
 For residue that slips through despite all of the above, run:
@@ -224,7 +227,9 @@ warden/cloaking/
 ├── builtin_patterns.txt    # single source of truth for detection regexes
 ├── hooks/
 │   ├── _patterns.sh        # shared bash loader (sourced by the guards)
-│   ├── decloak.sh          # PreToolUse:Bash — placeholder substitution
+│   ├── decloak.sh          # PreToolUse:Bash — placeholder substitution + output scrub
+│   ├── scrub-stream.sh     # stdin filter — masks registered secrets in command output
+│   ├── read-guard.sh       # PreToolUse:Read — deny reads of secret-bearing files
 │   ├── secret-guard.sh     # PreToolUse — detect raw secrets, vault + deny
 │   ├── recloak-mcp.sh      # PostToolUse:mcp__.*
 │   ├── userprompt-guard.sh # UserPromptSubmit soft-block

@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
 # Prismor Warden — cloaking PreToolUse hook (Claude Code, Bash matcher).
 #
-# Substitutes `@@SECRET:name@@` placeholders in the model's bash command with
-# the real value from $PRISMOR_SECRETS_DIR/<name>, then wraps the command so
-# that its captured stdout/stderr is piped through `sed` to scrub the real
-# value back to the placeholder before Claude Code records it.
+# Two jobs, both aimed at keeping a real secret out of the model's context,
+# the JSONL transcript, and any upstream API request:
 #
-# Result: the real secret is resident only inside this hook's process and the
-# local bash subprocess — never in the model's context, the JSONL transcript,
-# or any API request to the upstream provider.
+#   1. DECLOAK — substitute each `@@SECRET:name@@` placeholder in the command
+#      with the real value from $PRISMOR_SECRETS_DIR/<name> so the command
+#      actually works when it runs locally.
 #
-# Stdin:  Claude Code PreToolUse JSON payload
-# Stdout: JSON with hookSpecificOutput.updatedInput (if substitution occurred)
-#         or hookSpecificOutput.permissionDecision=deny (if secret not found).
-#         Empty stdout = no-op (command contained no placeholder).
+#   2. SCRUB — wrap the command so its combined stdout/stderr is piped through
+#      `scrub-stream.sh`, which masks every registered secret value back to its
+#      placeholder before Claude Code records the output. This happens for
+#      EVERY Bash command, not only ones that used a placeholder — so a secret
+#      a command reads out of a file (`grep KEY .env`, `source .env; echo $KEY`,
+#      `cat config`, an HTTP response body, ...) is masked too. That closes the
+#      leak path where the raw value enters context without ever passing
+#      through an `@@SECRET@@` placeholder.
+#
+# The scrubber reads the vault itself at runtime, so no secret value is ever
+# embedded in the wrapped command string (which Claude Code records verbatim).
+#
+# Stdin:  Claude Code PreToolUse JSON payload.
+# Stdout: JSON with hookSpecificOutput.updatedInput (command rewritten), or
+#         permissionDecision=deny (a referenced secret is not registered).
+#         Empty stdout = no-op (no secrets registered and no placeholder).
 set -uo pipefail
 
-SECRETS_DIR="${PRISMOR_SECRETS_DIR:-$HOME/.prismor/secrets}"
+_HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SECRETS_DIR="${PRISMOR_SECRETS_DIR:-${PRISMOR_HOME:-$HOME/.prismor}/secrets}"
+SCRUBBER="$_HOOK_DIR/scrub-stream.sh"
 
-# Require jq — the rest of Warden already depends on Python, but hook scripts
-# are shell-only for speed. If jq is missing we fail closed with a clear msg.
+# Require jq — hook scripts are shell-only for speed. Fail closed if missing.
 if ! command -v jq >/dev/null 2>&1; then
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Prismor cloaking requires jq (brew install jq)"}}\n'
   exit 0
@@ -32,41 +43,48 @@ tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty')"
 cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
 [[ -n "$cmd" ]] || exit 0
 
-# Enumerate unique placeholders in the command.
-placeholders="$(printf '%s' "$cmd" | grep -oE '@@SECRET:[a-zA-Z0-9_-]+@@' | sort -u || true)"
-[[ -n "$placeholders" ]] || exit 0
-
+# ── 1. Decloak: substitute any @@SECRET:name@@ placeholders ────────────────
 new_cmd="$cmd"
-sed_filter=""
-while IFS= read -r placeholder; do
-  [[ -z "$placeholder" ]] && continue
-  name="${placeholder#@@SECRET:}"
-  name="${name%@@}"
-  secret_file="$SECRETS_DIR/$name"
+placeholders="$(printf '%s' "$cmd" | grep -oE '@@SECRET:[a-zA-Z0-9_-]+@@' | sort -u || true)"
+if [[ -n "$placeholders" ]]; then
+  while IFS= read -r placeholder; do
+    [[ -z "$placeholder" ]] && continue
+    name="${placeholder#@@SECRET:}"
+    name="${name%@@}"
+    secret_file="$SECRETS_DIR/$name"
+    if [[ ! -f "$secret_file" ]]; then
+      # Fail closed: deny rather than leaving a dangling placeholder that would
+      # confuse the downstream command.
+      jq -n --arg reason "Prismor cloaking: secret '$name' not registered. Run: prismor cloak add $name" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+      exit 0
+    fi
+    real="$(cat "$secret_file")"
+    new_cmd="${new_cmd//"$placeholder"/$real}"
+  done <<< "$placeholders"
+fi
 
-  if [[ ! -f "$secret_file" ]]; then
-    # Fail closed: deny the tool call rather than silently leaving the
-    # placeholder in, which would confuse downstream commands.
-    jq -n --arg reason "Prismor cloaking: secret '$name' not registered. Run: prismor cloak add $name" \
-      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
-    exit 0
-  fi
+# ── 2. Decide whether to wrap the command for output scrubbing ──────────────
+# Scrub whenever there is at least one registered secret to protect, OR a
+# placeholder substitution injected a real value into the command. If the
+# vault is empty and no substitution happened, stay a no-op (preserves the
+# original behavior for users who have not registered any secret).
+have_secrets=0
+shopt -s nullglob
+for _f in "$SECRETS_DIR"/*; do
+  [[ -f "$_f" ]] && { have_secrets=1; break; }
+done
 
-  real="$(cat "$secret_file")"
-  # Substitute placeholder → real in the command string.
-  new_cmd="${new_cmd//"$placeholder"/$real}"
+if [[ "$have_secrets" -eq 0 && "$new_cmd" == "$cmd" ]]; then
+  exit 0
+fi
 
-  # Build the sed scrubber: real → placeholder. Escape sed metacharacters.
-  esc_real="$(printf '%s' "$real" | sed 's/[\/&|]/\\&/g')"
-  sed_filter+="s|$esc_real|$placeholder|g;"
-done <<< "$placeholders"
+# Wrap: run the command in a brace group, merge stderr into stdout, pipe
+# through the scrubber, and re-raise the command's own exit status (not sed's)
+# so callers that branch on exit codes still behave correctly. Only the
+# scrubber path and the secrets-dir path are embedded — never a secret value.
+wrapped="{ $new_cmd ; } 2>&1 | PRISMOR_SECRETS_DIR=$(printf '%q' "$SECRETS_DIR") $(printf '%q' "$SCRUBBER"); exit \${PIPESTATUS[0]}"
 
-# Wrap the command in a subshell whose combined stdout/stderr is scrubbed.
-# The model only ever sees the output of `sed`, never the raw output.
-wrapped="( $new_cmd ) 2>&1 | sed -E '$sed_filter'"
-
-# Preserve any other fields of tool_input (e.g., description) and overwrite
-# only .command.
 new_input="$(printf '%s' "$input" | jq --arg c "$wrapped" '.tool_input | .command = $c')"
 jq -n --argjson ni "$new_input" \
   '{hookSpecificOutput:{hookEventName:"PreToolUse",updatedInput:$ni}}'
