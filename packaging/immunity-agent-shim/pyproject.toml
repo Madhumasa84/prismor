@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 # `warden/__init__.py` on every release.
 [project]
 name = "immunity-agent"
-version = "1.13.0"
+version = "1.14.0"
 description = "Deprecated — renamed to 'prismor'. Installs prismor for you. Run: pip install prismor"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "prismor>=1.13.0",
+    "prismor>=1.14.0",
 ]
 
 [project.urls]
