@@ -8,6 +8,7 @@ Commands:
   audit         Full security posture check across all Warden subsystems
   audit --fix   Auto-remediate fixable issues
   status        One-shot health check for this workspace (--all for every workspace)
+  doctor        Health-check every runtime subsystem (hooks, policy, signature, enrollment, sink, chain); --json for scripts
   analyze       Analyze a JSONL session file
   ingest        Analyze and store a session
   sessions      List stored sessions
@@ -259,6 +260,10 @@ def main(argv: Optional[List[str]] = None) -> None:
                 print(f"  telemetry:  {pending} event(s) spooled for upload (control plane unreachable)")
         except Exception:
             pass
+        return
+
+    if args.command == "doctor":
+        _run_doctor(workspace, as_json=bool(getattr(args, "json", False)))
         return
 
     if args.command == "logout":
@@ -1979,6 +1984,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     enroll_status = subparsers.add_parser("enroll-status", help="Show this machine's enrollment status")
 
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Health-check every runtime subsystem: hooks, policy, remote policy signature, enrollment, telemetry sink, chain state",
+    )
+    doctor_parser.add_argument("--json", action="store_true", help="Machine-readable output (exit 0 iff all checks pass)")
+
     subparsers.add_parser("logout", help="Un-enroll this machine (remove device identity + cached remote policy)")
     workspace_p = subparsers.add_parser("workspace", help="Show or set whether this workspace is org-managed or personal")
     workspace_p.add_argument("action", nargs="?", choices=["managed", "personal", "auto"], help="managed = report to org; personal = local-only; auto = let org patterns decide")
@@ -2493,6 +2504,133 @@ def _print_status(session: Dict[str, Any]) -> None:
         print(f"  {_color(f'[{sev}]', color)} {finding['title']} ({finding['category']})")
         if finding.get("evidence"):
             print(f"         {finding['evidence']}")
+
+
+def _run_doctor(workspace: Path, as_json: bool = False) -> None:
+    """Read-only health check across every runtime subsystem: hooks, policy,
+    remote policy signature, enrollment, telemetry sink, chain state.
+
+    One line per check (`✓` ok, `⚠` degraded-but-working, `✗` broken).
+    Exit code 0 iff no `✗`. `--json` emits the same checks as a list for
+    harness/scripting use.
+    """
+    checks: List[Dict[str, str]] = []
+
+    def add(state: str, name: str, detail: str) -> None:
+        checks.append({"state": state, "name": name, "detail": detail})
+
+    # 1. IDE hooks — per-agent config with the dispatcher wired in.
+    agents_with_hooks: List[str] = []
+    for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot"):
+        hook_path = _find_hook_config(agent_name, workspace)
+        if hook_path and hook_path.exists():
+            try:
+                if "warden" in hook_path.read_text().lower() or "prismor" in hook_path.read_text().lower():
+                    agents_with_hooks.append(agent_name)
+            except Exception:
+                pass
+    if agents_with_hooks:
+        add("ok", "hooks", f"installed for {', '.join(agents_with_hooks)}")
+    else:
+        add("warn", "hooks", "no IDE hooks installed (run `prismor install-hooks`; SDK adapters are unaffected)")
+
+    # 2. Policy engine loads.
+    try:
+        from warden.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace)
+        n_rules = len(getattr(engine, "rules", []) or [])
+        mode = getattr(engine, "default_mode", "observe")
+        add("ok", "policy", f"{n_rules} rules loaded (default mode: {mode})")
+    except Exception as exc:
+        add("fail", "policy", f"policy failed to load: {exc}")
+
+    # 3–4. Enrollment + remote policy signature.
+    ident = None
+    try:
+        from warden.enterprise import identity as _identity
+        ident = _identity.load_identity()
+    except Exception:
+        pass
+    if not ident:
+        add("warn", "enrollment", "not enrolled — local protection only (run `prismor enroll <token>` to link an org)")
+        add("warn", "remote policy", "n/a (not enrolled)")
+    else:
+        revoked = _identity.revoked_info()
+        if revoked:
+            add("warn", "enrollment",
+                f"enrolled to {ident.get('org_name') or ident.get('org_id')} but the control plane rejected this device "
+                f"({revoked.get('reason') or '401/403'}) — likely revoked; local protection continues")
+        else:
+            add("ok", "enrollment", f"enrolled to {ident.get('org_name') or ident.get('org_id')} as {ident.get('label')}")
+        try:
+            from warden.enterprise import remote_policy as _remote
+            cached = _remote.cached_policy_path()
+            if not cached.exists():
+                add("warn", "remote policy", "no cached org policy yet (first pull happens on the next tool call)")
+            else:
+                sig_path = _remote._cached_sig_path()
+                sig = sig_path.read_text(encoding="utf-8").strip() if sig_path.exists() else ""
+                version = _remote.current_version()
+                if sig and _remote._verify_signature(cached.read_bytes(), sig):
+                    add("ok", "remote policy", f"v{version}, Ed25519 signature verified")
+                else:
+                    add("fail", "remote policy",
+                        f"cached policy v{version} signature {'INVALID' if sig else 'MISSING'} — "
+                        "running on local policy (fail-closed); re-pull or contact your admin")
+        except Exception as exc:
+            add("fail", "remote policy", f"verification error: {exc}")
+
+    # 5. Telemetry sink reachability + spool backlog.
+    if ident:
+        api_base = str(ident.get("api_base") or "").rstrip("/")
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"{api_base}/api/health", method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                resp.read(16)
+            add("ok", "telemetry sink", f"control plane reachable ({api_base})")
+        except Exception as exc:
+            add("warn", "telemetry sink", f"control plane unreachable ({exc.__class__.__name__}) — events spool locally")
+        try:
+            from warden.enterprise import telemetry_spool as _spool
+            pending = _spool.pending_count()
+            if pending:
+                add("warn", "telemetry spool", f"{pending} event(s) queued for upload")
+            else:
+                add("ok", "telemetry spool", "empty")
+        except Exception:
+            pass
+    else:
+        add("warn", "telemetry sink", "n/a (not enrolled)")
+
+    # 6. Tamper-evident chain state.
+    try:
+        from warden.enterprise import chain as _chain
+        state = _chain.current_state()
+        if int(state.get("seq", -1)) >= 0:
+            add("ok", "integrity chain", f"at link #{state['seq']}")
+        else:
+            add("ok", "integrity chain", "not started (begins with the first uploaded finding)")
+    except Exception as exc:
+        add("warn", "integrity chain", f"unreadable state: {exc}")
+
+    failed = any(c["state"] == "fail" for c in checks)
+    if as_json:
+        print(json.dumps({"ok": not failed, "checks": checks}, indent=2))
+    else:
+        print()
+        print(f"  {_color('PRISMOR', _BOLD)}  doctor")
+        print(f"  {_color('─' * 50, _DIM)}")
+        glyphs = {"ok": _color("✓", _GREEN), "warn": _color("⚠", _YELLOW), "fail": _color("✗", _RED)}
+        for c in checks:
+            print(f"  {glyphs[c['state']]} {c['name']:<16} {c['detail']}")
+        print()
+        if failed:
+            print(f"  {_color('One or more checks failed.', _RED)}")
+        else:
+            print(f"  {_color('All systems operational.', _GREEN)}")
+    if failed:
+        raise SystemExit(1)
 
 
 def _print_status_overview(workspace: Path) -> None:

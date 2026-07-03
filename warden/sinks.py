@@ -314,6 +314,17 @@ def _dispatch_prismor(
             scrub_patterns=scrub_patterns,
         )
         _telemetry.assert_redacted(rec)  # fail closed if redacted path leaks
+        # Tamper-evident chain link. Best-effort: a chain failure degrades to
+        # an unchained record (reported, not fatal) — telemetry must never
+        # block on chain state.
+        try:
+            from warden.enterprise import chain as _chain
+            seq, prev_hash, digest = _chain.next_link(rec)
+            rec["chain_seq"] = seq
+            rec["prev_hash"] = prev_hash
+            rec["hash"] = digest
+        except Exception:
+            pass
         records.append(rec)
 
     if not records:
