@@ -24,7 +24,9 @@ from typing import Any, Dict, Optional
 
 # Default control-plane base URL. Overridable via $PRISMOR_API_BASE so
 # self-hosted / staging deployments can repoint without a rebuild.
-DEFAULT_API_BASE = "https://prismor.dev"
+# www is canonical: the apex is subject to host-level redirects that urllib
+# will not follow for POSTs (a domain-level 308 once broke enrollment).
+DEFAULT_API_BASE = "https://www.prismor.dev"
 
 _SCHEMA = "warden.identity.v1"
 

@@ -1751,7 +1751,7 @@ def get_enrollment() -> Optional[Dict[str, Any]]:
             "enrolled": True,
             "org_id": data.get("org_id"),
             "device_id": data.get("device_id"),
-            "api_base": data.get("api_base", "https://prismor.dev"),
+            "api_base": data.get("api_base", "https://www.prismor.dev"),
         }
     except Exception:
         return None
