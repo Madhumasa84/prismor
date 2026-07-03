@@ -42,7 +42,7 @@ fi
 if command -v python3 &>/dev/null; then
     if ! python3 -c "import yaml" 2>/dev/null; then
         warn "PyYAML is not installed. It is required for the policy engine."
-        warn "Without it, Warden cannot load any detection rules."
+        warn "Without it, Prismor cannot load any detection rules."
         echo ""
         info "Install with one of:"
         info "  pip3 install pyyaml"
@@ -120,8 +120,8 @@ else
     ok "Created CLAUDE.md"
 fi
 
-# ── Step 4: Install Warden hooks ────────────────────────────────────────
-info "Installing Warden hooks (mode: $MODE)..."
+# ── Step 4: Install Prismor hooks ────────────────────────────────────────
+info "Installing Prismor hooks (mode: $MODE)..."
 HOOKS_OK=0
 for agent in "${AGENTS_FOUND[@]}"; do
     # Capture stderr so we can surface the real cause on failure instead of
@@ -199,14 +199,14 @@ fi
 echo ""
 if [ "$HOOKS_OK" -eq 0 ]; then
     err "Initialization FAILED — no hooks were installed for any agent."
-    err "Warden is NOT monitoring $TARGET_DIR. See the errors above for the cause."
+    err "Prismor is NOT monitoring $TARGET_DIR. See the errors above for the cause."
     err "A CLAUDE.md was written, but without hooks nothing is enforced."
     exit 1
 fi
 
 ok "Prismor initialized for: $TARGET_DIR"
 echo ""
-echo -e "  ${GREEN}Warden:${NC}  hooks installed for $HOOKS_OK agent(s) (mode: $MODE)"
+echo -e "  ${GREEN}Prismor:${NC}  hooks installed for $HOOKS_OK agent(s) (mode: $MODE)"
 echo -e "  ${GREEN}Config:${NC}  $CLAUDE_MD"
 echo ""
 if [ "$MODE" != "enforce" ]; then

@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.policy_engine import CompiledRule, PolicyEngine, validate_policy
+from prismor.runtime.policy_engine import CompiledRule, PolicyEngine, validate_policy
 
 
 def mkraw(patterns, **extra):

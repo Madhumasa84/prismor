@@ -44,7 +44,7 @@ Standard OS-level and endpoint security tools monitor the kernel and filesystem.
 
 ![Prismor Architecture](assets/immunity-highlevel.png)
 
-- 🛡️ [Warden](docs/warden.md) covers the policy engine, session logs, security audit, and CLI reference
+- 🛡️ [Prismor](docs/prismor-runtime.md) covers the policy engine, session logs, security audit, and CLI reference
 - 📦 [Supply Chain](docs/supply-chain.md) covers install-time enforcement, IOC matching, and risk scoring
 - 🛜 [Network Isolation](docs/network-isolation.md) covers egress allowlists, raw IP detection, and tunnel blocking
 - 🔍 [Skill Scanner](docs/skill-scanner.md) covers MCP server and skill risk scanning across supported agents
@@ -115,7 +115,7 @@ PRISMOR_MODE=enforce PRISMOR_CLOAK=1 bash ~/.prismor/scripts/init.sh .
 
 > On externally-managed Pythons (PEP 668 — Ubuntu 23.04+, Homebrew) `pip3 install` refuses to run; install PyYAML from your system package manager instead (`sudo apt install python3-yaml`, `brew install pyyaml`, …). `init.sh` will tell you if it's missing.
 
-This installs enforce-mode Warden hooks and the Cloak prevention layer. To register a secret, run `prismor cloak add stripe_key` and enter the value when prompted. Reference it in tool calls as `@@SECRET:stripe_key@@` and the hook handles the rest.
+This installs enforce-mode Prismor hooks and the Cloak prevention layer. To register a secret, run `prismor cloak add stripe_key` and enter the value when prompted. Reference it in tool calls as `@@SECRET:stripe_key@@` and the hook handles the rest.
 
 Prefer the interactive wizard? Drop the env vars:
 
@@ -139,7 +139,7 @@ Enforcement is decided **per rule by your policy**, not by a single global switc
 Out of the box **everything observes** — nothing is blocked until you flip rules (or `default_mode`) to `enforce` in your policy:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   default_mode: observe        # global default for rules without their own mode
 rules:
@@ -166,7 +166,7 @@ There are three independent layers that can each restrict an agent session. Disa
 
 ### 1. Uninstall hooks entirely
 
-Removes the `hook-dispatch` entries from the agent's hooks config, so Warden stops receiving `PreToolUse`/`PostToolUse`/`UserPromptSubmit` events altogether.
+Removes the `hook-dispatch` entries from the agent's hooks config, so Prismor stops receiving `PreToolUse`/`PostToolUse`/`UserPromptSubmit` events altogether.
 
 ```bash
 prismor uninstall-hooks --agent claude --scope project   # this workspace only
@@ -186,7 +186,7 @@ prismor uninstall-hooks --agent all --scope project      # every supported agent
 | Codex | `<workspace>/.codex/hooks.json` | `~/.codex/hooks.json` |
 | Copilot | `<workspace>/.github/copilot/hooks.json` | `~/.copilot/hooks.json` |
 
-If you only run one scope, the other one's hooks (if installed) keep firing. Run both if you want Warden fully out of the picture for an agent.
+If you only run one scope, the other one's hooks (if installed) keep firing. Run both if you want Prismor fully out of the picture for an agent.
 
 A running session has already loaded its hook config — uninstalling mid-session won't take effect until you start a new session.
 
@@ -201,13 +201,13 @@ prismor install-hooks --agent all --scope project --mode observe
 PRISMOR_LOCAL_DRY_RUN=1   # set in your shell/session env
 ```
 
-`--mode observe` logs findings without blocking. `PRISMOR_LOCAL_DRY_RUN=1` additionally suppresses blocking for any finding that would otherwise block under observe-installed hooks (`warden/cli.py`, checked when `args.mode == "observe"`). This is the right lever if you want Warden's telemetry/logging to keep working while you temporarily stop enforcement.
+`--mode observe` logs findings without blocking. `PRISMOR_LOCAL_DRY_RUN=1` additionally suppresses blocking for any finding that would otherwise block under observe-installed hooks (`prismor/runtime/cli.py`, checked when `args.mode == "observe"`). This is the right lever if you want Prismor's telemetry/logging to keep working while you temporarily stop enforcement.
 
-This does **not** affect policy rules set to `mode: enforce` in `.prismor-warden/policy.yaml` — those remain policy-authoritative regardless of how the hook was installed (see [Observe / Enforce](#observe--enforce-per-rule-policy-authoritative) above).
+This does **not** affect policy rules set to `mode: enforce` in `.prismor/policy.yaml` — those remain policy-authoritative regardless of how the hook was installed (see [Observe / Enforce](#observe--enforce-per-rule-policy-authoritative) above).
 
 ### 3. Clear a session's scoped-agent rules
 
-[Scoped Agent](docs/scoped-agent.md) synthesizes a per-session `allowed_tools`/`deny_tools` list at `.prismor-warden/scoped/{session_id}.json`. **This check is independent of hook `--mode`** — a tool in `deny_tools` is hardcoded to `action: block` / `mode: enforce` in `warden/scoped_agent.py`, so it blocks even when hooks are installed with `--mode observe`. Uninstalling hooks or switching to observe mode will not lift a scoped denial.
+[Scoped Agent](docs/scoped-agent.md) synthesizes a per-session `allowed_tools`/`deny_tools` list at `.prismor/scoped/{session_id}.json`. **This check is independent of hook `--mode`** — a tool in `deny_tools` is hardcoded to `action: block` / `mode: enforce` in `prismor/runtime/scoped_agent.py`, so it blocks even when hooks are installed with `--mode observe`. Uninstalling hooks or switching to observe mode will not lift a scoped denial.
 
 ```bash
 prismor scope list                    # find the session ID
@@ -224,7 +224,7 @@ There's no bulk-clear — each session is cleared by ID individually. If a sessi
 
 Measured overhead is 0.8 ms per tool call across 10,000 simulated agent sessions, below the 1 ms threshold for every task category tested.
 
-![Warden Simulation Results](assets/warden-simulation.png)
+![Prismor Simulation Results](assets/prismor-simulation.png)
 
 See [benchmark.md](benchmark.md) for the full methodology, per-category breakdown, and latency analysis.
 
@@ -239,7 +239,7 @@ Regex rules catch known injection shapes. The opt-in semantic guard adds an inte
 Enable per-project:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   semantic_guard:
     enabled: true
@@ -274,16 +274,16 @@ Sessions, findings, threat categories, agent breakdowns, and a live event feed �
 flowchart TD
     IDE["Your IDE / Agent\n(Claude Code · Cursor · Windsurf · Codex)"]
 
-    IDE -->|"PreToolUse / PostToolUse hooks"| Warden
+    IDE -->|"PreToolUse / PostToolUse hooks"| Prismor
 
-    subgraph Warden["Warden Runtime Monitor"]
+    subgraph Prismor["Prismor Runtime Monitor"]
         Policy["Policy Engine\n(YAML rules)"]
         Session["Session Store\n(SQLite / JSONL)"]
         Policy --> Session
     end
 
-    Warden -->|"action permitted"| Allow["ALLOW\n+ log event"]
-    Warden -->|"rule matched"| Block["BLOCK\n+ log finding"]
+    Prismor -->|"action permitted"| Allow["ALLOW\n+ log event"]
+    Prismor -->|"rule matched"| Block["BLOCK\n+ log finding"]
 
     IDE -->|"PreToolUse hook\n(inject @@SECRET@@)"| Cloak
     IDE -->|"PostToolUse hook\n(scrub output)"| Cloak
@@ -302,13 +302,13 @@ flowchart TD
     subgraph SC["Supply Chain Install Enforcement"]
         Scorer["Risk Scorer\n(age · maintainers · scripts)"]
         IOC["IOC Database\n(known compromised packages)"]
-        Feed["Advisory Feed\n(Warden / NVD)"]
+        Feed["Advisory Feed\n(Prismor / NVD)"]
         Scorer --> IOC
         Scorer --> Feed
     end
 
     SC -->|"score < 30"| PkgMgr["Package Manager\n(npm · pip · cargo · go...)"]
-    SC -->|"score >= 60 or IOC match"| SCBlock["BLOCK\n+ log to Warden store"]
+    SC -->|"score >= 60 or IOC match"| SCBlock["BLOCK\n+ log to Prismor store"]
 ```
 
 ---
@@ -341,7 +341,7 @@ See [docs/supply-chain.md](docs/supply-chain.md) for the full scoring table, eco
 
 PRs are welcome. Guidelines:
 
-- New detection rules go in `warden/default_policy.yaml`, following the schema in `warden/policy_schema.json`
+- New detection rules go in `prismor/runtime/default_policy.yaml`, following the schema in `prismor/runtime/policy_schema.json`
 - Tests live in `tests/`, so run `pytest` before opening a PR
 - Open an issue first if you're unsure where something fits
 

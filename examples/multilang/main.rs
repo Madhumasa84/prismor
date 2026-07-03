@@ -1,4 +1,4 @@
-// Rust — real OpenAI function-calling + Warden eval-server interception.
+// Rust — real OpenAI function-calling + Prismor eval-server interception.
 // Uses ureq (sync HTTP, minimal dep) + serde_json.
 // Cargo.toml inlined below — run with: cargo script rust_openai_test.rs
 // (or compile separately; see run_rust_test.sh)
@@ -6,7 +6,7 @@
 use std::env;
 use std::collections::HashMap;
 
-fn warden_check(tool_name: &str, args_json: &str, mode: &str, subject: &str) -> bool {
+fn prismor_check(tool_name: &str, args_json: &str, mode: &str, subject: &str) -> bool {
     let workspace = format!("{}/immunity-test-env/immunity-agent", env::var("HOME").unwrap_or_default());
     let body = format!(
         r#"{{"tool_name":"{tool_name}","arguments":{args_json},"event_type":"shell","agent":"rust","mode":"{mode}","subject":"{subject}","workspace":"{workspace}"}}"#
@@ -112,7 +112,7 @@ fn agent_turn(prompt: &str, mode: &str, subject: &str, api_key: &str) {
         any = true;
         println!("  tool_call: {name}({args_raw})");
 
-        let allow = warden_check(name, &args_raw, mode, subject);
+        let allow = prismor_check(name, &args_raw, mode, subject);
         if !allow && mode == "enforce" {
             println!("  ⛔ BLOCKED  [policy violation — eval-server denied]");
         } else {
@@ -137,7 +137,7 @@ fn main() {
     };
 
     println!("╔══════════════════════════════════════════════════════╗");
-    println!("║  Rust + OpenAI function calling + Warden eval         ║");
+    println!("║  Rust + OpenAI function calling + Prismor eval         ║");
     println!("╚══════════════════════════════════════════════════════╝");
 
     agent_turn("List the files in the current directory using the shell.", "enforce", "", &api_key);

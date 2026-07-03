@@ -1,16 +1,16 @@
 /**
- * Prismor Warden adapter for the Vercel AI SDK.
+ * Prismor adapter for the Vercel AI SDK.
  *
- * Wraps tool `execute` functions to call the Warden eval-server
+ * Wraps tool `execute` functions to call the Prismor eval-server
  * (immunity eval-server) before the tool body runs. A denied call
- * throws WardenBlocked (enforce mode) or logs and proceeds (observe mode).
+ * throws PrismorBlocked (enforce mode) or logs and proceeds (observe mode).
  *
  * Quick start:
- *   const tools = wardenTools({ run_shell, search_web }, { subject: `user:${userId}` });
+ *   const tools = prismorTools({ run_shell, search_web }, { subject: `user:${userId}` });
  *   const result = await generateText({ model, tools, prompt });
  */
 
-export interface WardenOptions {
+export interface PrismorOptions {
   /** URL of the running eval-server. Default: http://127.0.0.1:7071 */
   evalUrl?: string;
   /** Subject for per-user attribution: "user:alice" or "user=alice;team=data" */
@@ -28,14 +28,14 @@ export interface WardenOptions {
    */
   agentName?: string;
   /**
-   * Map tool argument keys to a Warden event type.
+   * Map tool argument keys to a Prismor event type.
    * Default: "shell" (args serialised to command string).
    * Use "network" for URL-fetching tools, "file_write" for file-writing tools.
    */
   eventType?: "shell" | "network" | "file_write" | "file_read" | "tool_result";
 }
 
-export interface WardenDecision {
+export interface PrismorDecision {
   allow: boolean;
   reason: string | null;
   findings: unknown[];
@@ -43,11 +43,11 @@ export interface WardenDecision {
   subject: { user_id: string | null; team_id: string | null } | null;
 }
 
-export class WardenBlocked extends Error {
-  decision: WardenDecision;
-  constructor(reason: string, decision: WardenDecision) {
-    super(`Blocked by Prismor Warden: ${reason}`);
-    this.name = "WardenBlocked";
+export class PrismorBlocked extends Error {
+  decision: PrismorDecision;
+  constructor(reason: string, decision: PrismorDecision) {
+    super(`Blocked by Prismor: ${reason}`);
+    this.name = "PrismorBlocked";
     this.decision = decision;
   }
 }
@@ -55,15 +55,15 @@ export class WardenBlocked extends Error {
 async function evaluate(
   toolName: string,
   args: Record<string, unknown>,
-  opts: Required<WardenOptions>,
+  opts: Required<PrismorOptions>,
   sessionId: string,
-): Promise<WardenDecision> {
+): Promise<PrismorDecision> {
   const res = await fetch(`${opts.evalUrl}/v1/evaluate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(opts.subject ? { "X-Warden-Subject": opts.subject } : {}),
-      ...(opts.agentName ? { "X-Warden-Agent-Name": opts.agentName } : {}),
+      ...(opts.subject ? { "X-Prismor-Subject": opts.subject } : {}),
+      ...(opts.agentName ? { "X-Prismor-Agent-Name": opts.agentName } : {}),
     },
     body: JSON.stringify({
       tool_name: toolName,
@@ -80,13 +80,13 @@ async function evaluate(
 
   if (!res.ok) {
     // Server error — fail open (don't break the agent on infrastructure issues)
-    console.warn(`[prismor-warden] eval-server returned ${res.status} — failing open`);
+    console.warn(`[prismor] eval-server returned ${res.status} — failing open`);
     return { allow: true, reason: null, findings: [], blocking: null, subject: null };
   }
-  return res.json() as Promise<WardenDecision>;
+  return res.json() as Promise<PrismorDecision>;
 }
 
-function resolveOpts(opts: WardenOptions): Required<WardenOptions> {
+function resolveOpts(opts: PrismorOptions): Required<PrismorOptions> {
   const agent = opts.agent ?? "vercel-ai";
   return {
     evalUrl: opts.evalUrl ?? "http://127.0.0.1:7071",
@@ -105,16 +105,16 @@ function sessionId(): string {
 }
 
 /**
- * Wrap a single Vercel AI SDK tool so every call is evaluated by Warden
+ * Wrap a single Vercel AI SDK tool so every call is evaluated by Prismor
  * before the tool body executes.
  *
  * @param toolName  The key name under which this tool is registered (used in telemetry).
  * @param tool      The tool object returned by the `tool()` helper.
- * @param opts      Warden options (evalUrl, subject, mode, …).
+ * @param opts      Prismor options (evalUrl, subject, mode, …).
  */
-export function wardenTool<
+export function prismorTool<
   T extends { execute?: (...args: any[]) => any },
->(toolName: string, tool: T, opts: WardenOptions = {}): T {
+>(toolName: string, tool: T, opts: PrismorOptions = {}): T {
   if (!tool.execute) return tool;
   const resolved = resolveOpts(opts);
   const sid = sessionId();
@@ -123,7 +123,7 @@ export function wardenTool<
   const guarded = async (args: Record<string, unknown>, ctx: unknown) => {
     const decision = await evaluate(toolName, args, resolved, sid);
     if (!decision.allow) {  // honor the runtime decision (incl. org kill-switch), not the app-passed mode
-      throw new WardenBlocked(decision.reason ?? "policy violation", decision);
+      throw new PrismorBlocked(decision.reason ?? "policy violation", decision);
     }
     return original(args, ctx);
   };
@@ -135,13 +135,13 @@ export function wardenTool<
  * Wrap every tool in a record — the idiomatic Vercel AI SDK pattern.
  *
  * @example
- * const tools = wardenTools({ run_shell, search_web }, { subject: `user:${userId}` });
+ * const tools = prismorTools({ run_shell, search_web }, { subject: `user:${userId}` });
  * const result = await generateText({ model, tools, prompt });
  */
-export function wardenTools<
+export function prismorTools<
   T extends Record<string, { execute?: (...args: any[]) => any }>,
->(tools: T, opts: WardenOptions = {}): T {
+>(tools: T, opts: PrismorOptions = {}): T {
   return Object.fromEntries(
-    Object.entries(tools).map(([name, t]) => [name, wardenTool(name, t, opts)]),
+    Object.entries(tools).map(([name, t]) => [name, prismorTool(name, t, opts)]),
   ) as T;
 }

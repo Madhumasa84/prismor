@@ -1,24 +1,24 @@
 # Connecting a Self-Hosted Runtime to the Prismor Platform
 
-Prismor is open-core. The runtime ("Warden"), the framework adapters, and the
+Prismor is open-core. The runtime ("Prismor"), the framework adapters, and the
 YAML rule format in this repo are open and auditable. The **control plane**
 (`prismor-web` — the org dashboard, the policy-signing private key, and the
 premium feed) is proprietary. This document describes the *open client side* of
-that link: how an enrolled Warden install talks to the control plane, what it
+that link: how an enrolled Prismor install talks to the control plane, what it
 trusts, and exactly what does and does not leave the machine.
 
 See also: [docs/sdk-integration.md](sdk-integration.md)
 (the runtime, not the SDK, is what connects).
 
-Everything here is **opt-in**. On a plain install, `warden/enterprise/*` is the
+Everything here is **opt-in**. On a plain install, `prismor/runtime/enterprise/*` is the
 **client** side and a guarded no-op: `is_enrolled()` returns False and every
 control-plane path short-circuits. Local protection — the 63 default rules in
-`warden/default_policy.yaml` — is always on, enrolled or not.
+`prismor/runtime/default_policy.yaml` — is always on, enrolled or not.
 
 ## Connection lifecycle at a glance
 
 ```
-  Developer machine (Warden, this repo)      Prismor control plane (prismor-web, proprietary)
+  Developer machine (Prismor, this repo)      Prismor control plane (prismor-web, proprietary)
   ─────────────────────────────────────      ───────────────────────────────────────────────
   prismor enroll <token>  ──POST /api/devices/enroll──▶  validate one-time token
    identity.enroll()           {token,label,platform}     mint revocable device_key
@@ -53,7 +53,7 @@ prismor enroll --token <TOKEN> --label "ci-runner-3" --api-base https://prismor.
 - **Token:** a one-time enrollment token from the dashboard (Admin → Devices →
   Enroll), exchanged exactly once.
 - **What happens:** `identity.enroll()` POSTs `{token, label, platform,
-  warden_version}` to `/api/devices/enroll`; the server returns `device_id`,
+  prismor_version}` to `/api/devices/enroll`; the server returns `device_id`,
   `org_id`, `user_id`, `device_key`, `org_name`.
 - **Where the key is stored:** `save_identity()` writes
   `~/.prismor/identity.json` (override via `$PRISMOR_HOME`) at **0600**, dir
@@ -85,13 +85,13 @@ On the hot path, `remote_policy.check_and_refresh()` (debounced, clamped to
    inject rules.
 5. **Tighten-only floor:** the engine enforces `_NON_OVERRIDABLE_RULE_IDS`, so
    even a *valid* signed policy can never disable the destructive-command /
-   secret-exfil protections or turn Warden off.
+   secret-exfil protections or turn Prismor off.
 6. **Offline-safe:** unreachable control plane ⇒ cached policy persists.
 
 ## 3. Redacted telemetry (what leaves the box)
 
 Telemetry flows only for **org-managed** workspaces (`workspace_scope.py`).
-Personal repos emit nothing. The `prismor` sink (`warden/sinks.py`) builds
+Personal repos emit nothing. The `prismor` sink (`prismor/runtime/sinks.py`) builds
 records via `telemetry.build_record()` and runs `assert_redacted()` before upload
 — a fail-closed guard.
 

@@ -1,14 +1,14 @@
 """Regression: the `prismor` control-plane sink ignores a local `url` override.
 
 The prismor sink uploads with `Authorization: Bearer <device_key>`
-(warden/sinks.py upload_telemetry). If a local `.prismor-warden/policy.yaml`
+(prismor/runtime/sinks.py upload_telemetry). If a local `.prismor/policy.yaml`
 could set `url:` on a `type: prismor` sink, anyone who lands a file in a repo
 could redirect that device-key credential to an attacker endpoint. The sink must
 pin the destination to the enrolled identity's api_base and ignore a local url.
 """
-import warden.sinks as sinks
-import warden.enterprise.identity as ident
-import warden.enterprise.telemetry as telem
+import prismor.runtime.sinks as sinks
+import prismor.runtime.enterprise.identity as ident
+import prismor.runtime.enterprise.telemetry as telem
 
 
 def test_prismor_sink_ignores_local_url(monkeypatch, capsys):

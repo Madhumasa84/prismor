@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.hooks import (
+from prismor.runtime.hooks import (
     _is_pre_action,
     _strip_claude,
     _strip_codex,
@@ -26,7 +26,7 @@ class TestStripClaude(unittest.TestCase):
     """Test _strip_claude removes Prismor entries and leaves others."""
 
     def test_removes_prismor_hooks(self):
-        marker = "/repo/warden/cli.py"
+        marker = "/repo/prismor/runtime/cli.py"
         config = {
             "hooks": {
                 "PreToolUse": [
@@ -39,7 +39,7 @@ class TestStripClaude(unittest.TestCase):
                     }
                 ]
             },
-            "env": {"PRISMOR_WARDEN_WORKSPACE": "/some/path", "OTHER_VAR": "keep"},
+            "env": {"PRISMOR_WORKSPACE": "/some/path", "OTHER_VAR": "keep"},
         }
         result, removed = _strip_claude(config, marker)
         self.assertTrue(removed)
@@ -48,11 +48,11 @@ class TestStripClaude(unittest.TestCase):
         self.assertEqual(len(result["hooks"]["PreToolUse"][0]["hooks"]), 1)
         self.assertEqual(result["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "other-tool --check")
         # PRISMOR env removed, OTHER_VAR kept
-        self.assertNotIn("PRISMOR_WARDEN_WORKSPACE", result["env"])
+        self.assertNotIn("PRISMOR_WORKSPACE", result["env"])
         self.assertEqual(result["env"]["OTHER_VAR"], "keep")
 
     def test_removes_entire_entry_when_only_prismor(self):
-        marker = "/repo/warden/cli.py"
+        marker = "/repo/prismor/runtime/cli.py"
         config = {
             "hooks": {
                 "PreToolUse": [
@@ -75,11 +75,11 @@ class TestStripClaude(unittest.TestCase):
             },
             "env": {},
         }
-        result, removed = _strip_claude(config, "/repo/warden/cli.py")
+        result, removed = _strip_claude(config, "/repo/prismor/runtime/cli.py")
         self.assertFalse(removed)
 
     def test_empty_config(self):
-        result, removed = _strip_claude({}, "/repo/warden/cli.py")
+        result, removed = _strip_claude({}, "/repo/prismor/runtime/cli.py")
         self.assertFalse(removed)
 
 
@@ -87,7 +87,7 @@ class TestStripCursor(unittest.TestCase):
     """Test _strip_cursor removes Prismor entries."""
 
     def test_removes_prismor_entries(self):
-        marker = "/repo/warden/cli.py"
+        marker = "/repo/prismor/runtime/cli.py"
         config = {
             "hooks": {
                 "beforeShellCommand": [
@@ -103,7 +103,7 @@ class TestStripCursor(unittest.TestCase):
 
     def test_no_change(self):
         config = {"hooks": {"beforeShellCommand": [{"command": "unrelated"}]}}
-        result, removed = _strip_cursor(config, "/repo/warden/cli.py")
+        result, removed = _strip_cursor(config, "/repo/prismor/runtime/cli.py")
         self.assertFalse(removed)
 
 
@@ -111,7 +111,7 @@ class TestStripCodex(unittest.TestCase):
     """Test _strip_codex removes Prismor entries."""
 
     def test_removes_prismor_hooks(self):
-        marker = "/repo/warden/cli.py"
+        marker = "/repo/prismor/runtime/cli.py"
         config = {
             "hooks": {
                 "PreToolUse": [
@@ -133,7 +133,7 @@ class TestStripCodex(unittest.TestCase):
 
     def test_no_change(self):
         config = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "unrelated"}]}]}}
-        result, removed = _strip_codex(config, "/repo/warden/cli.py")
+        result, removed = _strip_codex(config, "/repo/prismor/runtime/cli.py")
         self.assertFalse(removed)
 
 
@@ -141,7 +141,7 @@ class TestStripWindsurf(unittest.TestCase):
     """Test _strip_windsurf removes Prismor entries."""
 
     def test_removes_prismor_entries(self):
-        marker = "/repo/warden/cli.py"
+        marker = "/repo/prismor/runtime/cli.py"
         config = {
             "hooks": {
                 "pre_run_command": [
@@ -157,7 +157,7 @@ class TestStripWindsurf(unittest.TestCase):
 
     def test_no_change(self):
         config = {"hooks": {"pre_run_command": [{"command": "other"}]}}
-        result, removed = _strip_windsurf(config, "/repo/warden/cli.py")
+        result, removed = _strip_windsurf(config, "/repo/prismor/runtime/cli.py")
         self.assertFalse(removed)
 
 
@@ -248,7 +248,7 @@ class TestInstallUninstallRoundtrip(unittest.TestCase):
             agent="all",
             scope="project",
         )
-        from warden.hooks import _SUPPORTED_AGENTS
+        from prismor.runtime.hooks import _SUPPORTED_AGENTS
         self.assertEqual(len(results), len(_SUPPORTED_AGENTS))
         for r in results:
             self.assertTrue(r["removed"])
@@ -399,7 +399,7 @@ class TestSingleEditContentReachesDownstreamChecks(unittest.TestCase):
         }
 
     def _evaluate_single_edit(self, engine, file_path: str, new_string: str):
-        from warden.policy_engine import PolicyEngine  # local import: keep module load order simple
+        from prismor.runtime.policy_engine import PolicyEngine  # local import: keep module load order simple
         normalized = normalize_payload(
             agent="claude",
             payload=self._single_edit_payload(file_path, new_string),
@@ -408,9 +408,9 @@ class TestSingleEditContentReachesDownstreamChecks(unittest.TestCase):
         return engine.evaluate(normalized["event"], 0, session_id=normalized["sessionId"])
 
     def test_canary_marker_detected_in_single_edit_content(self):
-        from warden.policy_engine import PolicyEngine
-        with patch("warden.canary.get_markers", return_value=["CANARY-ABC123"]), \
-             patch("warden.canary.check_content_for_markers", return_value="CANARY-ABC123"):
+        from prismor.runtime.policy_engine import PolicyEngine
+        with patch("prismor.runtime.canary.get_markers", return_value=["CANARY-ABC123"]), \
+             patch("prismor.runtime.canary.check_content_for_markers", return_value="CANARY-ABC123"):
             engine = PolicyEngine()
             findings = self._evaluate_single_edit(
                 engine, "/repo/notes.md", "leaked secret: CANARY-ABC123"
@@ -421,7 +421,7 @@ class TestSingleEditContentReachesDownstreamChecks(unittest.TestCase):
     def test_supply_chain_manifest_check_fires_on_single_edit(self):
         """Same gap, different consumer: a manifest pin added via a plain
         Edit (not MultiEdit, not Write) must still be scored."""
-        from warden.policy_engine import PolicyEngine
+        from prismor.runtime.policy_engine import PolicyEngine
         with patch("supplychain.scoring.engine.fetch_vulns",
                    return_value=[{"id": "CVE-x", "severity": "critical", "title": "t", "malicious": False}]):
             engine = PolicyEngine()
@@ -436,7 +436,7 @@ class TestSingleEditContentReachesDownstreamChecks(unittest.TestCase):
         includes single-Edit content) for ANY event type, not just
         prompts — confirm a file_write carrying an injection-shaped
         string reaches it too."""
-        from warden.policy_engine import PolicyEngine
+        from prismor.runtime.policy_engine import PolicyEngine
         engine = PolicyEngine()
         engine.semantic_guard_config = {
             "enabled": True, "mode": "hybrid",
@@ -453,8 +453,8 @@ class TestSingleEditContentReachesDownstreamChecks(unittest.TestCase):
     def test_benign_single_edit_produces_none_of_the_above(self):
         """Sanity check on the other side: an ordinary edit must not
         spuriously trigger any of the three checks above."""
-        from warden.policy_engine import PolicyEngine
-        with patch("warden.canary.get_markers", return_value=["CANARY-ABC123"]), \
+        from prismor.runtime.policy_engine import PolicyEngine
+        with patch("prismor.runtime.canary.get_markers", return_value=["CANARY-ABC123"]), \
              patch("supplychain.scoring.engine.fetch_vulns", return_value=[]):
             engine = PolicyEngine()
             findings = self._evaluate_single_edit(

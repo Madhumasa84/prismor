@@ -1,23 +1,23 @@
-# prismor-warden-browser-use
+# prismor-browser-use
 
-Prismor Warden adapter for [browser-use](https://github.com/browser-use/browser-use).
+Prismor adapter for [browser-use](https://github.com/browser-use/browser-use).
 
 Intercepts every browser action — navigation, clicks, form input, file ops — before
-Playwright executes it, evaluating against the active Warden policy. Works with the
+Playwright executes it, evaluating against the active Prismor policy. Works with the
 same observe/enforce model and per-user attribution as the other Prismor adapters.
 
 ## Install
 
 ```bash
-pip install prismor-warden-browser-use
-pip install "prismor-warden-browser-use[browser]"  # + browser-use itself
+pip install prismor-browser-use
+pip install "prismor-browser-use[browser]"  # + browser-use itself
 ```
 
 ## Usage
 
 ```python
 from browser_use import Agent, Controller
-from prismor.warden.browser_use import guard_controller
+from prismor.browser_use import guard_controller
 
 controller = Controller()
 guard_controller(controller, mode="enforce")   # every action now policy-checked
@@ -29,7 +29,7 @@ await agent.run()
 ## Per-user (multi-tenant)
 
 ```python
-from prismor.warden.browser_use import guard_controller, use_subject
+from prismor.browser_use import guard_controller, use_subject
 
 controller = Controller()
 guard_controller(controller)                   # once at startup, no bound subject
@@ -46,8 +46,8 @@ with use_subject("user:alice"):                # per-request
 | `upload_file`, `save_pdf` | `file_write` | path-based rules |
 | `click_element`, `input_text`, `scroll`, … | `shell` | `destructive-command`, custom rules |
 
-Denied actions return a string to the LLM (`⛔ Prismor Warden blocked …`) so the
-agent recovers gracefully. Use `raise_on_block=True` to raise `WardenBlocked` instead.
+Denied actions return a string to the LLM (`⛔ Prismor blocked …`) so the
+agent recovers gracefully. Use `raise_on_block=True` to raise `PrismorBlocked` instead.
 
 ## Trace findings to your control plane
 
@@ -56,7 +56,7 @@ enrolled (`~/.prismor/identity.json`) **and** the workspace policy enables the
 telemetry sink:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   outputs:
     - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest

@@ -10,7 +10,7 @@ _spec.loader.exec_module(guard)
 
 def test_clean_files_pass(tmp_path: Path):
     # A normal source file with no secrets and an allowed path → no violations.
-    assert guard.scan(["warden/sinks.py"]) == []
+    assert guard.scan(["prismor/runtime/sinks.py"]) == []
 
 
 def test_public_key_is_allowed():

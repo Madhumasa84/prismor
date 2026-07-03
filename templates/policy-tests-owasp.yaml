@@ -1,9 +1,9 @@
-# Prismor Warden — OWASP LLM Top 10 + Agentic Top 10 starter test pack.
+# Prismor — OWASP LLM Top 10 + Agentic Top 10 starter test pack.
 #
-# Copy this file to `.prismor-warden/policy-tests.yaml` in your workspace
+# Copy this file to `.prismor/policy-tests.yaml` in your workspace
 # and extend it with project-specific cases. Run with:
 #
-#     warden policy test
+#     prismor policy test
 #
 # Each case has: name, type (command|read|write), input, expect
 # (pass|warn|block), optional expect_rule.

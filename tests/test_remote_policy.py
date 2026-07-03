@@ -79,7 +79,7 @@ def _enroll():
     # Remote (org) policy only applies to org-managed workspaces, which requires
     # an enrolled device. With no managed_repo_patterns set, every workspace is
     # managed (default), so enrolling is enough to exercise remote-policy merge.
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
     identity.save_identity({"device_id": "d", "org_id": "o", "user_id": "u",
                             "device_key": "prism_dev_x", "api_base": "http://x"})
 
@@ -89,7 +89,7 @@ def test_signed_remote_policy_applies_but_cannot_weaken(tmp_path, monkeypatch):
     _write_remote(tmp_path / ".prismor", REMOTE_POLICY)
     _enroll()
 
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.policy_engine import PolicyEngine
     engine = PolicyEngine(workspace=tmp_path)
 
     rule_ids = {r.id for r in engine.rules}
@@ -113,7 +113,7 @@ def test_tampered_remote_policy_is_ignored(tmp_path, monkeypatch):
     _write_remote(tmp_path / ".prismor", REMOTE_POLICY, sign_with=b"a different document")
     _enroll()
 
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.policy_engine import PolicyEngine
     engine = PolicyEngine(workspace=tmp_path)
     rule_ids = {r.id for r in engine.rules}
     # The org rule must NOT have been applied — policy was rejected.
@@ -123,7 +123,7 @@ def test_tampered_remote_policy_is_ignored(tmp_path, monkeypatch):
 
 def test_no_remote_policy_is_inert(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.policy_engine import PolicyEngine
     engine = PolicyEngine(workspace=tmp_path)
     # Default policy still loads; core rule present; no remote meta.
     assert any(r.id == "destructive-command" for r in engine.rules)
@@ -151,7 +151,7 @@ def test_signed_agent_controls_reach_engine(tmp_path, monkeypatch):
     _write_remote(tmp_path / ".prismor", AGENT_CONTROL_POLICY)
     _enroll()
 
-    from warden.policy_engine import PolicyEngine
+    from prismor.runtime.policy_engine import PolicyEngine
     engine = PolicyEngine(workspace=tmp_path)
     assert engine.agent_controls.get("checkout-bot", {}).get("enabled") is False
     assert engine.agent_controls.get("support-bot", {}).get("mode") == "enforce"
@@ -162,7 +162,7 @@ def test_agent_controls_sig_matches_server_format(tmp_path, monkeypatch):
     (sorted key:enabled:mode:iam → sha256 → 16 hex) so a control change triggers
     a re-pull; empty when there are no controls."""
     monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
-    from warden.enterprise import remote_policy
+    from prismor.runtime.enterprise import remote_policy
 
     _write_remote(tmp_path / ".prismor", AGENT_CONTROL_POLICY)
     _enroll()

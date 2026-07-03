@@ -49,7 +49,7 @@ PATH_ALLOWLIST = {
 # key-shaped or secret-shaped material that is fake by design. Each is an
 # explicit, reviewed exception — keep this list short and justified.
 CONTENT_ALLOWLIST = {
-    "warden/canary.py",                 # honeytoken templates: a *fake* SSH key + AWS key planted as bait
+    "prismor/runtime/canary.py",                 # honeytoken templates: a *fake* SSH key + AWS key planted as bait
     "tests/test_cloak_secret_guard.py", # secret-detection tests: AWS example key + dummy ghp_ token fixtures
     "tests/test_oss_guard.py",          # this guard's own tests embed a fake PEM + AWS example key as fixtures
 }

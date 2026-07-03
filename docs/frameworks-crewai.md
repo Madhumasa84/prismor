@@ -1,9 +1,9 @@
 # CrewAI integration
 
-Prismor Warden adapter for CrewAI. Ships from
-[`adapters/crewai/`](../adapters/crewai/) as `prismor-warden-crewai`.
+Prismor adapter for CrewAI. Ships from
+[`adapters/crewai/`](../adapters/crewai/) as `prismor-crewai`.
 Registry entry: `id: crewai` in
-[`warden/integrations/registry.yaml`](../warden/integrations/registry.yaml).
+[`prismor/runtime/integrations/registry.yaml`](../prismor/runtime/integrations/registry.yaml).
 
 ## Install
 
@@ -19,7 +19,7 @@ pip install "prismor[crewai]"
 ```python
 from crewai import Agent, Task, Crew
 from crewai_tools import tool
-from prismor.warden.crewai import guard_tools
+from prismor.crewai import guard_tools
 
 @tool("Shell runner")
 def run_shell(command: str) -> str:
@@ -44,16 +44,16 @@ unaffected.
 ## Guard a single tool
 
 ```python
-from prismor.warden.crewai import warden_guard_tool
+from prismor.crewai import prismor_guard_tool
 
-guarded = warden_guard_tool(run_shell, mode="enforce", subject="user:alice")
+guarded = prismor_guard_tool(run_shell, mode="enforce", subject="user:alice")
 ```
 
 ## Per-user control (multi-tenant)
 
 ```python
 from crewai import Crew
-from prismor.warden.crewai import guard_tools, use_subject
+from prismor.crewai import guard_tools, use_subject
 
 tools = guard_tools([run_shell, search])   # once, at startup — no bound subject
 
@@ -65,7 +65,7 @@ with use_subject("user:alice"):
     result = crew.kickoff(inputs={"prompt": user_prompt})
 ```
 
-Per-user IAM example (`.prismor-warden/iam.yaml`):
+Per-user IAM example (`.prismor/iam.yaml`):
 
 ```yaml
 agents:
@@ -115,11 +115,11 @@ guard_tools([ShellTool()])   # wraps tool._run
 By default a blocked call returns a denial string to the crew:
 
 ```
-⛔ Prismor Warden blocked this tool call: [HIGH] destructive-command matched
+⛔ Prismor blocked this tool call: [HIGH] destructive-command matched
 ```
 
 CrewAI surfaces this as the tool's output, and the agent typically reports the
-error and moves on. Use `raise_on_block=True` to raise `WardenBlocked` instead,
+error and moves on. Use `raise_on_block=True` to raise `PrismorBlocked` instead,
 which halts the task.
 
 ## Event mapping
@@ -130,7 +130,7 @@ which halts the task.
 | Override with `event_type="network"` | `network` | `url` | `suspicious-network`, `secret-in-url-params` |
 | Override with `event_type="file_write"` | `file_write` | `path` | path-based rules |
 
-Pass `event_type` to `warden_guard_tool` for tools that make network requests
+Pass `event_type` to `prismor_guard_tool` for tools that make network requests
 or write files rather than running shell commands.
 
 ## Reference
@@ -138,9 +138,9 @@ or write files rather than running shell commands.
 | Symbol | Purpose |
 |---|---|
 | `guard_tools(tools, **kwargs)` | Guard a list of CrewAI tools in one call |
-| `warden_guard_tool(tool, **kwargs)` | Guard a single tool |
+| `prismor_guard_tool(tool, **kwargs)` | Guard a single tool |
 | `use_subject(value)` | Per-request subject contextmanager |
-| `WardenBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
+| `PrismorBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
 
 All functions accept: `subject`, `workspace`, `agent`, `mode`, `session_id`,
 `event_type`, `raise_on_block`. See [`adapters/crewai/`](../adapters/crewai/)

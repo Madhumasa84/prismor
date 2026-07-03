@@ -1,6 +1,6 @@
 """Tests for the OpenAI Agents SDK adapter (adapters/openai-agents).
 
-Exercises the adapter end to end against the real Warden policy pipeline with no
+Exercises the adapter end to end against the real Prismor policy pipeline with no
 live LLM: allow / observe / enforce, and per-user IAM scoping. The adapter wraps
 a plain callable, so we drive it by calling the wrapped function directly.
 """
@@ -15,12 +15,12 @@ _ADAPTER_SRC = Path(__file__).resolve().parent.parent / "adapters" / "openai-age
 if str(_ADAPTER_SRC) not in sys.path:
     sys.path.insert(0, str(_ADAPTER_SRC))
 
-from prismor.warden.openai import WardenBlocked, warden_guard  # noqa: E402
+from prismor.openai import PrismorBlocked, prismor_guard  # noqa: E402
 
 # The legacy flat module must stay importable and share the same objects, so
 # isinstance checks work across old- and new-style imports.
-import prismor_warden_openai as _legacy  # noqa: E402
-assert _legacy.WardenBlocked is WardenBlocked
+import prismor_openai as _legacy  # noqa: E402
+assert _legacy.PrismorBlocked is PrismorBlocked
 
 
 def _make_tool():
@@ -37,15 +37,15 @@ def _make_tool():
 
 def test_safe_call_runs(tmp_path):
     tool, calls = _make_tool()
-    guarded = warden_guard(tool, workspace=tmp_path, mode="enforce")
+    guarded = prismor_guard(tool, workspace=tmp_path, mode="enforce")
     assert guarded(command="echo hello") == "ran: echo hello"
     assert calls["ran"] == 1
 
 
 def test_enforce_blocks_destructive(tmp_path):
     tool, calls = _make_tool()
-    guarded = warden_guard(tool, workspace=tmp_path, mode="enforce")
-    with pytest.raises(WardenBlocked) as exc:
+    guarded = prismor_guard(tool, workspace=tmp_path, mode="enforce")
+    with pytest.raises(PrismorBlocked) as exc:
         guarded(command="rm -rf /")
     # Tool must NOT have executed.
     assert calls["ran"] == 0
@@ -55,7 +55,7 @@ def test_enforce_blocks_destructive(tmp_path):
 
 def test_observe_never_blocks_but_records(tmp_path):
     tool, calls = _make_tool()
-    guarded = warden_guard(tool, workspace=tmp_path, mode="observe")
+    guarded = prismor_guard(tool, workspace=tmp_path, mode="observe")
     # Same dangerous input, but observe mode is log-only: the call proceeds.
     assert guarded(command="rm -rf /") == "ran: rm -rf /"
     assert calls["ran"] == 1
@@ -63,7 +63,7 @@ def test_observe_never_blocks_but_records(tmp_path):
 
 def test_no_raise_returns_decision(tmp_path):
     tool, calls = _make_tool()
-    guarded = warden_guard(tool, workspace=tmp_path, mode="enforce", raise_on_block=False)
+    guarded = prismor_guard(tool, workspace=tmp_path, mode="enforce", raise_on_block=False)
     decision = guarded(command="rm -rf /")
     assert decision.allow is False
     assert decision.blocking is not None
@@ -72,7 +72,7 @@ def test_no_raise_returns_decision(tmp_path):
 
 def test_subject_tagged_on_findings(tmp_path):
     tool, _ = _make_tool()
-    guarded = warden_guard(
+    guarded = prismor_guard(
         tool, workspace=tmp_path, mode="enforce", subject="user:alice", raise_on_block=False
     )
     decision = guarded(command="rm -rf /")
@@ -84,10 +84,10 @@ def test_subject_tagged_on_findings(tmp_path):
 def test_per_request_subject_context(tmp_path):
     # Guard with NO bound subject (the multi-tenant pattern): the per-request
     # context decides who the call is attributed to.
-    from warden.principal import use_subject
+    from prismor.runtime.principal import use_subject
 
     tool, _ = _make_tool()
-    guarded = warden_guard(tool, workspace=tmp_path, mode="enforce", raise_on_block=False)
+    guarded = prismor_guard(tool, workspace=tmp_path, mode="enforce", raise_on_block=False)
 
     with use_subject("user:dave"):
         decision = guarded(command="rm -rf /")
@@ -101,7 +101,7 @@ def test_per_request_subject_context(tmp_path):
 
 
 def _write_iam(workspace: Path) -> None:
-    iam_dir = workspace / ".prismor-warden"
+    iam_dir = workspace / ".prismor"
     iam_dir.mkdir(parents=True, exist_ok=True)
     # bob is denied shell tools (Bash); other users have no profile → unrestricted.
     (iam_dir / "iam.yaml").write_text(
@@ -117,18 +117,18 @@ def _write_iam(workspace: Path) -> None:
 
 def test_per_user_iam_scoping(tmp_path, monkeypatch):
     # Ensure no ambient named-agent identity overrides subject-based selection.
-    monkeypatch.delenv("WARDEN_AGENT_ID", raising=False)
+    monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
 
     tool, calls = _make_tool()
 
     # bob: has a deny-Bash IAM profile → a safe shell call is still blocked.
-    bob = warden_guard(tool, workspace=tmp_path, mode="enforce", subject="user:bob")
-    with pytest.raises(WardenBlocked):
+    bob = prismor_guard(tool, workspace=tmp_path, mode="enforce", subject="user:bob")
+    with pytest.raises(PrismorBlocked):
         bob(command="echo hi")
     assert calls["ran"] == 0
 
     # alice: no IAM profile → same safe call is allowed.
-    alice = warden_guard(tool, workspace=tmp_path, mode="enforce", subject="user:alice")
+    alice = prismor_guard(tool, workspace=tmp_path, mode="enforce", subject="user:alice")
     assert alice(command="echo hi") == "ran: echo hi"
     assert calls["ran"] == 1

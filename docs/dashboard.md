@@ -1,6 +1,6 @@
 # Dashboard & Sessions
 
-Warden logs every agent tool call — not just the ones it blocks — to a local
+Prismor logs every agent tool call — not just the ones it blocks — to a local
 SQLite store. This doc covers the three ways to read that history: the
 **terminal dashboard**, the **local web dashboard**, and the **session**
 commands for drilling into a single run.
@@ -8,17 +8,17 @@ commands for drilling into a single run.
 Everything is local. `serve` binds to `127.0.0.1` by default; there is no cloud
 component and no external service.
 
-Implementation: [`warden/server.py`](../warden/server.py), session store in
-[`warden/store.py`](../warden/store.py).
+Implementation: [`prismor/runtime/server.py`](../prismor/runtime/server.py), session store in
+[`prismor/runtime/store.py`](../prismor/runtime/store.py).
 
 ---
 
 ## Where the data lives
 
 ```
-.prismor-warden/
+.prismor/
 ├─ sessions/<session-id>.jsonl   append-only log, one JSON object per tool call
-└─ warden.db                     SQLite, indexed for cross-session queries
+└─ prismor.db                     SQLite, indexed for cross-session queries
 ```
 
 Workspaces are registered as you install hooks, so the dashboards can aggregate
@@ -27,7 +27,7 @@ across every project you've protected.
 ```
    workspace A ─┐
    workspace B ─┼─► registered workspaces ─► status --all / dashboard ─► you
-   workspace C ─┘        (warden.db each)
+   workspace C ─┘        (prismor.db each)
 ```
 
 ---
@@ -81,7 +81,7 @@ are registered yet — install hooks in a project first to collect data.
 
 ### Agents tab
 
-The **Agents** tab manages every agent that has run in a Warden-enabled
+The **Agents** tab manages every agent that has run in a Prismor-enabled
 workspace (Claude Code, Codex, Cursor, … — they auto-register on first run):
 
 - **Enabled toggle** — the per-agent kill switch. Off = every tool call from
@@ -90,7 +90,7 @@ workspace (Claude Code, Codex, Cursor, … — they auto-register on first run):
   `observe` (log only), or `enforce` (block in real time).
 - **IAM profile** — pin the agent to a least-privilege profile from `iam.yaml`.
 
-Changes are written to `.prismor-warden/agents.yaml` and picked up by running
+Changes are written to `.prismor/agents.yaml` and picked up by running
 agents within 30 s. The topbar also shows the **effective enforcement mode**
 (observe/enforce, merged across enterprise > project > global policy) at all
 times.
@@ -133,6 +133,6 @@ viewer, with full rule metadata.
 
 ## See also
 
-- [Warden](warden.md) — session-log schema and the audit command
+- [Prismor](prismor-runtime.md) — session-log schema and the audit command
 - [Learning](learning.md) — mines this same history for new rules
 - [CLI Reference](cli-reference.md) — all commands at a glance

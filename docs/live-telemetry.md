@@ -5,7 +5,7 @@
 An org admin opens **Admin → Observability** and sees their developers' AI-agent
 security activity **stream in live, automatically** — no per-developer manual
 steps, no refreshing. When a developer's Claude/Cursor/etc. session triggers a
-Warden finding (a blocked `rm -rf`, a secret-exfil attempt, a risky MCP call),
+Prismor finding (a blocked `rm -rf`, a secret-exfil attempt, a risky MCP call),
 it should appear in the dashboard within seconds, **redacted** (metadata +
 hashes, never raw commands or secrets).
 
@@ -18,8 +18,8 @@ Developer's AI agent (Claude Code)
 prismor hook-dispatch            ← the installed `prismor` runtime
    │  PolicyEngine evaluates the event → findings
    ▼
-prismor telemetry sink            ← warden/sinks.py _dispatch_prismor
-   │  builds a REDACTED record (warden/enterprise/telemetry.py), uses the enrolled
+prismor telemetry sink            ← prismor/runtime/sinks.py _dispatch_prismor
+   │  builds a REDACTED record (prismor/runtime/enterprise/telemetry.py), uses the enrolled
    │  device key (~/.prismor/identity.json) → POST
    ▼
 POST /api/telemetry/ingest        ← prismor-web, device-auth
@@ -37,11 +37,11 @@ sink, and the machine must be **enrolled** (`prismor enroll <token>`).
 Diagnosed on 2026-06-10. The dashboard was frozen at ~3h old because:
 
 1. The user's Claude Code hooks invoke the **pipx-installed** runtime:
-   `~/.local/pipx/venvs/immunity-agent/.../warden/cli.py hook-dispatch …`
+   `~/.local/pipx/venvs/immunity-agent/.../prismor/runtime/cli.py hook-dispatch …`
 2. That install is **v1.5.8 — predating the cloud sink**. It's missing
    `identity.py`, `telemetry.py`, `remote_policy.py`, and its `sinks.py` has no
    `prismor` dispatcher.
-3. So every live tool call wrote findings to the **local** `warden.db`, but
+3. So every live tool call wrote findings to the **local** `prismor.db`, but
    **nothing uploaded**. The dashboard only had data from a one-time **manual
    backfill** of 3,067 historical local findings — hence "last activity 3h ago."
 
@@ -53,7 +53,7 @@ In short: **enrolled ✓, but the live hook runs old code with no uploader.**
 Publish **immunity-agent ≥ 1.6.x** (this branch — `identity`/`telemetry`/
 `remote_policy` + the `prismor` sink) to PyPI. Developers `pipx upgrade
 immunity-agent`. Their existing hooks already call the installed
-`warden/cli.py`, so once it's the new code, **every finding uploads live with
+`prismor/runtime/cli.py`, so once it's the new code, **every finding uploads live with
 zero further steps**. Enrollment is one-time (`prismor enroll <token>`).
 
 ### Local / pre-release (stopgap for testing)
@@ -62,7 +62,7 @@ code now, and keep the local control-plane server running:
 
 ```jsonc
 // ~/.claude/settings.json — hook command
-"PYTHONPATH=<repo> <repo>/venv/bin/python -m warden.cli \
+"PYTHONPATH=<repo> <repo>/venv/bin/python -m prismor.runtime.cli \
    hook-dispatch --agent claude --workspace \"$HOME\" --mode observe"
 ```
 (Requires the local prismor-web server up at the `api_base` in

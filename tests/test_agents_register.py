@@ -1,4 +1,4 @@
-"""Tests for record_seen's control-plane fleet registration (warden/agents.py).
+"""Tests for record_seen's control-plane fleet registration (prismor/runtime/agents.py).
 
 Invariants:
   * Registration fires once per process per agent, only when enrolled AND the
@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from warden import agents
+from prismor.runtime import agents
 
 
 class _SyncThread:
@@ -36,7 +36,7 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def _enroll():
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
     identity.save_identity({
         "device_id": "d1", "org_id": "o1", "user_id": "u1",
         "device_key": "prism_dev_x", "api_base": "http://127.0.0.1:1",
@@ -52,39 +52,39 @@ def posts(monkeypatch):
 
 def test_registers_named_agent_when_enrolled_and_managed(tmp_path, monkeypatch, posts):
     _enroll()
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: True)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: True)
     agents.record_seen("checkout-bot", framework="openai-agents", workspace=tmp_path)
     assert len(posts) == 1
     _, payload = posts[0]
     assert payload == {"agents": [{"name": "checkout-bot", "framework": "openai-agents"}]}
     # Local registry still written alongside.
-    assert (tmp_path / ".prismor-warden" / "agents.yaml").exists()
+    assert (tmp_path / ".prismor" / "agents.yaml").exists()
 
 
 def test_unnamed_agent_registers_with_empty_name(tmp_path, monkeypatch, posts):
     _enroll()
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: True)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: True)
     # record_seen is called with name == framework for unnamed agents.
     agents.record_seen("claude", framework="claude", workspace=tmp_path)
     assert posts[0][1] == {"agents": [{"name": "", "framework": "claude"}]}
 
 
 def test_noop_when_not_enrolled(tmp_path, monkeypatch, posts):
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: True)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: True)
     agents.record_seen("bot", framework="langchain", workspace=tmp_path)
     assert posts == []
 
 
 def test_noop_on_personal_workspace(tmp_path, monkeypatch, posts):
     _enroll()
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: False)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: False)
     agents.record_seen("bot", framework="langchain", workspace=tmp_path)
     assert posts == []
 
 
 def test_once_per_process_and_disk_debounce(tmp_path, monkeypatch, posts):
     _enroll()
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: True)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: True)
     agents.record_seen("bot", framework="langchain", workspace=tmp_path)
     agents.record_seen("bot", framework="langchain", workspace=tmp_path)  # same process
     assert len(posts) == 1
@@ -105,6 +105,6 @@ def test_once_per_process_and_disk_debounce(tmp_path, monkeypatch, posts):
 def test_post_failure_never_raises(tmp_path, monkeypatch):
     """The real _post_registration against a dead endpoint stays silent."""
     _enroll()
-    monkeypatch.setattr("warden.enterprise.workspace_scope.is_managed", lambda ws: True)
+    monkeypatch.setattr("prismor.runtime.enterprise.workspace_scope.is_managed", lambda ws: True)
     # No _post_registration stub — the dead api_base (port 1) must be swallowed.
     agents.record_seen("bot", framework="crewai", workspace=tmp_path)  # must not raise

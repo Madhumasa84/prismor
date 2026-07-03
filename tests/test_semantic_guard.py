@@ -6,14 +6,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.semantic_guard import SemanticGuard, SemanticRisk, _heuristic_analyze
-from warden.semantic_guard_v2 import (
+from prismor.runtime.semantic_guard import SemanticGuard, SemanticRisk, _heuristic_analyze
+from prismor.runtime.semantic_guard_v2 import (
     HIGH_THRESH,
     LOW_THRESH,
     HybridRisk,
     SemanticGuardV2,
 )
-from warden.policy_engine import PolicyEngine
+from prismor.runtime.policy_engine import PolicyEngine
 
 
 class TestHeuristicEngine(unittest.TestCase):

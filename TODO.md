@@ -23,7 +23,7 @@ Rough sketch:
 ## Medium priority
 
 ### Dashboard subject filter
-Data is already captured and tagged per-user in findings/events (field: `subject`). The dashboard (`warden/server.py` `/api/findings`, `/api/events`) and `warden/dashboard.html` don't yet expose a subject filter or column. Add:
+Data is already captured and tagged per-user in findings/events (field: `subject`). The dashboard (`prismor/runtime/server.py` `/api/findings`, `/api/events`) and `prismor/runtime/dashboard.html` don't yet expose a subject filter or column. Add:
 - `?subject=user:alice` query param on `/api/findings` / `/api/events`
 - A "User" column in the findings table
 - A user dropdown filter in `dashboard.html`
@@ -32,7 +32,7 @@ Data is already captured and tagged per-user in findings/events (field: `subject
 All framework docs written: frameworks-openai-agents.md, frameworks-langchain.md, frameworks-crewai.md, frameworks-browser-use.md, frameworks-overview.md.
 
 ### Coding-agent adapters: Gemini CLI, Kiro, OpenCode
-Registry entries exist (`status: roadmap`), hook surfaces documented. Need normalizers + `_merge_*`/`_normalize_*` functions in `warden/hooks.py`, entries in `_SUPPORTED_AGENTS`. Gemini and Kiro use `exit-2` (same convention as Claude/Cursor); OpenCode uses `throw`.
+Registry entries exist (`status: roadmap`), hook surfaces documented. Need normalizers + `_merge_*`/`_normalize_*` functions in `prismor/runtime/hooks.py`, entries in `_SUPPORTED_AGENTS`. Gemini and Kiro use `exit-2` (same convention as Claude/Cursor); OpenCode uses `throw`.
 
 ---
 
@@ -42,10 +42,10 @@ Registry entries exist (`status: roadmap`), hook surfaces documented. Need norma
 Add `bash scripts/verify_registry.sh` to the CI workflow (`.github/workflows/`) alongside the existing test step. Catches registry drift and matrix out-of-sync.
 
 ### Per-user telemetry SIEM field
-`warden/enterprise/telemetry.py` `build_record()` already has `"subject"` field added. Verify that SIEM sinks (Splunk, Datadog, generic HTTP) forward it correctly, and document the field in the sink schema.
+`prismor/runtime/enterprise/telemetry.py` `build_record()` already has `"subject"` field added. Verify that SIEM sinks (Splunk, Datadog, generic HTTP) forward it correctly, and document the field in the sink schema.
 
 ### `guard_agent` for LangChain/LangGraph
 LangChain equivalent of OpenAI's `guard_agent(agent)` — accept a `RunnableSequence` or `AgentExecutor`, extract the bound tools, call `guard_tools`, return the same object. Currently callers must extract tools manually.
 
 ### Sweep-only agents: Aider, Trae, Kilocode
-Registry entries exist (`status: sweep-only`). These have no programmable pre-tool hook; the only coverage is rules injection into their config files. Consider a `immunity sweep-inject <agent>` subcommand that writes Warden guardrail rules into `.aider.conf.yml` / `.trae/rules/` / `.kilocode/rules/`.
+Registry entries exist (`status: sweep-only`). These have no programmable pre-tool hook; the only coverage is rules injection into their config files. Consider a `immunity sweep-inject <agent>` subcommand that writes Prismor guardrail rules into `.aider.conf.yml` / `.trae/rules/` / `.kilocode/rules/`.

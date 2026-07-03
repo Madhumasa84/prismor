@@ -1,5 +1,5 @@
-"""Tests for eval-time rule exemptions (warden/runtime._apply_rule_exemptions)
-and the re-pull signature (warden/enterprise/remote_policy).
+"""Tests for eval-time rule exemptions (prismor/runtime/runtime._apply_rule_exemptions)
+and the re-pull signature (prismor/runtime/enterprise/remote_policy).
 
 An exemption {ruleId, scope, scopeId, action, expires} relaxes ('allow' → drop)
 or downgrades ('flag' → warn, non-blocking) a finding for the current
@@ -7,8 +7,8 @@ user/device/session. Core/floor rules can never be exempted.
 """
 from __future__ import annotations
 
-from warden.runtime import _apply_rule_exemptions
-from warden.principal import Subject
+from prismor.runtime.runtime import _apply_rule_exemptions
+from prismor.runtime.principal import Subject
 
 
 def _finding(rule_id, category="tool_call_abuse", mode="enforce"):
@@ -45,7 +45,7 @@ def test_user_allow():
 
 def test_device_allow(monkeypatch):
     # device_id comes from the enrolled identity, not the Subject.
-    monkeypatch.setattr("warden.enterprise.identity.load_identity", lambda: {"device_id": "dev_1"})
+    monkeypatch.setattr("prismor.runtime.enterprise.identity.load_identity", lambda: {"device_id": "dev_1"})
     ex = [{"ruleId": "r", "scope": "device", "scopeId": "dev_1", "action": "allow"}]
     assert _apply_rule_exemptions([_finding("r")], ex, session_id="s", subject=SUBJ) == []
     ex_miss = [{"ruleId": "r", "scope": "device", "scopeId": "dev_2", "action": "allow"}]
@@ -96,7 +96,7 @@ def test_sig_round_trips(tmp_path, monkeypatch):
     """_current_rule_exemptions_sig reproduces the server's format so a change
     triggers a re-pull; empty when there are none."""
     monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
-    from warden.enterprise import remote_policy
+    from prismor.runtime.enterprise import remote_policy
     import hashlib
 
     exemptions = [

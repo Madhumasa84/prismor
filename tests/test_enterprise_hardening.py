@@ -24,7 +24,7 @@ def _isolated_home(tmp_path, monkeypatch):
 
 
 def test_spool_append_and_drain_fifo():
-    from warden.enterprise import telemetry_spool as spool
+    from prismor.runtime.enterprise import telemetry_spool as spool
 
     spool.append([{"n": 1}, {"n": 2}])
     spool.append([{"n": 3}])
@@ -41,7 +41,7 @@ def test_spool_append_and_drain_fifo():
 
 
 def test_spool_is_bounded_drops_oldest():
-    from warden.enterprise import telemetry_spool as spool
+    from prismor.runtime.enterprise import telemetry_spool as spool
 
     spool.append([{"n": i} for i in range(spool.SPOOL_MAX_RECORDS + 50)])
     assert spool.pending_count() == spool.SPOOL_MAX_RECORDS
@@ -50,7 +50,7 @@ def test_spool_is_bounded_drops_oldest():
 
 
 def test_spool_survives_corrupt_lines(tmp_path):
-    from warden.enterprise import telemetry_spool as spool
+    from prismor.runtime.enterprise import telemetry_spool as spool
 
     spool.append([{"n": 1}])
     with open(spool.spool_path(), "a", encoding="utf-8") as f:
@@ -63,7 +63,7 @@ def test_spool_survives_corrupt_lines(tmp_path):
 
 
 def test_revocation_marker_roundtrip():
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
 
     assert identity.revoked_info() is None
     assert not identity.revoked_backoff_active()
@@ -78,7 +78,7 @@ def test_revocation_marker_roundtrip():
 
 
 def test_revocation_backoff_expires(monkeypatch):
-    from warden.enterprise import identity
+    from prismor.runtime.enterprise import identity
 
     identity.mark_revoked("rejected")
     # Age the marker past the retry window.
@@ -90,7 +90,7 @@ def test_revocation_backoff_expires(monkeypatch):
 
 
 def test_policy_check_skipped_while_revoked(monkeypatch):
-    from warden.enterprise import identity, remote_policy
+    from prismor.runtime.enterprise import identity, remote_policy
 
     identity.save_identity({
         "device_id": "d1", "org_id": "o1", "user_id": "u1",
@@ -111,11 +111,11 @@ def test_policy_check_skipped_while_revoked(monkeypatch):
 
 
 def test_override_cannot_drop_core_block_categories(tmp_path):
-    from warden.policy_engine import PolicyEngine, _CORE_BLOCK_CATEGORIES
+    from prismor.runtime.policy_engine import PolicyEngine, _CORE_BLOCK_CATEGORIES
 
     ws = tmp_path / "ws"
-    (ws / ".prismor-warden").mkdir(parents=True)
-    (ws / ".prismor-warden" / "policy.yaml").write_text(
+    (ws / ".prismor").mkdir(parents=True)
+    (ws / ".prismor" / "policy.yaml").write_text(
         "settings:\n  block_categories: [prompt_injection]\n",
         encoding="utf-8",
     )

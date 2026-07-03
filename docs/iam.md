@@ -1,12 +1,12 @@
 # IAM (Agent Identities)
 
-Warden IAM gives each agent a **named identity with a permission profile** —
+Prismor IAM gives each agent a **named identity with a permission profile** —
 the tools it may use, the tools it is denied, whether it may touch the network,
 and which paths it may reach. When several agents share a workspace (Claude for
 coding, a read-only research bot, a CI reviewer), IAM constrains each to only
 what it needs.
 
-Implementation: [`warden/iam.py`](../warden/iam.py).
+Implementation: [`prismor/runtime/iam.py`](../prismor/runtime/iam.py).
 
 ---
 
@@ -14,20 +14,20 @@ Implementation: [`warden/iam.py`](../warden/iam.py).
 
 ```mermaid
 flowchart LR
-    ENV["WARDEN_AGENT_ID=researcher"] --> HOOK
-    CALL["agent tool call<br/>{ Bash: 'curl …' }"] --> HOOK["Warden hook"]
+    ENV["PRISMOR_AGENT_ID=researcher"] --> HOOK
+    CALL["agent tool call<br/>{ Bash: 'curl …' }"] --> HOOK["Prismor hook"]
     HOOK --> YAML[("iam.yaml<br/>researcher:<br/>allowed_tools: [Read, WebFetch]<br/>deny_tools: [Bash, Write]<br/>deny_network: false")]
     YAML --> DEC{"Bash ∈ deny_tools?"}
     DEC -->|yes| BLOCK["BLOCK"]
     DEC -->|no| ALLOW["continue to policy engine"]
 ```
 
-The active identity comes from the `WARDEN_AGENT_ID` environment variable. If it
-is unset, no IAM restrictions apply beyond the base Warden policy. Each tool call
+The active identity comes from the `PRISMOR_AGENT_ID` environment variable. If it
+is unset, no IAM restrictions apply beyond the base Prismor policy. Each tool call
 is checked against the resolved profile and blocked if it violates it — this runs
 *in addition to* the normal policy engine.
 
-> **Trust boundary.** `WARDEN_AGENT_ID` is inherited by the agent being
+> **Trust boundary.** `PRISMOR_AGENT_ID` is inherited by the agent being
 > constrained, so IAM guards **cooperative or misconfigured** agents, not a
 > fully adversarial one that can rewrite its own environment. It is a
 > least-privilege guardrail, not a sandbox. Pair it with `enforce` mode and OS
@@ -40,7 +40,7 @@ is checked against the resolved profile and blocked if it violates it — this r
 Profiles live in YAML. Resolution order (project wins over global):
 
 1. `~/.prismor/iam.yaml` — global, user-level
-2. `.prismor-warden/iam.yaml` — per-project
+2. `.prismor/iam.yaml` — per-project
 
 ```yaml
 agents:
@@ -80,7 +80,7 @@ prismor iam init
 prismor iam init --scope project
 
 # 2. Edit it to define your identities, then activate one:
-export WARDEN_AGENT_ID=researcher
+export PRISMOR_AGENT_ID=researcher
 
 # 3. Inspect
 prismor iam list                 # all identities; marks the active one
@@ -102,7 +102,7 @@ deploying an agent under it.
 
 | Use | Reach for |
 |---|---|
-| A **persistent** role that should always have the same powers | **IAM** (this doc) — set `WARDEN_AGENT_ID` and define it once. |
+| A **persistent** role that should always have the same powers | **IAM** (this doc) — set `PRISMOR_AGENT_ID` and define it once. |
 | A **per-session, task-derived** restriction for one run | [Scoped Agent](scoped-agent.md) — rules are synthesized from the task. |
 
 They compose: an IAM profile sets the standing floor, scoped rules tighten it
@@ -113,5 +113,5 @@ further for a single session.
 ## See also
 
 - [Scoped Agent](scoped-agent.md) — session-scoped, task-derived rules
-- [Warden](warden.md) — the base policy engine IAM layers on top of
+- [Prismor](prismor-runtime.md) — the base policy engine IAM layers on top of
 - [CLI Reference](cli-reference.md) — all commands at a glance

@@ -23,7 +23,7 @@ TEST_DIR="$HOME/immunity-test-env"
 
 # ── start eval-server ─────────────────────────────────────────────────────────
 echo "▶ Starting eval-server on port $EVAL_PORT…"
-PYTHONPATH="$WORKSPACE" "$VENV_PYTHON" -m warden.eval_server --port "$EVAL_PORT" > /tmp/eval_server.log 2>&1 &
+PYTHONPATH="$WORKSPACE" "$VENV_PYTHON" -m prismor.runtime.eval_server --port "$EVAL_PORT" > /tmp/eval_server.log 2>&1 &
 SERVER_PID=$!
 
 cleanup() { kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
@@ -71,8 +71,8 @@ echo " Language: $(java --version 2>&1 | head -1)"
 echo "══════════════════════════════════════════════"
 cd /tmp
 mkdir -p /tmp/java_test_classes
-if javac "$TEST_DIR/WardenOpenAITest.java" -d /tmp/java_test_classes 2>&1 && \
-   java -cp /tmp/java_test_classes WardenOpenAITest; then
+if javac "$TEST_DIR/PrismorOpenAITest.java" -d /tmp/java_test_classes 2>&1 && \
+   java -cp /tmp/java_test_classes PrismorOpenAITest; then
   RESULTS+=("✅ Java")
 else
   RESULTS+=("❌ Java")
@@ -83,13 +83,13 @@ echo ""
 echo "══════════════════════════════════════════════"
 echo " Language: $(rustc --version)"
 echo "══════════════════════════════════════════════"
-RUST_PROJ="$HOME/immunity-test-env/rust-warden-test"
+RUST_PROJ="$HOME/immunity-test-env/rust-prismor-test"
 mkdir -p "$RUST_PROJ/src"
 cp "$TEST_DIR/rust_openai_test.rs" "$RUST_PROJ/src/main.rs"
 
 cat > "$RUST_PROJ/Cargo.toml" <<'EOF'
 [package]
-name = "rust-warden-test"
+name = "rust-prismor-test"
 version = "0.1.0"
 edition = "2021"
 
@@ -97,7 +97,7 @@ edition = "2021"
 ureq = { version = "2", features = ["tls"] }
 EOF
 
-if (cd "$RUST_PROJ" && cargo build --release -q 2>&1 && "$RUST_PROJ/target/release/rust-warden-test"); then
+if (cd "$RUST_PROJ" && cargo build --release -q 2>&1 && "$RUST_PROJ/target/release/rust-prismor-test"); then
   RESULTS+=("✅ Rust")
 else
   RESULTS+=("❌ Rust")

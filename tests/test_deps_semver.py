@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from warden.deps import (
+from prismor.runtime.deps import (
     _read_npm_lockfile,
     check_against_feed,
     check_floating_ranges,
@@ -96,7 +96,7 @@ def test_empty_version_falls_back_to_name_only(tmp_path: Path) -> None:
 def test_parse_package_json_uses_lockfile_pin(tmp_path: Path) -> None:
     pkg = tmp_path / "package.json"
     _write_pkg(tmp_path, "lodash", "^4.17.0")
-    from warden.deps import _parse_package_json
+    from prismor.runtime.deps import _parse_package_json
     deps = _parse_package_json(pkg.read_text(), lockfile_map={"lodash": "4.17.21"})
     assert deps == [{
         "name": "lodash",

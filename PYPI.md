@@ -31,7 +31,7 @@ Requires Python ≥ 3.8 and PyYAML (installed automatically).
 
 ## Quick start
 
-**Install Warden hooks into your project** (enforces policy on every agent tool call):
+**Install Prismor hooks into your project** (enforces policy on every agent tool call):
 
 ```bash
 prismor install-hooks --agent claude --workspace . --mode observe
@@ -80,7 +80,7 @@ prismor dashboard   # opens http://127.0.0.1:7070 in your browser
 
 ## Detection coverage
 
-Warden ships with 56 rules covering the [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/):
+Prismor ships with 56 rules covering the [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/):
 
 | Category | Severity | What it catches |
 |---|---|---|

@@ -1,21 +1,21 @@
-# prismor-warden-crewai
+# prismor-crewai
 
-Prismor Warden adapter for **CrewAI**. Every tool invocation is routed through
-Warden's shared policy pipeline (`warden.runtime.evaluate_tool_call`) before the
+Prismor adapter for **CrewAI**. Every tool invocation is routed through
+Prismor's shared policy pipeline (`prismor.runtime.runtime.evaluate_tool_call`) before the
 tool runs — same engine, observe/enforce model, and per-user attribution as the
 other adapters. Registry entry: `id: crewai`.
 
 ## Install
 
 ```bash
-pip install prismor-warden-crewai      # + the Warden runtime (immunity-agent)
+pip install prismor-crewai      # + the Prismor runtime (immunity-agent)
 ```
 
 ## Use
 
 ```python
 from crewai import Agent
-from prismor.warden.crewai import guard_tools
+from prismor.crewai import guard_tools
 
 tools = guard_tools([run_shell], subject="user:alice", mode="enforce")
 agent = Agent(role="ops", goal="...", backstory="...", tools=tools)
@@ -36,7 +36,7 @@ enrolled (`~/.prismor/identity.json`) **and** the workspace policy enables the
 telemetry sink:
 
 ```yaml
-# .prismor-warden/policy.yaml
+# .prismor/policy.yaml
 settings:
   outputs:
     - type: prismor        # POSTs each finding to {api_base}/api/telemetry/ingest

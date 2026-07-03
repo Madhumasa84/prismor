@@ -27,9 +27,9 @@ os.environ["PRISMOR_HOME"] = str(_HOME)
 os.environ["PRISMOR_SECRETS_DIR"] = str(_HOME / "secrets")
 os.environ["PRISMOR_CLOAK_PATTERNS"] = str(_HOME / "cloak_patterns.txt")
 
-from warden.cloaking import patterns  # noqa: E402
+from prismor.runtime.cloaking import patterns  # noqa: E402
 
-_GUARD = _REPO / "warden" / "cloaking" / "hooks" / "secret-guard.sh"
+_GUARD = _REPO / "prismor" / "runtime" / "cloaking" / "hooks" / "secret-guard.sh"
 
 _passed = 0
 _failed = 0

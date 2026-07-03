@@ -12,7 +12,7 @@ The active rule set for a session becomes:
 policy.yaml (base, persistent)  +  scoped_agent rules (this session only)
 ```
 
-Implementation: [`warden/scoped_agent.py`](../warden/scoped_agent.py).
+Implementation: [`prismor/runtime/scoped_agent.py`](../prismor/runtime/scoped_agent.py).
 
 ---
 
@@ -27,7 +27,7 @@ flowchart TD
     CHECK -->|"not in allowed_tools"| BLOCK["BLOCK"]
 ```
 
-On the first prompt of a session, Warden derives a tight rule set from the goal
+On the first prompt of a session, Prismor derives a tight rule set from the goal
 and the tools available, saves it keyed by session id, and then checks every
 subsequent tool call against it alongside the base policy. The rules evaporate
 when the session ends — they never accumulate into your permanent policy.
@@ -79,7 +79,7 @@ prismor scope clear <id>
 
 | | [IAM](iam.md) | Scoped Agent (this doc) |
 |---|---|---|
-| Lifetime | Persistent, tied to `WARDEN_AGENT_ID` | One session |
+| Lifetime | Persistent, tied to `PRISMOR_AGENT_ID` | One session |
 | Source | Hand-written `iam.yaml` profile | Auto-synthesized from the task prompt |
 | Best for | A standing role (read-only bot, reviewer) | Tightening one run to its actual task |
 
@@ -92,5 +92,5 @@ profile (if any), *and* the scoped rules.
 ## See also
 
 - [IAM](iam.md) — persistent named identities
-- [Warden](warden.md) — the base policy engine
+- [Prismor](prismor-runtime.md) — the base policy engine
 - [CLI Reference](cli-reference.md) — all commands at a glance

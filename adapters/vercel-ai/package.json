@@ -1,7 +1,7 @@
 {
-  "name": "prismor-warden",
+  "name": "prismor",
   "version": "0.1.0",
-  "description": "Prismor Warden for JS/TS agents \u2014 policy-controlled tool calls for the Vercel AI SDK via the Prismor eval-server",
+  "description": "Prismor for JS/TS agents \u2014 policy-controlled tool calls for the Vercel AI SDK via the Prismor eval-server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -27,7 +27,7 @@
   },
   "keywords": [
     "prismor",
-    "warden",
+    "prismor",
     "ai-security",
     "vercel-ai",
     "tool-call"

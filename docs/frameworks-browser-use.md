@@ -1,13 +1,13 @@
 # browser-use integration
 
-Prismor Warden adapter for [browser-use](https://github.com/browser-use/browser-use).
+Prismor adapter for [browser-use](https://github.com/browser-use/browser-use).
 Ships from [`adapters/browser-use/`](../adapters/browser-use/) as
-`prismor-warden-browser-use`. Registry entry: `id: browser-use` in
-[`warden/integrations/registry.yaml`](../warden/integrations/registry.yaml).
+`prismor-browser-use`. Registry entry: `id: browser-use` in
+[`prismor/runtime/integrations/registry.yaml`](../prismor/runtime/integrations/registry.yaml).
 
 Browser agents carry unique risk: they can navigate to attacker-controlled URLs,
 exfiltrate data via form submissions, download and execute files, and act on
-behalf of users with their credentials. Warden intercepts every action before
+behalf of users with their credentials. Prismor intercepts every action before
 Playwright touches the browser.
 
 ## Install
@@ -24,7 +24,7 @@ pip install "prismor[browser-use]"
 ```python
 from browser_use import Agent, Controller
 from langchain_openai import ChatOpenAI
-from prismor.warden.browser_use import guard_controller
+from prismor.browser_use import guard_controller
 
 controller = Controller()
 guard_controller(controller, mode="enforce")   # every browser action policy-checked
@@ -35,7 +35,7 @@ await agent.run()
 ```
 
 That's it. Every action the LLM triggers — navigation, clicks, form input, file
-uploads — is evaluated against the active Warden policy before Playwright runs it.
+uploads — is evaluated against the active Prismor policy before Playwright runs it.
 
 ## How it works
 
@@ -47,16 +47,16 @@ regardless of which action the LLM invokes.
 ```mermaid
 flowchart TD
     LLM["LLM decides to call<br/>go_to_url('https://webhook.site/…')"] --> REG["Registry.execute_action('go_to_url', GoToUrlParams(url=…))"]
-    REG --> WARDEN["Warden evaluates:<br/>event_type='network', url='https://webhook.site/…'"]
-    WARDEN -->|"suspicious-network rule matches"| DENY["Decision(allow=False)"]
-    DENY --> MSG["'⛔ Prismor Warden blocked action go_to_url' returned to LLM"]
+    REG --> PRISMOR["Prismor evaluates:<br/>event_type='network', url='https://webhook.site/…'"]
+    PRISMOR -->|"suspicious-network rule matches"| DENY["Decision(allow=False)"]
+    DENY --> MSG["'⛔ Prismor blocked action go_to_url' returned to LLM"]
     MSG --> SAFE["Playwright never opens the URL"]
 ```
 
 ## Per-user control (multi-tenant)
 
 ```python
-from prismor.warden.browser_use import guard_controller, use_subject
+from prismor.browser_use import guard_controller, use_subject
 
 controller = Controller()
 guard_controller(controller)   # once, at startup — no bound subject
@@ -71,7 +71,7 @@ with use_subject("user:alice"):
 Same agent, same controller, different policy per user. The subject is resolved
 from the contextvar and threaded through policy evaluation, IAM, and telemetry.
 
-Per-user IAM example (`.prismor-warden/iam.yaml`):
+Per-user IAM example (`.prismor/iam.yaml`):
 
 ```yaml
 agents:
@@ -85,7 +85,7 @@ agents:
 
 ## Event mapping
 
-browser-use actions are normalised to canonical Warden event types before
+browser-use actions are normalised to canonical Prismor event types before
 policy evaluation:
 
 | Action | Event type | Field | Rules that apply |
@@ -115,11 +115,11 @@ Tested on a Linux host with `browser-use 0.13.1` and the real `Controller` objec
 By default a blocked action returns a string to the LLM:
 
 ```
-⛔ Prismor Warden blocked action 'go_to_url': [HIGH] Flags calls to webhook.site …
+⛔ Prismor blocked action 'go_to_url': [HIGH] Flags calls to webhook.site …
 ```
 
 The agent receives this as the action's output and typically reports the block
-and tries an alternative. Use `raise_on_block=True` to raise `WardenBlocked`
+and tries an alternative. Use `raise_on_block=True` to raise `PrismorBlocked`
 instead, which halts the run immediately.
 
 ## Reference
@@ -128,7 +128,7 @@ instead, which halts the run immediately.
 |---|---|
 | `guard_controller(controller, **kwargs)` | Patch the controller's registry — one call guards all actions |
 | `use_subject(value)` | Per-request subject contextmanager |
-| `WardenBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
+| `PrismorBlocked` | Raised on enforce-mode block (when `raise_on_block=True`) |
 
 `guard_controller` accepts: `subject`, `workspace`, `agent`, `mode`,
 `session_id`, `raise_on_block`. See

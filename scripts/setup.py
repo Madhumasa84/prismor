@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prismor Warden — Interactive Setup Wizard
+Prismor — Interactive Setup Wizard
 Usage: python3 setup.py [TARGET_DIR] [--non-interactive]
 
 Environment variables (non-interactive mode):
@@ -26,15 +26,15 @@ from pathlib import Path
 # ── Constants ────────────────────────────────────────────────────────────────
 
 def _pkg_version() -> str:
-    # Prefer the installed package; fall back to parsing warden/__init__.py
-    # next to this script (git-clone path where warden may not be importable).
+    # Prefer the installed package; fall back to parsing prismor/runtime/__init__.py
+    # next to this script (git-clone path where prismor may not be importable).
     try:
-        from warden import __version__ as v
+        from prismor.runtime import __version__ as v
         return v
     except Exception:
         pass
     try:
-        init = Path(__file__).resolve().parent.parent / "warden" / "__init__.py"
+        init = Path(__file__).resolve().parent.parent / "prismor" / "__init__.py"
         m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init.read_text())
         if m:
             return m.group(1)
@@ -192,7 +192,7 @@ PRISMOR_DIR = Path(os.environ.get("PRISMOR_HOME", Path.home() / ".prismor"))
 if not PRISMOR_DIR.exists():
     PRISMOR_DIR = SCRIPT_DIR.parent
 
-DEFAULT_POLICY = PRISMOR_DIR / "warden" / "default_policy.yaml"
+DEFAULT_POLICY = PRISMOR_DIR / "prismor" / "default_policy.yaml"
 
 def load_rules():
     if DEFAULT_POLICY.exists():
@@ -332,7 +332,7 @@ def step_agents(target):
 
     while True:
         lines = header_lines(2, 3, "AGENTS")
-        lines.append(f"  {w('Select agents to install Warden hooks for:', DIM)}")
+        lines.append(f"  {w('Select agents to install Prismor hooks for:', DIM)}")
         lines.append("")
         for i, ag in enumerate(agents):
             arrow = w("▸ ", CYAN) if i == sel else "  "
@@ -483,7 +483,7 @@ def do_install(target, mode, rules, agents, hooks=None):
     # 0. Register workspace globally
     try:
         sys.path.insert(0, str(PRISMOR_DIR))
-        from warden.store import register_workspace
+        from prismor.runtime.store import register_workspace
         register_workspace(target)
     except Exception:
         pass
@@ -501,7 +501,7 @@ def do_install(target, mode, rules, agents, hooks=None):
     disabled = [r["id"] for r in rules if not r["on"]]
     if disabled:
         def write_policy():
-            d = target / ".prismor-warden"
+            d = target / ".prismor"
             d.mkdir(exist_ok=True)
             txt = 'version: "1.0"\nrules:\n'
             for rid in disabled:
@@ -510,7 +510,7 @@ def do_install(target, mode, rules, agents, hooks=None):
             return True, f"{len(disabled)} disabled"
         spinner_run("Writing policy overrides", write_policy)
 
-    # 3. Warden runtime hooks
+    # 3. Prismor runtime hooks
     if hooks.get("runtime", True):
         for agent in agents:
             def install(a=agent):
@@ -618,10 +618,10 @@ def do_install(target, mode, rules, agents, hooks=None):
         shell = os.environ.get("SHELL", "/bin/zsh")
         rc = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc" if "bash" in shell else ".profile")
         content = rc.read_text() if rc.exists() else ""
-        # Clean up legacy `warden` alias if present (pre-unification leftover)
-        if "alias warden=" in content:
+        # Clean up legacy `prismor` alias if present (pre-unification leftover)
+        if "alias prismor=" in content:
             lines = content.splitlines(keepends=True)
-            lines = [l for l in lines if "alias warden=" not in l]
+            lines = [l for l in lines if "alias prismor=" not in l]
             content = "".join(lines)
             rc.write_text(content)
         if str(PRISMOR_DIR / "scripts") in content:

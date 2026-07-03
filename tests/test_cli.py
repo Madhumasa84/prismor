@@ -1,4 +1,4 @@
-"""Tests for the Warden CLI entry points."""
+"""Tests for the Prismor CLI entry points."""
 
 import json
 import os
@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CLI = str(REPO_ROOT / "warden" / "cli.py")
-IMMUNITY_CLI = str(REPO_ROOT / "immunity")
-SAMPLE = str(REPO_ROOT / "warden" / "examples" / "sample-session.jsonl")
+CLI = str(REPO_ROOT / "prismor" / "runtime" / "cli.py")
+IMMUNITY_CLI = str(REPO_ROOT / "bin" / "immunity")
+SAMPLE = str(REPO_ROOT / "prismor" / "runtime" / "examples" / "sample-session.jsonl")
 
 
 def run_cli(*args, stdin=None):
@@ -174,7 +174,7 @@ class TestImmunityUmbrella(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         # Every advertised domain must appear in the top-level help.
         for domain in (
-            "warden", "cloak", "policy", "sweep",
+            "prismor", "cloak", "policy", "sweep",
             "iam", "sandbox", "canary", "scope", "learn", "supplychain",
         ):
             self.assertIn(domain, r.stdout, f"domain '{domain}' missing from --help")
@@ -186,7 +186,7 @@ class TestImmunityUmbrella(unittest.TestCase):
         # Help is introspection-driven: every non-internal top-level command
         # from the real parser must show up, so nothing can silently drop out.
         import argparse
-        from warden.cli import build_parser
+        from prismor.runtime.cli import build_parser
         r = run_immunity("--help")
         self.assertEqual(r.returncode, 0)
         hidden = {"hook-dispatch"}  # internal, intentionally not listed
@@ -209,23 +209,6 @@ class TestImmunityUmbrella(unittest.TestCase):
         for token in ("install", "show", "plant", "--redact", "--all", "--no-open"):
             self.assertIn(token, r.stdout, f"'{token}' missing from --help")
 
-    def test_warden_bare_is_quiet(self):
-        # `prismor warden` with no subcommand must NOT dump the argparse usage
-        # wall — just a short deprecation pointer to `prismor help`.
-        r = run_immunity("warden")
-        self.assertEqual(r.returncode, 0)
-        self.assertIn("deprecated", r.stderr.lower())
-        self.assertIn("prismor help", r.stderr)
-        self.assertNotIn("positional arguments", r.stdout + r.stderr)
-        self.assertNotIn("{info,dashboard", r.stdout + r.stderr)
-
-    def test_warden_subcommand_still_forwards(self):
-        # `prismor warden status` keeps working (warns, then runs status).
-        r = run_immunity("warden", "status")
-        self.assertEqual(r.returncode, 0)
-        self.assertIn("deprecated", r.stderr.lower())
-        self.assertIn("status", r.stdout)
-
     def test_bare_invocation_prints_help(self):
         r = run_immunity()
         self.assertEqual(r.returncode, 0)
@@ -242,8 +225,8 @@ class TestImmunityUmbrella(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("unknown command", r.stderr)
 
-    def test_domain_help_dispatches_to_warden(self):
-        # `prismor cloak --help` should reach warden.cli's cloak subparser.
+    def test_domain_help_dispatches_to_prismor(self):
+        # `prismor cloak --help` should reach prismor.runtime.cli's cloak subparser.
         r = run_immunity("cloak", "--help")
         self.assertEqual(r.returncode, 0)
         for action in ("install", "uninstall", "add", "list", "remove", "status"):
@@ -255,19 +238,19 @@ class TestSkillInstall(unittest.TestCase):
 
     def test_install_skill_copies_manifest_and_docs(self):
         import tempfile
-        from warden.setup_wizard import _install_skill
+        from prismor.runtime.setup_wizard import _install_skill
         with tempfile.TemporaryDirectory() as ws:
             ok, detail = _install_skill(Path(ws))
             self.assertTrue(ok, detail)
             skill = Path(ws) / ".claude" / "skills" / "immunity-agent"
             self.assertTrue((skill / "SKILL.md").exists())
             # Docs the SKILL.md links to come along, the heavy gif does not.
-            self.assertTrue((skill / "docs" / "warden.md").exists())
+            self.assertTrue((skill / "docs" / "prismor-runtime.md").exists())
             self.assertFalse((skill / "docs" / "demo.gif").exists())
 
     def test_install_skill_is_idempotent(self):
         import tempfile
-        from warden.setup_wizard import _install_skill
+        from prismor.runtime.setup_wizard import _install_skill
         with tempfile.TemporaryDirectory() as ws:
             _install_skill(Path(ws))
             ok, detail = _install_skill(Path(ws))
@@ -278,7 +261,7 @@ class TestSkillInstall(unittest.TestCase):
     def test_install_skill_runs_without_claude_agent(self):
         """SKILL.md must be installed regardless of which agents are selected."""
         import tempfile
-        from warden.setup_wizard import _install_skill
+        from prismor.runtime.setup_wizard import _install_skill
         with tempfile.TemporaryDirectory() as ws:
             ok, detail = _install_skill(Path(ws))
             self.assertTrue(ok, detail)
@@ -298,31 +281,31 @@ class TestWriteAgentContext(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_cursor_writes_cursorrules(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["cursor"])
         content = (self.ws / ".cursorrules").read_text()
         self.assertIn("prismor status", content)
         self.assertIn("prismor supplychain", content)
 
     def test_windsurf_writes_windsurfrules(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["windsurf"])
         content = (self.ws / ".windsurfrules").read_text()
         self.assertIn("prismor status", content)
 
     def test_agents_md_written_for_codex(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["codex"])
         content = (self.ws / "AGENTS.md").read_text()
         self.assertIn("prismor status", content)
 
     def test_agents_md_written_for_copilot_and_hermes(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["copilot", "hermes"])
         self.assertTrue((self.ws / "AGENTS.md").exists())
 
     def test_idempotent_does_not_duplicate(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["cursor"])
         first = (self.ws / ".cursorrules").read_text()
         _write_agent_context(self.ws, ["cursor"])
@@ -330,7 +313,7 @@ class TestWriteAgentContext(unittest.TestCase):
         self.assertEqual(first, second, "second call must not append again")
 
     def test_appends_to_existing_file(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         (self.ws / ".cursorrules").write_text("# My existing rules\n")
         _write_agent_context(self.ws, ["cursor"])
         content = (self.ws / ".cursorrules").read_text()
@@ -338,7 +321,7 @@ class TestWriteAgentContext(unittest.TestCase):
         self.assertIn("prismor status", content)
 
     def test_claude_only_skips_cursor_and_windsurf(self):
-        from warden.setup_wizard import _write_agent_context
+        from prismor.runtime.setup_wizard import _write_agent_context
         _write_agent_context(self.ws, ["claude"])
         self.assertFalse((self.ws / ".cursorrules").exists())
         self.assertFalse((self.ws / ".windsurfrules").exists())
@@ -347,11 +330,11 @@ class TestWriteAgentContext(unittest.TestCase):
     def test_skill_is_bundled_in_resolver(self):
         # The resolver must find the manifest in a git checkout (and, by the
         # same suffix, an installed wheel).
-        from warden.paths import skill_manifest_path
+        from prismor.runtime.paths import skill_manifest_path
         self.assertTrue(skill_manifest_path().exists())
 
     def test_top_level_shortcut_dispatches(self):
-        # `prismor analyze` should reach the warden analyze command.
+        # `prismor analyze` should reach the prismor analyze command.
         r = run_immunity("analyze", "--input", SAMPLE, "--json")
         self.assertEqual(r.returncode, 0)
         data = json.loads(r.stdout)
@@ -360,7 +343,7 @@ class TestWriteAgentContext(unittest.TestCase):
 
     def test_check_shortcut(self):
         r = run_immunity("check", "rm -rf /")
-        # Critical finding -> warden exits non-zero by design; just verify
+        # Critical finding -> prismor exits non-zero by design; just verify
         # the output reached the policy engine.
         self.assertIn("CRITICAL", r.stdout)
 

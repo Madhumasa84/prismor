@@ -2,7 +2,7 @@
 app-passed ``mode``.
 
 The runtime already folds mode + the org per-agent control (kill-switch /
-forced-enforce) into ``Decision.allow`` (warden/runtime.py:106-107,152-155,214).
+forced-enforce) into ``Decision.allow`` (prismor/runtime/runtime.py:106-107,152-155,214).
 A deny that the control plane forces — e.g. an agent kill-switch — comes back as
 ``allow=False`` even when the app launched in ``observe`` mode. The adapters used
 to re-check ``and mode == "enforce"``, which silently let the tool run and
@@ -17,9 +17,9 @@ for _pkg in ("langchain", "crewai"):
     if str(_src) not in sys.path:
         sys.path.insert(0, str(_src))
 
-import prismor.warden.langchain as lc   # noqa: E402
-import prismor.warden.crewai as crew    # noqa: E402
-from warden.runtime import Decision     # noqa: E402
+import prismor.langchain as lc   # noqa: E402
+import prismor.crewai as crew    # noqa: E402
+from prismor.runtime.runtime import Decision     # noqa: E402
 
 
 class _Tool:

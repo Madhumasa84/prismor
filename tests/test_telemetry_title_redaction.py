@@ -4,7 +4,7 @@ import sys, os, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.enterprise.telemetry import build_record, assert_redacted, _safe_title, _title_has_leak
+from prismor.runtime.enterprise.telemetry import build_record, assert_redacted, _safe_title, _title_has_leak
 
 
 def _rec(title, **extra):

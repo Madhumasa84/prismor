@@ -30,12 +30,12 @@ class PackageVerdict:
 
 
 def load_allowlist(workspace: Path) -> Set[str]:
-    """Read supply_chain.allowlist from .prismor-warden/policy.yaml.
+    """Read supply_chain.allowlist from .prismor/policy.yaml.
 
     Accepts entries as bare names ("lodash") or ecosystem-qualified
     ("npm:lodash"). Both forms are returned lowercased.
     """
-    policy_path = workspace / ".prismor-warden" / "policy.yaml"
+    policy_path = workspace / ".prismor" / "policy.yaml"
     if not policy_path.is_file():
         return set()
     try:

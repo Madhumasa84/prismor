@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.policy_engine import PolicyEngine, validate_policy
+from prismor.runtime.policy_engine import PolicyEngine, validate_policy
 
 
 class TestPolicyEngineDefaults(unittest.TestCase):
@@ -366,7 +366,7 @@ class TestSupplyChainAutomaticHookCheck(unittest.TestCase):
     def test_settings_flag_disables_check(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
-            policy_dir = workspace / ".prismor-warden"
+            policy_dir = workspace / ".prismor"
             policy_dir.mkdir()
             (policy_dir / "policy.yaml").write_text(
                 "settings:\n  supply_chain_install_check: false\n"
@@ -530,7 +530,7 @@ class TestSupplyChainAutomaticHookCheck(unittest.TestCase):
     def test_package_cap_bounds_checked_count(self):
         """A command listing more packages than the cap should still return
         quickly and only score up to the cap, not hang scoring every one."""
-        from warden.policy_engine import _SUPPLY_CHAIN_MAX_PACKAGES_PER_COMMAND
+        from prismor.runtime.policy_engine import _SUPPLY_CHAIN_MAX_PACKAGES_PER_COMMAND
         engine = PolicyEngine()
         packages = " ".join(f"pkg{i}" for i in range(_SUPPLY_CHAIN_MAX_PACKAGES_PER_COMMAND + 5))
         with self._mock_osv([]):
@@ -639,7 +639,7 @@ class TestTransitivePostinstallScan(unittest.TestCase):
                 "": {"name": "test-app"},
                 "node_modules/express/node_modules/lodash": {"version": "4.17.4"},
             })
-            policy_dir = workspace / ".prismor-warden"
+            policy_dir = workspace / ".prismor"
             policy_dir.mkdir()
             (policy_dir / "policy.yaml").write_text("settings:\n  supply_chain_transitive_scan: false\n")
             engine = PolicyEngine(workspace=workspace)
@@ -681,7 +681,7 @@ class TestPolicyEngineAllowlist(unittest.TestCase):
 
     def test_allowlist_suppresses_finding(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            policy_dir = Path(tmpdir) / ".prismor-warden"
+            policy_dir = Path(tmpdir) / ".prismor"
             policy_dir.mkdir()
             policy_file = policy_dir / "policy.yaml"
             policy_file.write_text(
@@ -704,7 +704,7 @@ class TestPolicyEngineAllowlist(unittest.TestCase):
 
     def test_wildcard_allowlist(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            policy_dir = Path(tmpdir) / ".prismor-warden"
+            policy_dir = Path(tmpdir) / ".prismor"
             policy_dir.mkdir()
             policy_file = policy_dir / "policy.yaml"
             policy_file.write_text(
@@ -725,7 +725,7 @@ class TestPolicyEngineOverrides(unittest.TestCase):
 
     def test_disable_rule(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            policy_dir = Path(tmpdir) / ".prismor-warden"
+            policy_dir = Path(tmpdir) / ".prismor"
             policy_dir.mkdir()
             policy_file = policy_dir / "policy.yaml"
             policy_file.write_text(
@@ -747,7 +747,7 @@ class TestPolicyEngineOverrides(unittest.TestCase):
 
     def test_add_custom_rule(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            policy_dir = Path(tmpdir) / ".prismor-warden"
+            policy_dir = Path(tmpdir) / ".prismor"
             policy_dir.mkdir()
             policy_file = policy_dir / "policy.yaml"
             policy_file.write_text(
@@ -772,7 +772,7 @@ class TestPolicyValidation(unittest.TestCase):
     """Test policy file validation."""
 
     def test_valid_default_policy(self):
-        default = Path(__file__).parent.parent / "warden" / "default_policy.yaml"
+        default = Path(__file__).parent.parent / "prismor" / "runtime" / "default_policy.yaml"
         errors = validate_policy(default)
         self.assertEqual(errors, [])
 
@@ -852,7 +852,7 @@ class TestPolicyEngineCLI(unittest.TestCase):
     def test_check_exit_code_block(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "warden/cli.py", "check", "rm -rf /"],
+            [sys.executable, "prismor/runtime/cli.py", "check", "rm -rf /"],
             capture_output=True, text=True,
             cwd=Path(__file__).parent.parent,
         )
@@ -861,7 +861,7 @@ class TestPolicyEngineCLI(unittest.TestCase):
     def test_check_exit_code_safe(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "warden/cli.py", "check", "ls -la"],
+            [sys.executable, "prismor/runtime/cli.py", "check", "ls -la"],
             capture_output=True, text=True,
             cwd=Path(__file__).parent.parent,
         )
@@ -871,7 +871,7 @@ class TestPolicyEngineCLI(unittest.TestCase):
     def test_sarif_output(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "warden/cli.py", "analyze", "--input", "warden/examples/sample-session.jsonl", "--sarif"],
+            [sys.executable, "prismor/runtime/cli.py", "analyze", "--input", "prismor/runtime/examples/sample-session.jsonl", "--sarif"],
             capture_output=True, text=True,
             cwd=Path(__file__).parent.parent,
         )
@@ -884,7 +884,7 @@ class TestPolicyEngineCLI(unittest.TestCase):
     def test_policy_validate_default(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "warden/cli.py", "policy", "validate", "warden/default_policy.yaml"],
+            [sys.executable, "prismor/runtime/cli.py", "policy", "validate", "prismor/runtime/default_policy.yaml"],
             capture_output=True, text=True,
             cwd=Path(__file__).parent.parent,
         )
@@ -999,7 +999,7 @@ class TestObserveAllFindings(unittest.TestCase):
         # We test by simulating the exact condition in cli.py: current_findings set,
         # blocking=None (observe mode), and checking stderr output.
         import sys as _sys
-        from warden.hooks import should_block
+        from prismor.runtime.hooks import should_block
 
         blocking = should_block(findings, event)
         self.assertIsNone(blocking, "observe-mode findings must not block")
@@ -1007,7 +1007,7 @@ class TestObserveAllFindings(unittest.TestCase):
         with _patch("sys.stderr", buf):
             top = blocking or findings[0]
             for _f in findings:
-                _line = f"[warden] [{_f['severity']}] {_f['title']}"
+                _line = f"[prismor] [{_f['severity']}] {_f['title']}"
                 if _f.get("remediation"):
                     _line += f" → {_f['remediation']}"
                 buf.write(_line + "\n")
@@ -1032,7 +1032,7 @@ class TestObserveAllFindings(unittest.TestCase):
         buf = io.StringIO()
         top = findings[0]
         for _f in findings:
-            _line = f"[warden] [{_f['severity']}] {_f['title']}"
+            _line = f"[prismor] [{_f['severity']}] {_f['title']}"
             if _f.get("remediation"):
                 _line += f" → {_f['remediation']}"
             buf.write(_line + "\n")

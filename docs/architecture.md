@@ -2,7 +2,7 @@
 
 Prismor has three components that work together to protect AI coding agent sessions.
 
-**Warden** hooks into the agent's tool-use pipeline and evaluates every command against your policy before it reaches the OS. If the policy says block, the shell never sees the command.
+**Prismor** hooks into the agent's tool-use pipeline and evaluates every command against your policy before it reaches the OS. If the policy says block, the shell never sees the command.
 
 **Cloak** prevents secrets from entering model context. You register a real secret once under a placeholder. A PreToolUse hook substitutes the real value only at execution time, then scrubs it from captured output before the model sees it.
 
@@ -14,16 +14,16 @@ Prismor has three components that work together to protect AI coding agent sessi
 flowchart TD
     IDE["Your IDE / Agent\n(Claude Code · Cursor · Windsurf)"]
 
-    IDE -->|"PreToolUse / PostToolUse hooks"| Warden
+    IDE -->|"PreToolUse / PostToolUse hooks"| Prismor
 
-    subgraph Warden["Warden — Runtime Monitor"]
+    subgraph Prismor["Prismor — Runtime Monitor"]
         Policy["Policy Engine\n(YAML rules)"]
         Session["Session Store\n(SQLite / JSONL)"]
         Policy --> Session
     end
 
-    Warden -->|"action permitted"| Allow["ALLOW\n+ log event"]
-    Warden -->|"rule matched"| Block["BLOCK\n+ log finding"]
+    Prismor -->|"action permitted"| Allow["ALLOW\n+ log event"]
+    Prismor -->|"rule matched"| Block["BLOCK\n+ log finding"]
 
     IDE -->|"PreToolUse hook\n(inject @@SECRET@@)"| Cloak
     IDE -->|"PostToolUse hook\n(scrub output)"| Cloak
@@ -40,4 +40,4 @@ flowchart TD
 
 ## Why not kernel-level security?
 
-Kernel-level and endpoint security tools intercept syscalls after the agent has already constructed and dispatched the command. They have no context about why the agent issued it or what the user actually asked for. Warden operates upstream of that, at the agent hook layer, where blocking is safe and context is available.
+Kernel-level and endpoint security tools intercept syscalls after the agent has already constructed and dispatched the command. They have no context about why the agent issued it or what the user actually asked for. Prismor operates upstream of that, at the agent hook layer, where blocking is safe and context is available.

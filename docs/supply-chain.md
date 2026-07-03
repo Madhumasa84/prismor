@@ -43,7 +43,7 @@ alias pip="python3 /path/to/immunity-agent/prismor supplychain pip"
   ALLOW  score   0  express  age 5612d, 5 maintainers
 
   Blocked: @tanstack/react-router
-  To override: add to supply_chain.allowlist in .prismor-warden/policy.yaml
+  To override: add to supply_chain.allowlist in .prismor/policy.yaml
 ```
 
 ---

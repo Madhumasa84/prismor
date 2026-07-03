@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prismor Warden — security regression suite.
+# Prismor — security regression suite.
 #
 # Single entrypoint for the cloaking + policy tests, run identically in CI
 # (.github/workflows/security-regression.yml) and locally. These lock the

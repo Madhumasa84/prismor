@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from warden import store
+from prismor.runtime import store
 
 
 # A v1.5.8-shaped schema: missing supply_chain_events.session_id /
@@ -40,8 +40,8 @@ CREATE TABLE supply_chain_events (
 @pytest.fixture
 def v158_workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "ws"
-    (ws / ".prismor-warden").mkdir(parents=True)
-    db = ws / ".prismor-warden" / "warden.db"
+    (ws / ".prismor").mkdir(parents=True)
+    db = ws / ".prismor" / "prismor.db"
     conn = sqlite3.connect(db)
     conn.executescript(V158_SCHEMA)
     conn.commit()

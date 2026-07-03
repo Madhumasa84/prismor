@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.scanner import discover_configs, parse_config
+from prismor.runtime.scanner import discover_configs, parse_config
 
 
 class TestScannerCodex(unittest.TestCase):

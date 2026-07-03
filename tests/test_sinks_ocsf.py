@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from warden import sinks
+from prismor.runtime import sinks
 
 
 def _event():

@@ -5,8 +5,8 @@ name: Release Adapters
 #
 # PyPI side (trusted publishing, no tokens): each package needs a (pending)
 # publisher on pypi.org pointing at this repo + this workflow file + the
-# `pypi` environment: prismor-warden-langchain, prismor-warden-crewai,
-# prismor-warden-openai, prismor-warden-browser-use.
+# `pypi` environment: prismor-langchain, prismor-crewai,
+# prismor-openai, prismor-browser-use.
 #
 # npm side: set an automation token as the NPM_TOKEN repo secret; the job
 # skips cleanly when it's absent.
@@ -65,7 +65,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Build and publish prismor-warden
+      - name: Build and publish prismor
         if: env.NPM_TOKEN != ''
         working-directory: adapters/vercel-ai
         run: |

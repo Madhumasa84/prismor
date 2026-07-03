@@ -1,6 +1,6 @@
 # Framework adapters — overview
 
-Prismor Warden intercepts tool calls in production framework agents — not just
+Prismor intercepts tool calls in production framework agents — not just
 local coding agents. The integration is designed to be **a single function call**
 on your existing agent or controller object, with no changes to your tool logic.
 
@@ -12,19 +12,19 @@ on your existing agent or controller object, with no changes to your tool logic.
 | LangChain / LangGraph | Python | `pip install "prismor[langchain]"` | `guard_tools([...])` | `use_subject("user:alice")` |
 | CrewAI | Python | `pip install "prismor[crewai]"` | `guard_tools([...])` | `use_subject("user:alice")` |
 | browser-use | Python | `pip install "prismor[browser-use]"` | `guard_controller(controller)` | `use_subject("user:alice")` |
-| Vercel AI SDK | TypeScript | `npm install prismor-warden` | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
+| Vercel AI SDK | TypeScript | `npm install prismor` | `prismorTools(tools, opts)` | `{ subject: "user:alice" }` |
 
 > The Python adapters ship inside the `prismor` package (needs `>= 1.14.2`) —
 > the extra just pulls the framework itself. `prismor[frameworks]` installs all
-> four. On npm it is `prismor-warden` (the registry blocks bare `prismor` as too similar to `prisma`).
-| Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Warden-Subject` header |
+> four. On npm it is `prismor` (the registry blocks bare `prismor` as too similar to `prisma`).
+| Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Prismor-Subject` header |
 
 The Python multi-tenant pattern: guard once at startup with no bound subject,
 then wrap each request with `use_subject`. A context var threads the subject
 through the evaluation pipeline — thread-safe and async-safe.
 
 For non-Python languages: pass `subject` per call in the request body or
-`X-Warden-Subject` header. The eval-server resolves it identically.
+`X-Prismor-Subject` header. The eval-server resolves it identically.
 
 ## What "guard" does
 
@@ -32,10 +32,10 @@ Regardless of framework, every adapter does the same three things:
 
 1. **Intercept** — wraps the framework's tool execution surface (see table below)
    so the original callable is never reached on a denied call.
-2. **Evaluate** — calls `warden.runtime.evaluate_tool_call()` with a canonical
+2. **Evaluate** — calls `prismor.runtime.runtime.evaluate_tool_call()` with a canonical
    event and the resolved subject. Same pipeline as coding-agent hooks.
 3. **Block or allow** — in `enforce` mode a denied call returns a denial string
-   to the model (the run recovers gracefully) or raises `WardenBlocked`. In
+   to the model (the run recovers gracefully) or raises `PrismorBlocked`. In
    `observe` mode findings are recorded but the call always proceeds.
 
 ## Hook points by framework
@@ -80,7 +80,7 @@ Validated live on an Ubuntu EC2 instance with real OpenAI function calls:
 
 | Language | Adapter size | Dependencies |
 |---|---|---|
-| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor-warden` |
+| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor` |
 | Node.js (raw) | ~25 lines | built-in `fetch` |
 | Ruby | ~20 lines | stdlib `Net::HTTP` |
 | Java 21 | ~25 lines | stdlib `java.net.http` |
@@ -102,7 +102,7 @@ guard_controller(controller, name="browser-bot")   # browser-use
 ```
 
 ```ts
-const tools = wardenTools(myTools, { agentName: 'checkout-bot' });  // Vercel AI SDK
+const tools = prismorTools(myTools, { agentName: 'checkout-bot' });  // Vercel AI SDK
 ```
 
 What a name unlocks:
@@ -112,7 +112,7 @@ What a name unlocks:
 - **Per-agent runtime control** via `prismor agents set <name>` — kill-switch
   (`--disabled` hard-blocks every call), a mode override, and a forced IAM
   profile. Config lives in `agents.yaml` (global `~/.prismor/` or per-project
-  `.prismor-warden/`); agents self-register on first sight.
+  `.prismor/`); agents self-register on first sight.
 
 ```bash
 prismor agents list                                # every named instance seen
@@ -134,7 +134,7 @@ Policy is YAML — change it without redeploying agents.
 
 ## Per-user IAM
 
-Add `user:<id>` or `team:<id>` keys to `.prismor-warden/iam.yaml`:
+Add `user:<id>` or `team:<id>` keys to `.prismor/iam.yaml`:
 
 ```yaml
 agents:
@@ -150,8 +150,8 @@ org-wide defaults.
 
 ## Per-framework guides
 
-- [OpenAI Agents SDK](frameworks-openai-agents.md) — `guard_agent`, `warden_guard`, FunctionTool patching
-- [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools`, `WardenCallbackHandler`
+- [OpenAI Agents SDK](frameworks-openai-agents.md) — `guard_agent`, `prismor_guard`, FunctionTool patching
+- [LangChain / LangGraph](frameworks-langchain.md) — `guard_tools`, `PrismorCallbackHandler`
 - [CrewAI](frameworks-crewai.md) — `guard_tools`, BaseTool and structured tool support
 - [browser-use](frameworks-browser-use.md) — `guard_controller`, network/file/shell event mapping
-- [Vercel AI SDK](frameworks-vercel-ai.md) — `wardenTools`, TypeScript, eval-server HTTP protocol
+- [Vercel AI SDK](frameworks-vercel-ai.md) — `prismorTools`, TypeScript, eval-server HTTP protocol

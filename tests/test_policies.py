@@ -1,4 +1,4 @@
-"""Tests for the Warden policy engine."""
+"""Tests for the Prismor policy engine."""
 
 import sys
 import os
@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.policies import (
+from prismor.runtime.policies import (
     evaluate_event,
     DESTRUCTIVE_COMMAND_PATTERN,
     PROMPT_INJECTION_PATTERN,

@@ -1,4 +1,4 @@
-"""Tests for the Warden hooks module."""
+"""Tests for the Prismor hooks module."""
 
 import sys
 import os
@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from warden.hooks import _is_pre_action, should_block, legacy_should_block
+from prismor.runtime.hooks import _is_pre_action, should_block, legacy_should_block
 
 
 class TestIsPreAction(unittest.TestCase):
@@ -152,7 +152,7 @@ class TestIsLegacyPolicy(unittest.TestCase):
 
     def _engine(self, body):
         import tempfile, pathlib
-        from warden.policy_engine import PolicyEngine
+        from prismor.runtime.policy_engine import PolicyEngine
         d = tempfile.mkdtemp()
         p = pathlib.Path(d) / "policy.yaml"
         p.write_text(body)
@@ -160,7 +160,7 @@ class TestIsLegacyPolicy(unittest.TestCase):
 
     def test_shipped_policy_is_legacy(self):
         # The bundled default policy: block_categories, no default_mode, no rule modes.
-        from warden.policy_engine import PolicyEngine
+        from prismor.runtime.policy_engine import PolicyEngine
         self.assertTrue(PolicyEngine().is_legacy_policy)
 
     def test_default_mode_opts_out_of_legacy(self):
