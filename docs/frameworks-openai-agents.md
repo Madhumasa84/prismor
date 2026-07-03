@@ -14,14 +14,12 @@ The OpenAI Agents SDK adapter ships from
 
 ## Install
 
-> The adapter packages are not on PyPI yet — until they publish, install from
-> source (the import paths below are identical either way).
-
 ```bash
-pip install "prismor @ git+https://github.com/PrismorSec/prismor.git@main"              # Warden runtime
-pip install "prismor-warden-openai @ git+https://github.com/PrismorSec/prismor.git@main#subdirectory=adapters/openai-agents"
-pip install openai-agents                  # + the SDK itself, if not present
+pip install "prismor[openai-agents]"
 ```
+
+> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> works from source: `pip install "prismor[openai-agents] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard an agent (easy path)
 

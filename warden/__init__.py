@@ -1,6 +1,6 @@
 """Prismor Warden local session-security utility."""
 
-__version__ = "1.14.0"
+__version__ = "1.14.1"
 
 from warden.semantic_guard import SemanticGuard, SemanticRisk
 from warden.semantic_guard_v2 import SemanticGuardV2, HybridRisk

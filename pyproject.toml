@@ -35,6 +35,19 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["build", "pytest"]
+# Framework adapters ship inside this package (prismor.warden.<framework>);
+# the extras just pull the framework itself so `pip install "prismor[langchain]"`
+# is a one-liner. See adapters/ for the sources and docs/frameworks-*.
+langchain = ["langchain-core>=0.2"]
+crewai = ["crewai>=0.30"]
+openai-agents = ["openai-agents>=0.0.1"]
+browser-use = ["browser-use>=0.1.0"]
+frameworks = [
+    "langchain-core>=0.2",
+    "crewai>=0.30",
+    "openai-agents>=0.0.1",
+    "browser-use>=0.1.0",
+]
 
 [project.urls]
 Homepage = "https://prismor.dev"
@@ -54,10 +67,25 @@ prismor-warden-cloak = "warden.cloaking.hermes_plugin_entry:register"
 path = "warden/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["warden", "supplychain"]
+packages = [
+    "warden",
+    "supplychain",
+    # Framework adapter implementations — bundled so the extras above work
+    # without separate adapter packages on PyPI.
+    "adapters/langchain/prismor_warden_langchain",
+    "adapters/crewai/prismor_warden_crewai",
+    "adapters/openai-agents/prismor_warden_openai",
+    "adapters/browser-use/prismor_warden_browser_use",
+]
 
 # Bundle runtime data into the wheel under warden/data/
 [tool.hatch.build.targets.wheel.force-include]
+# prismor.warden.<framework> namespace shims (PEP 420 — no __init__.py above
+# the leaf, so the prismor/ and prismor/warden/ levels stay namespaces).
+"adapters/langchain/prismor/warden/langchain/__init__.py" = "prismor/warden/langchain/__init__.py"
+"adapters/crewai/prismor/warden/crewai/__init__.py" = "prismor/warden/crewai/__init__.py"
+"adapters/openai-agents/prismor/warden/openai/__init__.py" = "prismor/warden/openai/__init__.py"
+"adapters/browser-use/prismor/warden/browser_use/__init__.py" = "prismor/warden/browser_use/__init__.py"
 "immunity-agent.pth" = "immunity-agent.pth"
 "advisories/immunity-feed.json" = "warden/data/advisories/immunity-feed.json"
 "advisories/immunity-feed.json.sig" = "warden/data/advisories/immunity-feed.json.sig"
