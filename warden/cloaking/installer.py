@@ -24,6 +24,7 @@ _HOOKS_SUBDIR = Path(__file__).resolve().parent / "hooks"
 
 _DECLOAK = _HOOKS_SUBDIR / "decloak.sh"
 _SECRET_GUARD = _HOOKS_SUBDIR / "secret-guard.sh"
+_READ_GUARD = _HOOKS_SUBDIR / "read-guard.sh"
 _RECLOAK_MCP = _HOOKS_SUBDIR / "recloak-mcp.sh"
 _USERPROMPT_GUARD = _HOOKS_SUBDIR / "userprompt-guard.sh"
 _SWEEP_ON_STOP = _HOOKS_SUBDIR / "sweep-on-stop.sh"
@@ -109,6 +110,7 @@ def install(
     scope: str = "project",
     enable_userprompt_guard: bool = True,
     enable_secret_guard: bool = True,
+    enable_read_guard: bool = True,
     enable_sweep_on_stop: bool = False,
 ) -> Dict[str, Any]:
     """Install the cloaking hooks into ``settings.json``.
@@ -122,6 +124,10 @@ def install(
         enable_secret_guard: Wire the PreToolUse detect-and-block hook that
             catches raw secrets the model emits directly (not via a
             placeholder) and denies the call after vaulting the value.
+        enable_read_guard: Wire the PreToolUse hook that denies a Read of a
+            file containing a registered secret. The built-in Read tool has no
+            output-rewrite channel, so the read is blocked rather than scrubbed;
+            the model is told to use the ``@@SECRET:name@@`` placeholder instead.
         enable_sweep_on_stop: Wire the Stop-hook dry-run sweep. Off by
             default because it runs ``prismor sweep`` against ``~/.claude``
             on every session end, which is noisy for quick sessions.
@@ -155,12 +161,23 @@ def install(
         )
         installed.append(f"PreToolUse:{_SECRET_GUARD_MATCHER} (secret-guard)")
 
-    # PreToolUse: decloak on Bash matcher.
+    # PreToolUse: deny reads of files that hold a registered secret. Built-in
+    # Read has no post-hoc output scrub, so containment means blocking the read.
+    if enable_read_guard:
+        hooks["PreToolUse"] = _merge_claude_entries(
+            hooks.get("PreToolUse", []),
+            {"matcher": "Read", "hooks": [_hook_entry(_READ_GUARD)]},
+        )
+        installed.append("PreToolUse:Read (read-guard)")
+
+    # PreToolUse: decloak on Bash matcher. Substitutes @@SECRET@@ placeholders
+    # and wraps every Bash command so its output is scrubbed of registered
+    # secret values (not only placeholder-mediated ones).
     hooks["PreToolUse"] = _merge_claude_entries(
         hooks.get("PreToolUse", []),
         {"matcher": "Bash", "hooks": [_hook_entry(_DECLOAK)]},
     )
-    installed.append("PreToolUse:Bash (decloak)")
+    installed.append("PreToolUse:Bash (decloak + output scrub)")
 
     # PostToolUse: recloak MCP responses.
     hooks["PostToolUse"] = _merge_claude_entries(
