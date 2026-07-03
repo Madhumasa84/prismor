@@ -44,6 +44,20 @@ class TestDestructiveCommandPattern(unittest.TestCase):
     def test_chmod_777(self):
         self.assertIsNotNone(DESTRUCTIVE_COMMAND_PATTERN.search("chmod 777 /var/www"))
 
+    def test_chmod_world_writable_numeric(self):
+        for cmd in ("chmod -R 777 .", "chmod 0777 x", "chmod 1777 /tmp", "chmod 666 f"):
+            self.assertIsNotNone(DESTRUCTIVE_COMMAND_PATTERN.search(cmd), cmd)
+
+    def test_chmod_world_writable_symbolic(self):
+        for cmd in ("chmod a+rwx ./shared", "chmod o+w file",
+                    "chmod a+w file", "chmod ugo+rwx dir", "chmod g+w,o+w x"):
+            self.assertIsNotNone(DESTRUCTIVE_COMMAND_PATTERN.search(cmd), cmd)
+
+    def test_chmod_safe_modes_not_flagged(self):
+        for cmd in ("chmod 644 f", "chmod 755 script.sh", "chmod +x run.sh",
+                    "chmod 600 key", "chmod 750 dir", "chmod g+w shared", "chmod u+x bin"):
+            self.assertIsNone(DESTRUCTIVE_COMMAND_PATTERN.search(cmd), cmd)
+
     def test_mkfs(self):
         self.assertIsNotNone(DESTRUCTIVE_COMMAND_PATTERN.search("mkfs /dev/sda1"))
 

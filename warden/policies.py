@@ -61,7 +61,11 @@ DESTRUCTIVE_COMMAND_PATTERN = re.compile(
     r"(?:"
     r"rm\s+(?:-[a-zA-Z]*f[a-zA-Z]*\s+|(?:-[a-zA-Z]+\s+)*)(?:/\s*$|/\s+)"
     r"|sudo\s+rm\b"
-    r"|chmod\s+777\b"
+    # World-writable chmod — numeric modes whose "other" digit grants write
+    # (…2/3/6/7, e.g. 777, 666, 0777, 1777), plus symbolic grants of write to
+    # other/all (o+w, a+w, a+rwx). Group-only and read-only modes are ignored.
+    r"|chmod\s+(?:-[A-Za-z]+\s+)*[0-7]?[0-7][0-7][2367]\b"
+    r"|chmod\s+(?:-[A-Za-z]+\s+)*[ugoa,+=rwxXst-]*[oa][+=][a-zX]*w"
     r"|chown\s+-R\b"
     r"|mkfs\b"
     r"|dd\s+if=.*of=/dev/"
