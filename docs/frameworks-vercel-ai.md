@@ -22,8 +22,8 @@ HTTP client code with no Prismor Python dependency.
 
 ## Prerequisites
 
-Start the eval-server once alongside your app (Python, from the `immunity-agent`
-repo or any machine with `immunity` installed):
+Start the eval-server once alongside your app (Python, from the `prismor`
+repo or any machine with `prismor` installed):
 
 ```bash
 prismor eval-server --port 7071 --workspace /path/to/project
