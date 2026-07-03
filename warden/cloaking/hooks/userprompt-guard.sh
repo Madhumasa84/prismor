@@ -38,6 +38,39 @@ if [[ "$trimmed" == "!!allow "* ]]; then
   exit 0
 fi
 
+# ── @file-mention guard ───────────────────────────────────────────────────
+# Claude Code expands an `@path` mention by attaching the file's raw contents
+# to the model context — and it does so DOWNSTREAM of this hook, so the
+# attached bytes never appear in the `.prompt` we receive and cannot be
+# scrubbed after the fact. If a mentioned file holds a registered secret, the
+# only way to keep the value out of context is to block the prompt here, before
+# the attachment happens. (Verified: a prompt with `@secretfile` leaks the raw
+# value into context; blocking at this event prevents it.)
+cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
+mentions="$(printf '%s' "$prompt" | grep -oE '@[^[:space:]@]+' | sed 's/^@//' | sort -u || true)"
+if [[ -n "$mentions" ]]; then
+  while IFS= read -r mp; do
+    [[ -z "$mp" ]] && continue
+    case "$mp" in
+      /*) fp="$mp" ;;
+      *)  fp="${cwd:+$cwd/}$mp" ;;
+    esac
+    [[ -f "$fp" ]] || continue
+    shopt -s nullglob
+    for sf in "$SECRETS_DIR"/*; do
+      [[ -f "$sf" ]] || continue
+      rv="$(cat "$sf")"
+      [[ ${#rv} -ge 4 ]] || continue
+      if grep -qF -- "$rv" "$fp" 2>/dev/null; then
+        name="$(basename "$sf")"
+        reason="Prismor cloaking: your prompt references @${mp}, and that file contains the registered secret '${name}'. Claude Code would attach its raw contents to the model context, bypassing cloaking. Remove the @-mention and reference @@SECRET:${name}@@ in a tool command instead — Warden substitutes the real value at execution time and scrubs it from the output."
+        jq -n --arg r "$reason" '{decision: "block", reason: $r}'
+        exit 0
+      fi
+    done
+  done <<< "$mentions"
+fi
+
 # ── Detection patterns ────────────────────────────────────────────────────
 # Loaded from the shared single-source-of-truth file (builtin_patterns.txt)
 # plus any org-specific patterns the user added via `prismor cloak pattern add`.
