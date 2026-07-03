@@ -18,7 +18,7 @@ The OpenAI Agents SDK adapter ships from
 pip install "prismor[openai-agents]"
 ```
 
-> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> Needs `prismor >= 1.14.2`. Until that version is on PyPI, the same one-liner
 > works from source: `pip install "prismor[openai-agents] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard an agent (easy path)

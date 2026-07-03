@@ -11,7 +11,7 @@ Registry entry: `id: crewai` in
 pip install "prismor[crewai]"
 ```
 
-> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> Needs `prismor >= 1.14.2`. Until that version is on PyPI, the same one-liner
 > works from source: `pip install "prismor[crewai] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard tools (easy path)

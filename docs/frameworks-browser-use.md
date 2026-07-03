@@ -16,7 +16,7 @@ Playwright touches the browser.
 pip install "prismor[browser-use]"
 ```
 
-> Needs `prismor >= 1.14.1`. Until that version is on PyPI, the same one-liner
+> Needs `prismor >= 1.14.2`. Until that version is on PyPI, the same one-liner
 > works from source: `pip install "prismor[browser-use] @ git+https://github.com/PrismorSec/prismor.git@main"`.
 
 ## Guard a controller (easy path)
