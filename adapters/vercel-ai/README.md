@@ -1,4 +1,4 @@
-# prismor-warden-vercel
+# prismor
 
 Prismor Warden adapter for the [Vercel AI SDK](https://sdk.vercel.ai).
 
@@ -17,7 +17,7 @@ immunity eval-server --port 7071 --workspace /path/to/project
 ## Install
 
 ```bash
-npm install prismor-warden-vercel
+npm install prismor
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ npm install prismor-warden-vercel
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { wardenTools } from "prismor-warden-vercel";
+import { wardenTools } from "prismor";
 
 const run_shell = tool({
   description: "Run a shell command",
@@ -49,7 +49,7 @@ const result = await generateText({
 A blocked call throws `WardenBlocked`. In a Next.js API route:
 
 ```typescript
-import { WardenBlocked } from "prismor-warden-vercel";
+import { WardenBlocked } from "prismor";
 
 try {
   const result = await generateText({ model, tools, prompt });
