@@ -17,11 +17,13 @@ Read endpoints:
     GET /api/supply-chain  → supply chain enforcement stats
     GET /api/workspaces    → registered workspaces + enrollment status
     GET /api/policy        → all policy layers for a workspace (?workspace=…)
+    GET /api/agents        → agent registry merged with per-agent call stats
     GET /api/sessions/:id/control → scoped rules + recent blocks for a session
 
 Write endpoints (human-only — localhost):
     PUT /api/policy/global         → body: {yaml} — write ~/.prismor/policy.yaml
     PUT /api/policy/project        → body: {yaml, workspace} — write project policy
+    POST /api/agents/:name         → body: {enabled?, mode?, iam_profile?}
     PATCH /api/sessions/:id/control → body: {action, workspace, …data}
     OPTIONS *              → 204 CORS preflight
 """
@@ -242,8 +244,7 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
             try:
                 from warden.agents import list_agents, load_agents_config
                 from warden.iam import list_agent_ids, load_iam_config
-                from pathlib import Path as _Path
-                workspace = _Path.cwd()
+                workspace = _SERVER_WORKSPACE or Path.cwd()
 
                 # Merge store stats with registry config
                 store_stats = {a["name"]: a for a in get_agents_overview()}
@@ -308,8 +309,7 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
             try:
                 from warden.agents import upsert_agent
                 # Resolve the workspace from the server's perspective
-                from pathlib import Path as _Path
-                workspace = _Path.cwd()
+                workspace = _SERVER_WORKSPACE or Path.cwd()
                 # Map camelCase keys the UI sends to snake_case
                 fields = {}
                 if "enabled" in body:
@@ -329,6 +329,10 @@ class WardenRequestHandler(BaseHTTPRequestHandler):
                 })
             except Exception as exc:
                 self._send_json({"error": str(exc)}, status=500)
+            return
+
+        self._send_json({"error": "not found"}, status=404)
+
     def do_PUT(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")

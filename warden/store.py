@@ -1690,19 +1690,27 @@ def get_agents_overview() -> List[Dict[str, Any]]:
         try:
             # Check column exists (pre-migration DBs won't have it)
             cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-            name_col = "agent_name" if "agent_name" in cols else "agent"
+            # Most adapters (codex, cursor, copilot, …) only set ``agent``;
+            # ``agent_name`` is the optional instance label. Group on the
+            # label when present, falling back to the framework id, so
+            # sessions without a label still show up in the overview.
+            name_expr = (
+                "COALESCE(NULLIF(agent_name, ''), agent)"
+                if "agent_name" in cols
+                else "agent"
+            )
 
             for row in conn.execute(
                 f"""
                 SELECT
-                    COALESCE({name_col}, agent, 'unknown') as agent_name,
+                    COALESCE({name_expr}, 'unknown') as agent_name,
                     agent as framework,
                     MAX(updated_at) as last_seen,
                     COUNT(*) as total_calls,
                     SUM(CASE WHEN findings_count > 0 THEN 1 ELSE 0 END) as blocked_calls
                 FROM sessions
-                WHERE {name_col} IS NOT NULL AND {name_col} != ''
-                GROUP BY {name_col}
+                WHERE {name_expr} IS NOT NULL AND {name_expr} != ''
+                GROUP BY {name_expr}
                 """
             ):
                 name = row["agent_name"] or "unknown"
