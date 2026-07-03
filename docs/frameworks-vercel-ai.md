@@ -38,7 +38,7 @@ The server exposes:
 ## Install
 
 ```bash
-npm install @prismorsec/prismor
+npm install prismor-warden
 ```
 
 ## Quick start
@@ -47,7 +47,7 @@ npm install @prismorsec/prismor
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { wardenTools } from "@prismorsec/prismor";
+import { wardenTools } from "prismor-warden";
 
 const run_shell = tool({
   description: "Execute a shell command",
@@ -75,7 +75,7 @@ const result = await generateText({ model: openai("gpt-4o-mini"), tools, prompt 
 A denied call in enforce mode throws `WardenBlocked`:
 
 ```typescript
-import { WardenBlocked, wardenTools } from "@prismorsec/prismor";
+import { WardenBlocked, wardenTools } from "prismor-warden";
 
 // In a Next.js API route:
 export async function POST(req: Request) {
