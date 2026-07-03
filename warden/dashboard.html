@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Prismor Dashboard</title>
 <link rel="icon" type="image/png" href="https://prismor.dev/Prismor_Logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -16,10 +19,13 @@
     --gray-700: #374151; --gray-800: #1f2937; --gray-900: #111827;
     --pink-600: #db2777; --green-500: #22c55e;
     --sky-600: #0284c7; --rose-600: #e11d48;
+    /* Same faces as prismor.dev: Inter for UI, JetBrains Mono for code/ids */
+    --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-family: var(--font-ui);
     background: var(--gray-50); color: var(--gray-800);
     padding: 0; min-height: 100vh;
   }
@@ -411,7 +417,7 @@
   .rule-row.off { background: var(--gray-50, #fafafa); }
   .rule-row.off .rule-id, .rule-row.off .rule-title { opacity:.5; }
   .rule-main { flex:1; min-width:0; }
-  .rule-id { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; font-weight:600; color:var(--gray-900); }
+  .rule-id { font-family:var(--font-mono); font-size:12.5px; font-weight:600; color:var(--gray-900); }
   .rule-title { font-size:12px; color:var(--gray-500); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .rule-sev {
     font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
@@ -703,26 +709,183 @@
     display: flex; gap: 8px; align-items: center; margin-top: 14px; padding-top: 12px;
     border-top: 1px solid var(--gray-100);
   }
+
+  /* ── Topbar: logo, mode chip, upgrade ── */
+  .topbar-logo { width: 24px; height: 24px; object-fit: contain; display: block; }
+  .mode-chip {
+    font-family: inherit; font-size: 10px; font-weight: 600; cursor: pointer;
+    padding: 2px 9px; border-radius: 9999px; border: 1px solid transparent;
+    display: inline-flex; align-items: center; gap: 5px;
+    text-transform: uppercase; letter-spacing: 0.05em; background: none;
+  }
+  .mode-chip .badge-dot { background: currentColor; }
+  .mode-chip.observe { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+  .mode-chip.enforce { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+  .mode-chip.unknown { background: var(--gray-100); color: var(--gray-400); }
+  .upgrade-btn {
+    font-family: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+    padding: 5px 14px; border-radius: 6px; border: none; color: #fff;
+    background: linear-gradient(135deg, #7c3aed, #db2777);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .upgrade-btn:hover { opacity: 0.88; }
+  .upgrade-btn:active { transform: scale(0.97); }
+  .tab-lock { font-size: 10px; margin-left: 5px; opacity: 0.7; }
+
+  /* ── Agents tab ── */
+  .agent-off td { opacity: 0.55; }
+  .agent-off td:last-child, .agent-off td:nth-child(2) { opacity: 1; }
+  .agent-name { font-weight: 600; color: var(--gray-900); }
+
+  /* ── Upgrade modal ── */
+  .up-modal-overlay {
+    position: fixed; inset: 0; background: rgba(17,24,39,0.45); z-index: 300;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .up-modal-overlay.open { display: flex; }
+  .up-modal {
+    background: #fff; border-radius: 12px; max-width: 540px; width: 100%;
+    overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    max-height: 92vh; overflow-y: auto;
+  }
+  .up-modal-hero {
+    background: linear-gradient(135deg, #1e1b4b, #4c1d95); color: #fff;
+    padding: 26px 28px; position: relative;
+  }
+  .up-modal-hero img { width: 34px; height: 34px; margin-bottom: 10px; }
+  .up-modal-hero h3 { font-size: 16px; font-weight: 600; }
+  .up-modal-hero p { font-size: 12px; color: #c7d2fe; margin-top: 5px; line-height: 1.5; }
+  .up-modal-close {
+    position: absolute; top: 12px; right: 14px; background: none; border: none;
+    color: #c7d2fe; font-size: 15px; cursor: pointer; font-family: inherit;
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .up-modal-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+  .up-feat-list { padding: 18px 28px 6px; }
+  .up-feat {
+    display: flex; gap: 10px; align-items: flex-start; padding: 7px 0;
+    font-size: 12px; color: var(--gray-700); line-height: 1.5;
+  }
+  .up-feat .fi { flex-shrink: 0; width: 18px; text-align: center; }
+  .up-feat strong { color: var(--gray-900); }
+  .up-modal-actions { display: flex; gap: 14px; padding: 18px 28px 16px; align-items: center; }
+  .up-cta-primary {
+    flex: 1; text-align: center; background: var(--gray-900); color: #fff;
+    font-weight: 600; font-size: 13px; padding: 10px 18px; border-radius: 7px;
+    text-decoration: none; transition: background 0.15s;
+  }
+  .up-cta-primary:hover { background: #000; }
+  .up-cta-secondary { font-size: 12px; color: var(--gray-500); text-decoration: none; white-space: nowrap; }
+  .up-cta-secondary:hover { color: var(--gray-800); text-decoration: underline; }
+  .up-modal-note { font-size: 10px; color: var(--gray-400); padding: 0 28px 22px; line-height: 1.5; }
+
+  /* ── Fleet (enterprise teaser) ── */
+  .locked-hero {
+    border: 1px dashed var(--gray-300); background: #fff; border-radius: 10px;
+    padding: 36px 28px; text-align: center; margin-bottom: 20px;
+  }
+  .locked-hero .lock { font-size: 26px; margin-bottom: 10px; }
+  .locked-hero h3 { font-size: 15px; font-weight: 600; color: var(--gray-900); margin-bottom: 8px; }
+  .locked-hero p {
+    font-size: 12px; color: var(--gray-500); line-height: 1.6;
+    max-width: 460px; margin: 0 auto 18px;
+  }
+  .fleet-preview {
+    position: relative; border: 1px solid var(--gray-200); border-radius: 10px;
+    overflow: hidden; background: #fff;
+  }
+  .fleet-preview .blur {
+    filter: blur(3px); opacity: 0.5; pointer-events: none; user-select: none;
+    padding: 20px;
+  }
+  .fleet-preview .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(249,250,251,0.15), rgba(249,250,251,0.9));
+  }
+  .fleet-preview .overlay span {
+    font-size: 11px; color: var(--gray-500); background: #fff;
+    border: 1px solid var(--gray-200); border-radius: 6px; padding: 8px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+
+  /* ── Inline SVG icons (Lucide) ── */
+  .icon {
+    width: 14px; height: 14px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    vertical-align: -2px; flex-shrink: 0; display: inline-block;
+  }
+  .banner-icon { display: flex; align-items: flex-start; }
+  .banner-icon .icon { width: 15px; height: 15px; margin-top: 1px; }
+  .upgrade-btn .icon { width: 12px; height: 12px; }
+  .tab-lock .icon { width: 11px; height: 11px; vertical-align: -1px; }
+  .locked-hero .lock { color: var(--gray-400); }
+  .locked-hero .lock .icon { width: 28px; height: 28px; stroke-width: 1.75; }
+  .up-feat .fi .icon { width: 15px; height: 15px; color: #6d28d9; margin-top: 1px; }
+  .drawer-toggle .icon { width: 12px; height: 12px; vertical-align: -1.5px; }
+  .scoped-tag .icon { width: 11px; height: 11px; vertical-align: -1.5px; }
+
+  /* ── Monospace surfaces (code, ids, editors) — JetBrains Mono like the site ── */
+  code, .yaml-editor, .sess-id, .sess-drawer-sessid, .event-sess-id,
+  td.mono, .finding-cmd, .trigger-detail, .rule-id, .user-id, .adv-pill,
+  .policy-meta .path { font-family: var(--font-mono); }
+
+  /* ── Toast ── */
+  #wardenToast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #1f2937; color: #f9fafb; font-size: 11px; padding: 9px 16px;
+    border-radius: 6px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    display: none; max-width: 80vw;
+  }
+  #wardenToast.err { background: #b91c1c; }
 </style>
 </head>
 <body>
 
+<!-- ═══ ICON SPRITE (Lucide, inlined — no external requests) ══════ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21"/></symbol>
+</svg>
+
 <!-- ═══ TOP BAR ═══════════════════════════════════════════════════ -->
 <div class="topbar">
   <div class="topbar-left">
+    <img class="topbar-logo" src="https://prismor.dev/Prismor_Logo.png" alt="Prismor" />
     <h1>Prismor</h1>
+    <button id="modeChip" class="mode-chip unknown" onclick="gotoPolicy()"
+            title="Effective enforcement mode — click to manage in Policy Control">
+      <span class="badge-dot"></span><span id="modeChipLabel">mode</span>
+    </button>
   </div>
   <div class="topbar-right">
     <span id="lastUpdated" class="last-updated"></span>
     <span id="statusBadge" class="badge badge-demo"><span class="badge-dot"></span> loading</span>
+    <button class="upgrade-btn" onclick="openUpgradeModal()"><svg class="icon"><use href="#i-sparkles"/></svg> Upgrade</button>
   </div>
 </div>
 
 <!-- ═══ TAB NAV ═══════════════════════════════════════════════════ -->
 <div class="tab-nav">
   <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="agents">Agents</button>
   <button class="tab-btn" data-tab="sessions">Session Control</button>
   <button class="tab-btn" data-tab="policy">Policy Control</button>
+  <button class="tab-btn" data-tab="fleet">Fleet<span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -932,12 +1095,62 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: AGENTS                                                   -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-agents" class="page">
+  <div class="section" style="margin-top:0">
+    <h2>Agent Control</h2><div class="rule"></div>
+    <span class="hint">per-agent kill switch, enforcement mode &amp; IAM profile — live agents pick changes up within 30 s</span>
+  </div>
+
+  <div class="banner banner-info">
+    <span class="banner-icon"><svg class="icon"><use href="#i-bot"/></svg></span>
+    <div class="banner-text">
+      <strong>Manage every agent from one place</strong>
+      Claude Code, Codex, Cursor, and other agents auto-register the first time they run in a
+      Warden-enabled workspace. <strong>Blocked</strong> denies every tool call from that agent
+      (kill switch) · <strong>Observe</strong> logs threats without blocking ·
+      <strong>Enforce</strong> blocks them in real time. Saved to <code>.prismor-warden/agents.yaml</code>.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="bar" style="margin-bottom:14px">
+      <span id="agentsCount" class="result-count"></span>
+      <div class="bar-right">
+        <button class="fbtn" id="agentsRefresh">↺ Refresh</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Agent</th><th>Status</th><th>Mode</th><th>IAM Profile</th>
+          <th class="right">Calls</th><th class="right">Blocked</th><th>Last Seen</th>
+          <th class="right" title="Off = kill switch: every tool call denied">Enabled</th>
+        </tr></thead>
+        <tbody id="agentsBody"><tr><td colspan="8" class="empty">Loading agents…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="banner banner-enterprise" style="margin-top:16px">
+    <span class="banner-icon"><svg class="icon"><use href="#i-building"/></svg></span>
+    <div class="banner-text">
+      <strong>Need this across your whole org?</strong>
+      Prismor Enterprise adds an org-level kill switch — pause a compromised agent on every
+      enrolled machine at once, with signed policy a local re-enable can't override.
+      <a href="#" onclick="openUpgradeModal();return false" style="color:inherit;font-weight:600">Talk to us →</a>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
 <!-- PAGE: SESSION CONTROL                                          -->
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="page-sessions" class="page">
   <div class="section" style="margin-top:0">
     <h2>Live Sessions</h2><div class="rule"></div>
-    <span class="hint">pause Prismor, clear scope, or unblock a stuck agent</span>
+    <span class="hint">pause Prismor, clear scope, or unblock a stuck agent — per-agent kill switch lives in the Agents tab</span>
   </div>
 
   <div id="enrollBannerSess"></div>
@@ -1020,7 +1233,7 @@
   <!-- Per-rule toggle list (project-scoped) -->
   <div id="pscope-rules" class="policy-scope-pane active">
     <div class="banner banner-info">
-      <span class="banner-icon">🛡️</span>
+      <span class="banner-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
       <div class="banner-text">
         <strong>Detection rules</strong>
         Toggle individual rules for <strong>this project</strong>. Disabling a rule stops it
@@ -1046,7 +1259,7 @@
   <!-- Global policy -->
   <div id="pscope-global" class="policy-scope-pane">
     <div class="banner banner-info">
-      <span class="banner-icon">🌐</span>
+      <span class="banner-icon"><svg class="icon"><use href="#i-globe"/></svg></span>
       <div class="banner-text">
         <strong>Global policy</strong>
         Applies to every project on this machine unless overridden at the project level.
@@ -1082,7 +1295,7 @@
   <!-- Project policy -->
   <div id="pscope-project" class="policy-scope-pane">
     <div class="banner banner-info">
-      <span class="banner-icon">📁</span>
+      <span class="banner-icon"><svg class="icon"><use href="#i-folder"/></svg></span>
       <div class="banner-text">
         <strong>Project policy</strong>
         Overrides global settings for this project only. Stored in
@@ -1119,7 +1332,7 @@
   <!-- Enterprise policy (read-only) -->
   <div id="pscope-enterprise" class="policy-scope-pane">
     <div class="banner banner-enterprise" id="enterpriseBanner">
-      <span class="banner-icon">🔒</span>
+      <span class="banner-icon"><svg class="icon"><use href="#i-lock"/></svg></span>
       <div class="banner-text" id="enterpriseBannerText">
         <strong>Not enrolled</strong>
         Enroll this device in a Prismor org to receive centrally-managed policies.
@@ -1136,7 +1349,7 @@
   <!-- Effective (merged) — read-only -->
   <div id="pscope-effective" class="policy-scope-pane">
     <div class="banner banner-info">
-      <span class="banner-icon">🔀</span>
+      <span class="banner-icon"><svg class="icon"><use href="#i-merge"/></svg></span>
       <div class="banner-text">
         <strong>Effective policy</strong>
         What actually runs on this machine right now — global + project + enterprise merged together.
@@ -1156,13 +1369,80 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: FLEET (enterprise teaser)                                -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-fleet" class="page">
+  <div class="section" style="margin-top:0">
+    <h2>Fleet</h2><div class="rule"></div>
+    <span class="hint">org-wide visibility across every enrolled device</span>
+  </div>
+
+  <div class="locked-hero">
+    <div class="lock"><svg class="icon"><use href="#i-lock"/></svg></div>
+    <h3>Fleet view is a Prismor Enterprise feature</h3>
+    <p>
+      This local dashboard shows agents and sessions on <em>this machine</em>. Fleet view gives
+      your security team the same picture across every developer laptop and CI runner in the org —
+      live sessions, findings, per-device policy status, and a remote kill switch — streamed as
+      redacted telemetry to a dashboard you host.
+    </p>
+    <button class="upgrade-btn" onclick="openUpgradeModal()"><svg class="icon"><use href="#i-sparkles"/></svg> Talk to us</button>
+  </div>
+
+  <div class="fleet-preview" aria-hidden="true">
+    <div class="blur">
+      <table>
+        <thead><tr>
+          <th>Device</th><th>User</th><th>Agents</th><th>Mode</th><th>Findings (7d)</th><th>Last Seen</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>mbp-eng-042</td><td>priya@acme.dev</td><td>claude-code, codex</td><td>enforce</td><td>3</td><td>2m ago</td></tr>
+          <tr><td>mbp-eng-017</td><td>sam@acme.dev</td><td>claude-code</td><td>enforce</td><td>0</td><td>11m ago</td></tr>
+          <tr><td>ci-runner-08</td><td>—</td><td>codex</td><td>enforce</td><td>1</td><td>just now</td></tr>
+          <tr><td>mbp-eng-063</td><td>jo@acme.dev</td><td>cursor</td><td>observe</td><td>7</td><td>1h ago</td></tr>
+          <tr><td>mbp-eng-029</td><td>lee@acme.dev</td><td>claude-code, cursor</td><td>enforce</td><td>0</td><td>3h ago</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="overlay"><span>Illustrative preview — live fleet data is part of Prismor Enterprise</span></div>
+  </div>
+</div>
+
 <!-- ═══ MORE FROM PRISMOR (CTA) ══════════════════════════════════════════ -->
 <div class="prismor-cta">
   <div class="prismor-cta-text">
-    <strong>Want team dashboards, signed remote policy &amp; audit history?</strong>
-    <span>This is the local agent. Prismor Cloud adds org-wide fleet visibility, centrally-managed policy, and long-term audit trails.</span>
+    <strong>Rolling Prismor out to a team?</strong>
+    <span>This local dashboard stays free and open source. Enterprise adds fleet visibility, signed remote policy, org kill switch, and audit history.</span>
   </div>
-  <a class="prismor-cta-btn" href="https://prismor.dev?utm_source=immunity_dashboard&utm_medium=cta" target="_blank" rel="noopener">Explore Prismor Cloud →</a>
+  <a class="prismor-cta-btn" href="#" onclick="openUpgradeModal();return false">Talk to us →</a>
+</div>
+
+<!-- ═══ UPGRADE MODAL ═══════════════════════════════════════════════════ -->
+<div class="up-modal-overlay" id="upModalOverlay" onclick="if(event.target===this)closeUpgradeModal()">
+  <div class="up-modal" role="dialog" aria-modal="true" aria-label="Prismor Enterprise">
+    <div class="up-modal-hero">
+      <button class="up-modal-close" onclick="closeUpgradeModal()" aria-label="Close">✕</button>
+      <img src="https://prismor.dev/Prismor_Logo.png" alt="" />
+      <h3>Prismor Enterprise</h3>
+      <p>Everything in the open-source agent, plus an org control plane for security teams. Cloud or self-hosted.</p>
+    </div>
+    <div class="up-feat-list">
+      <div class="up-feat"><span class="fi"><svg class="icon"><use href="#i-radio"/></svg></span><div><strong>Fleet visibility</strong> — every enrolled device, agent, and session in one org dashboard</div></div>
+      <div class="up-feat"><span class="fi"><svg class="icon"><use href="#i-pen"/></svg></span><div><strong>Signed remote policy</strong> — push observe/enforce and rule changes org-wide, verified on-device</div></div>
+      <div class="up-feat"><span class="fi"><svg class="icon"><use href="#i-ban"/></svg></span><div><strong>Org kill switch</strong> — pause a compromised agent on every machine at once; a local re-enable can't lift it</div></div>
+      <div class="up-feat"><span class="fi"><svg class="icon"><use href="#i-database"/></svg></span><div><strong>Audit history &amp; export</strong> — long-term, redacted telemetry for compliance and incident review</div></div>
+      <div class="up-feat"><span class="fi"><svg class="icon"><use href="#i-users"/></svg></span><div><strong>Teams &amp; roles</strong> — control who can change policy, grant exemptions, and lift blocks</div></div>
+    </div>
+    <div class="up-modal-actions">
+      <a class="up-cta-primary" href="https://prismor.dev/demo?utm_source=immunity_dashboard&utm_medium=upgrade_modal" target="_blank" rel="noopener">Book a demo →</a>
+      <a class="up-cta-secondary" href="mailto:contact@prismor.dev?subject=Prismor%20Enterprise">contact@prismor.dev</a>
+    </div>
+    <div class="up-modal-note">
+      The local dashboard is free and open source, forever — Enterprise adds the cloud control plane on top, nothing here is taken away.
+      Prefer chat? <a href="https://discord.gg/FH2PRX754c" target="_blank" rel="noopener" style="color:inherit">Join our Discord</a>.
+    </div>
+  </div>
 </div>
 
 <!-- ═══ LOADING SCREEN ═══════════════════════════════════════════════════ -->
@@ -1243,8 +1523,55 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       loadPolicy();           // silent background refresh
       loadRules();            // per-rule toggle list
     }
+    if (btn.dataset.tab === 'agents') {
+      if (_agentsCache) renderAgents(_agentsCache);
+      loadAgents();           // silent background refresh
+    }
   });
 });
+
+// ── Toast (non-blocking feedback — replaces alert()) ──────────────────────
+let _toastTimer;
+function toast(msg, isErr) {
+  let t = document.getElementById('wardenToast');
+  if (!t) { t = document.createElement('div'); t.id = 'wardenToast'; document.body.appendChild(t); }
+  t.className = isErr ? 'err' : '';
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.style.display = 'none'; }, 3200);
+}
+
+// ── Topbar: mode chip + upgrade modal ──────────────────────────────────────
+function gotoPolicy() {
+  document.querySelector('.tab-btn[data-tab="policy"]')?.click();
+}
+function _modeIn(yaml) {
+  const m = (yaml || '').match(/default_mode\s*:\s*(\w+)/);
+  return m ? m[1] : null;
+}
+function updateModeChip(data) {
+  const chip = document.getElementById('modeChip');
+  const label = document.getElementById('modeChipLabel');
+  if (!chip || !label) return;
+  // Effective precedence: enterprise > project > global > built-in default (observe)
+  const mode = _modeIn((data.enterprise || {}).yaml)
+            || _modeIn((data.project || {}).yaml)
+            || _modeIn((data.global || {}).yaml)
+            || 'observe';
+  chip.className = 'mode-chip ' + (mode === 'enforce' ? 'enforce' : 'observe');
+  label.textContent = mode;
+  chip.title = mode === 'enforce'
+    ? 'Enforce — threats are blocked in real time. Click to manage.'
+    : 'Observe — threats are logged but NOT blocked. Click to switch to enforce.';
+}
+function openUpgradeModal() {
+  document.getElementById('upModalOverlay')?.classList.add('open');
+}
+function closeUpgradeModal() {
+  document.getElementById('upModalOverlay')?.classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeUpgradeModal(); });
 
 // ── Session detail drawer ──────────────────────────────────────────────────
 const ALL_TOOLS = ['Bash','Edit','MultiEdit','Read','WebFetch','WebSearch','Write'];
@@ -1367,12 +1694,12 @@ function renderDrawerContent(sessId, ws, data) {
   const footerEl = document.getElementById('sessDrawerFooter');
   if (paused) {
     footerEl.innerHTML =
-      '<button class="drawer-toggle resume" onclick="drawerAction(\'resume\')">▶ Resume Prismor</button>' +
+      '<button class="drawer-toggle resume" onclick="drawerAction(\'resume\')"><svg class="icon"><use href="#i-play"/></svg> Resume Prismor</button>' +
       '<button class="drawer-toggle clear"  onclick="drawerAction(\'clear\')">Clear scope</button>' +
       '<div class="drawer-status" id="drawerActionStatus"></div>';
   } else {
     footerEl.innerHTML =
-      '<button class="drawer-toggle pause" onclick="drawerAction(\'pause\')">⏸ Pause Prismor</button>' +
+      '<button class="drawer-toggle pause" onclick="drawerAction(\'pause\')"><svg class="icon"><use href="#i-pause"/></svg> Pause Prismor</button>' +
       '<button class="drawer-toggle clear" onclick="drawerAction(\'clear\')">Clear scope</button>' +
       '<div class="drawer-status" id="drawerActionStatus"></div>';
   }
@@ -1385,7 +1712,7 @@ function renderScopeView(container, scoped) {
   const netOk   = !scoped.deny_network;
   let html = '';
   if (scoped.paused) {
-    html += '<div style="margin-bottom:8px"><span class="scoped-tag" style="background:#fef9c3;color:#92400e;padding:3px 10px;border-radius:4px;font-size:11px">⏸ Immunity is paused</span></div>';
+    html += '<div style="margin-bottom:8px"><span class="scoped-tag" style="background:#fef9c3;color:#92400e;padding:3px 10px;border-radius:4px;font-size:11px"><svg class="icon"><use href="#i-pause"/></svg> Immunity is paused</span></div>';
   }
   if (allowed.length) html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Allowed tools</span><div class="drawer-rule-tags">' + allowed.map(t => '<span class="scoped-tag tag-allow">' + safe(t) + '</span>').join('') + '</div></div>';
   if (denied.length)  html += '<div class="drawer-rule-row"><span class="drawer-rule-label">Denied tools</span><div class="drawer-rule-tags">'  + denied.map(t  => '<span class="scoped-tag tag-deny">'  + safe(t) + '</span>').join('') + '</div></div>';
@@ -1536,6 +1863,7 @@ async function scopeSave() {
 async function drawerAction(action) {
   const sessId = _drawerSessId;
   const ws     = _drawerWs;
+  if (action === 'pause' && !confirm('Pause Prismor for this session?\n\nProtection is fully disabled for the session — nothing is blocked or flagged until you resume.')) return;
 
   // Disable all footer buttons immediately to prevent double-clicks
   document.querySelectorAll('#sessDrawerFooter button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
@@ -1646,7 +1974,7 @@ function buildPager(containerId, state, loadFn) {
 // ── Charts ────────────────────────────────────────────────────────────────
 let donutChart, lineChart, agentBarChart, toolBarChart, mcpBarChart, scEcoBarChart;
 function initCharts() {
-  Chart.defaults.font.family = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  Chart.defaults.font.family = '"Inter", -apple-system, BlinkMacSystemFont, sans-serif';
   Chart.defaults.font.size = 10;
   Chart.defaults.color = '#9ca3af';
   donutChart = new Chart(document.getElementById('donutChart'), {
@@ -2000,6 +2328,108 @@ async function loadSupplyChain(){
 document.getElementById('globalDays').addEventListener('change',()=>{loadStats();loadSupplyChain();});
 
 // ══════════════════════════════════════════════════════════════════════════
+// AGENTS TAB — per-agent kill switch, mode override, IAM profile
+// ══════════════════════════════════════════════════════════════════════════
+let _agentsCache = null;
+
+function fmtLastSeen(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 90) return 'just now';
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+  return Math.round(diff / 86400) + 'd ago';
+}
+
+async function loadAgents() {
+  try {
+    const data = await apiFetch('/api/agents');
+    _agentsCache = data;
+    renderAgents(data);
+  } catch (e) {
+    console.error('[warden] agents:', e);
+    if (!_agentsCache) {
+      document.getElementById('agentsBody').innerHTML =
+        '<tr><td colspan="8" class="empty">Failed to load agents: ' + safe(e.message) + '</td></tr>';
+    }
+  }
+}
+
+function renderAgents(data) {
+  const agents = data.agents || [];
+  const profiles = data.iam_profiles || [];
+  document.getElementById('agentsCount').textContent =
+    agents.length + ' agent' + (agents.length === 1 ? '' : 's') + ' registered';
+  const tbody = document.getElementById('agentsBody');
+  if (!agents.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">No agents discovered yet — agents ' +
+      'auto-register the first time they run in a Warden-enabled workspace. ' +
+      'Install hooks with <code>prismor install</code>, then start Claude Code, Codex, or Cursor.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = agents.map(a => {
+    const status = a.enabled
+      ? '<span class="status-pill status-active"><span class="status-dot"></span>Active</span>'
+      : '<span class="status-pill status-blocked"><span class="status-dot"></span>Blocked</span>';
+    const modeOpts = [['', 'inherit (global)'], ['observe', 'observe'], ['enforce', 'enforce']]
+      .map(([v, l]) => '<option value="' + v + '"' + ((a.mode || '') === v ? ' selected' : '') + '>' + l + '</option>')
+      .join('');
+    const iamOpts = ['<option value=""' + (!a.iam_profile ? ' selected' : '') + '>none</option>']
+      .concat(profiles.map(p =>
+        '<option value="' + safeAttr(p) + '"' + (a.iam_profile === p ? ' selected' : '') + '>' + safe(p) + '</option>'))
+      .join('');
+    return '<tr class="' + (a.enabled ? '' : 'agent-off') + '">' +
+      '<td><span class="agent-name">' + safe(a.name) + '</span>' +
+        (a.framework && a.framework !== a.name ? ' <span class="agent-pill">' + safe(a.framework) + '</span>' : '') + '</td>' +
+      '<td>' + status + '</td>' +
+      '<td><select class="fsel" onchange="agentSet(\'' + safeAttr(a.name) + '\',{mode:this.value||null})">' + modeOpts + '</select></td>' +
+      '<td><select class="fsel" onchange="agentSet(\'' + safeAttr(a.name) + '\',{iam_profile:this.value||null})">' + iamOpts + '</select></td>' +
+      '<td class="right">' + fmtNum(a.total_calls || 0) + '</td>' +
+      '<td class="right"' + (a.blocked_calls > 0 ? ' style="color:var(--pink-600);font-weight:600"' : '') + '>' + fmtNum(a.blocked_calls || 0) + '</td>' +
+      '<td style="color:var(--gray-400)">' + safe(fmtLastSeen(a.last_seen)) + '</td>' +
+      '<td class="right"><label class="rule-toggle" title="' +
+        (a.enabled ? 'Block this agent — every tool call will be denied' : 'Unblock this agent') + '">' +
+        '<input type="checkbox"' + (a.enabled ? ' checked' : '') +
+        ' onchange="agentToggle(\'' + safeAttr(a.name) + '\', this)"><span class="rule-track"></span></label></td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function agentSet(name, fields) {
+  try {
+    const result = await apiFetch('/api/agents/' + encodeURIComponent(name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (_agentsCache) {
+      const a = (_agentsCache.agents || []).find(x => x.name === name);
+      if (a) { a.enabled = result.enabled; a.mode = result.mode; a.iam_profile = result.iam_profile; }
+      renderAgents(_agentsCache);
+    }
+    if (fields.enabled === false)      toast(name + ' blocked — all tool calls denied');
+    else if (fields.enabled === true)  toast('✓ ' + name + ' unblocked');
+    else                               toast('✓ ' + name + ' updated');
+  } catch (e) {
+    toast('✗ ' + e.message, true);
+    loadAgents(); // re-sync UI with server state
+  }
+}
+
+function agentToggle(name, cb) {
+  const enabling = cb.checked;
+  if (!enabling && !confirm('Block agent "' + name + '"?\n\nEvery tool call from this agent will be denied (kill switch) until you unblock it here or via:\nprismor agents set ' + name + ' --enabled')) {
+    cb.checked = true;
+    return;
+  }
+  agentSet(name, { enabled: enabling });
+}
+
+document.getElementById('agentsRefresh').addEventListener('click', loadAgents);
+
+// ══════════════════════════════════════════════════════════════════════════
 // SESSION CONTROL TAB
 // ══════════════════════════════════════════════════════════════════════════
 let _serverWorkspace = null;
@@ -2024,7 +2454,7 @@ function renderEnrollBanners(enrollment) {
     if (enrollment && enrollment.enrolled) {
       el.innerHTML =
         '<div class="banner banner-enterprise" style="margin-bottom:16px">' +
-        '<span class="banner-icon">🏢</span>' +
+        '<span class="banner-icon"><svg class="icon"><use href="#i-building"/></svg></span>' +
         '<div class="banner-text"><strong>Enterprise enrolled</strong>' +
         'This device is enrolled in org <code>' + safeAttr(enrollment.org_id || '') + '</code>. ' +
         'The Enterprise policy tab is read-only — changes must be made by your org admin in the Prismor web dashboard. ' +
@@ -2122,7 +2552,7 @@ function renderSessDetail(el, data, idx) {
     const allowed = (scoped.allowed_tools || []).map(t => '<span class="scoped-tag tag-allow">' + safe(t) + '</span>').join('');
     const denied = (scoped.deny_tools || []).map(t => '<span class="scoped-tag tag-deny">' + safe(t) + '</span>').join('');
     const net = scoped.deny_network ? '<span class="scoped-tag tag-deny">network denied</span>' : '<span class="scoped-tag tag-net">network allowed</span>';
-    const paused = scoped.paused ? '<span class="scoped-tag" style="background:#fef9c3;color:#92400e">⏸ prismor paused</span>' : '';
+    const paused = scoped.paused ? '<span class="scoped-tag" style="background:#fef9c3;color:#92400e"><svg class="icon"><use href="#i-pause"/></svg> prismor paused</span>' : '';
     scopedHtml = '<div style="margin-bottom:8px">' +
       '<div style="font-size:10px;color:var(--gray-400);margin-bottom:4px">Scoped rules</div>' +
       paused +
@@ -2152,6 +2582,8 @@ function renderSessDetail(el, data, idx) {
 }
 
 async function sessAction(sessId, action, workspace, idx) {
+  if (action === 'pause' && !confirm('Pause Prismor for this session?\n\nProtection is fully disabled for the session — nothing is blocked or flagged until you resume.')) return;
+  if (action === 'clear' && !confirm('Clear the scoped rules for this session?\n\nThe session falls back to the full default policy.')) return;
   try {
     const ws = workspace || _serverWorkspace || '';
     const body = { action, workspace: ws };
@@ -2170,8 +2602,9 @@ async function sessAction(sessId, action, workspace, idx) {
       const pill = document.getElementById('pill-' + idx);
       if (pill) pill.innerHTML = statusPill({findingsCount:(data.recent_blocked||[]).length}, data.scoped);
     }
+    toast({pause:'Session paused — protection off', resume:'Session resumed', clear:'Scope cleared'}[action] || '✓ Done');
   } catch(e) {
-    alert('Failed: ' + e.message);
+    toast('✗ ' + e.message, true);
   }
 }
 
@@ -2235,6 +2668,8 @@ function setMode(scope, mode) {
 }
 
 function renderPolicyTab(data) {
+  updateModeChip(data);
+
   // Global
   const g = data.global || {};
   _globalPolicyOriginal = g.yaml || '';
@@ -2296,11 +2731,11 @@ function renderPolicyTab(data) {
   const wsBanner = document.getElementById('workspaceBanner');
   if (data.workspace) {
     wsBanner.innerHTML = '<div class="banner banner-info" style="margin-bottom:16px">' +
-      '<span class="banner-icon">📁</span>' +
+      '<span class="banner-icon"><svg class="icon"><use href="#i-folder"/></svg></span>' +
       '<div class="banner-text">Project workspace: <code>' + safeAttr(data.workspace) + '</code></div></div>';
   } else {
     wsBanner.innerHTML = '<div class="banner banner-warn" style="margin-bottom:16px">' +
-      '<span class="banner-icon">⚠️</span>' +
+      '<span class="banner-icon"><svg class="icon"><use href="#i-alert"/></svg></span>' +
       '<div class="banner-text"><strong>No project workspace detected</strong>' +
       ' — project policy editing unavailable. Launch the dashboard from inside a project directory.</div></div>';
   }
@@ -2468,7 +2903,7 @@ initCharts();
 const _loadFill = document.getElementById('loadingFill');
 const _loadLabel = document.getElementById('loadingLabel');
 let _loadDone = 0;
-const _loadTotal = 6;
+const _loadTotal = 7;
 function _loadTick(label) {
   _loadDone++;
   if (_loadFill) _loadFill.style.width = Math.min(100, Math.round(_loadDone / _loadTotal * 100)) + '%';
@@ -2488,6 +2923,7 @@ Promise.all([
   loadFindings().then(()      => _loadTick('Findings loaded')),
   loadEvents().then(()        => _loadTick('Events loaded')),
   loadSupplyChain().then(()   => _loadTick('Supply chain loaded')),
+  loadAgents().then(()        => _loadTick('Agents loaded')),
   loadWorkspaces()
     .then(() => Promise.all([loadSessionControl(), loadPolicy()]))
     .then(()                  => _loadTick('Policy & controls loaded')),
@@ -2498,6 +2934,7 @@ setInterval(() => {
   loadSupplyChain();
   loadSessionControl();
   loadPolicy();
+  loadAgents();
   if (findState.page===1 && !findState.agent && !findState.severity && !findState.category && !findState.q) loadFindings();
   if (evtState.page===1 && !evtState.verdict && !evtState.agent) loadEvents();
 }, 30000);

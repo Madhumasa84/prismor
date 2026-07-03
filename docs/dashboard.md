@@ -60,8 +60,9 @@ prismor dashboard --no-open         # headless: start the server, don't open a b
 > `prismor serve` is the deprecated alias of `prismor dashboard --no-open`.
 
 Serves a self-contained HTML dashboard plus a small JSON API over the registered
-workspace databases. The only external resource is a Chart.js CDN link loaded by
-the browser; the data never leaves your machine.
+workspace databases. The only external resources are a Chart.js CDN link and the
+Inter / JetBrains Mono webfonts (Google Fonts) loaded by the browser; the data
+never leaves your machine.
 
 | Endpoint | Returns |
 |---|---|
@@ -72,9 +73,27 @@ the browser; the data never leaves your machine.
 | `GET /api/findings` | Paginated findings (`?page&limit&agent&severity&category&q`) |
 | `GET /api/events` | Paginated events (`?page&limit&verdict&agent`) |
 | `GET /api/supply-chain` | Supply-chain enforcement stats |
+| `GET /api/agents` | Agent registry merged with per-agent call stats |
+| `POST /api/agents/<name>` | Update per-agent controls: `{enabled?, mode?, iam_profile?}` |
 
 If you run `dashboard` before installing hooks anywhere, it warns that no workspaces
 are registered yet — install hooks in a project first to collect data.
+
+### Agents tab
+
+The **Agents** tab manages every agent that has run in a Warden-enabled
+workspace (Claude Code, Codex, Cursor, … — they auto-register on first run):
+
+- **Enabled toggle** — the per-agent kill switch. Off = every tool call from
+  that agent is denied with a CRITICAL `agent-disabled` finding.
+- **Mode** — override the enforcement mode for one agent: `inherit (global)`,
+  `observe` (log only), or `enforce` (block in real time).
+- **IAM profile** — pin the agent to a least-privilege profile from `iam.yaml`.
+
+Changes are written to `.prismor-warden/agents.yaml` and picked up by running
+agents within 30 s. The topbar also shows the **effective enforcement mode**
+(observe/enforce, merged across enterprise > project > global policy) at all
+times.
 
 ---
 
