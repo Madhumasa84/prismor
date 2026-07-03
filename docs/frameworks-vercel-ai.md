@@ -37,8 +37,12 @@ The server exposes:
 
 ## Install
 
+> The npm package is not published yet — until it is, install the adapter from
+> a checkout of the repo (it has no runtime npm dependencies).
+
 ```bash
-npm install prismor-warden-vercel
+git clone https://github.com/PrismorSec/prismor.git
+npm install ./prismor/adapters/vercel-ai
 ```
 
 ## Quick start
