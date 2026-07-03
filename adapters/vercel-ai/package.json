@@ -1,5 +1,5 @@
 {
-  "name": "@prismorsec/prismor",
+  "name": "prismor-warden",
   "version": "0.1.0",
   "description": "Prismor Warden for JS/TS agents \u2014 policy-controlled tool calls for the Vercel AI SDK via the Prismor eval-server",
   "main": "dist/index.js",
