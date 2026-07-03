@@ -6,13 +6,16 @@ on your existing agent or controller object, with no changes to your tool logic.
 
 ## UX at a glance
 
-| Framework | Language | Install | Guard | Multi-tenant |
+| Framework | Language | Package | Guard | Multi-tenant |
 |---|---|---|---|---|
-| OpenAI Agents SDK | Python | `pip install prismor-warden-openai` | `guard_agent(agent)` | `use_subject("user:alice")` |
-| LangChain / LangGraph | Python | `pip install prismor-warden-langchain` | `guard_tools([...])` | `use_subject("user:alice")` |
-| CrewAI | Python | `pip install prismor-warden-crewai` | `guard_tools([...])` | `use_subject("user:alice")` |
-| browser-use | Python | `pip install prismor-warden-browser-use` | `guard_controller(controller)` | `use_subject("user:alice")` |
-| Vercel AI SDK | TypeScript | `npm install prismor-warden-vercel` | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
+| OpenAI Agents SDK | Python | `prismor-warden-openai` | `guard_agent(agent)` | `use_subject("user:alice")` |
+| LangChain / LangGraph | Python | `prismor-warden-langchain` | `guard_tools([...])` | `use_subject("user:alice")` |
+| CrewAI | Python | `prismor-warden-crewai` | `guard_tools([...])` | `use_subject("user:alice")` |
+| browser-use | Python | `prismor-warden-browser-use` | `guard_controller(controller)` | `use_subject("user:alice")` |
+| Vercel AI SDK | TypeScript | `prismor-warden-vercel` | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
+
+> The adapter packages are not on PyPI/npm yet — each framework doc shows the
+> verified install-from-source command until they publish.
 | Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Warden-Subject` header |
 
 The Python multi-tenant pattern: guard once at startup with no bound subject,
@@ -76,7 +79,7 @@ Validated live on an Ubuntu EC2 instance with real OpenAI function calls:
 
 | Language | Adapter size | Dependencies |
 |---|---|---|
-| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor-warden-vercel` |
+| TypeScript (Vercel AI SDK) | ~80 lines | `prismor-warden-vercel` (from source until published — see [frameworks-vercel-ai](frameworks-vercel-ai.md)) |
 | Node.js (raw) | ~25 lines | built-in `fetch` |
 | Ruby | ~20 lines | stdlib `Net::HTTP` |
 | Java 21 | ~25 lines | stdlib `java.net.http` |
