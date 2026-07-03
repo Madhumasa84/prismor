@@ -14,7 +14,7 @@ on your existing agent or controller object, with no changes to your tool logic.
 | browser-use | Python | `pip install "prismor[browser-use]"` | `guard_controller(controller)` | `use_subject("user:alice")` |
 | Vercel AI SDK | TypeScript | `prismor-warden-vercel` (npm, from source until published) | `wardenTools(tools, opts)` | `{ subject: "user:alice" }` |
 
-> The Python adapters ship inside the `prismor` package (needs `>= 1.14.1`) —
+> The Python adapters ship inside the `prismor` package (needs `>= 1.14.2`) —
 > the extra just pulls the framework itself. `prismor[frameworks]` installs all
 > four. The npm package publishes separately.
 | Any language | Any | — (HTTP client only) | `POST /v1/evaluate` | `X-Warden-Subject` header |

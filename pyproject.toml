@@ -129,6 +129,10 @@ packages = [
 include = [
     "warden/",
     "supplychain/",
+    # The wheel is built FROM the sdist in CI — the bundled framework adapters
+    # (impl modules + namespace shims) must ride along or the published wheel
+    # ships shims that import nothing (the 1.14.1 bug).
+    "adapters/",
     "immunity-agent.pth",
     "advisories/immunity-feed.json",
     "advisories/immunity-feed.json.sig",

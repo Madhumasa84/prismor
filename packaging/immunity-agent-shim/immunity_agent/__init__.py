@@ -12,4 +12,4 @@ then use the ``prismor`` command. See https://prismor.dev for details.
 """
 
 __all__ = ["__version__"]
-__version__ = "1.14.1"
+__version__ = "1.14.2"
