@@ -1746,9 +1746,14 @@ def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
 def validate_policy(path: Path) -> List[str]:
     """Validate a policy YAML file. Returns a list of error messages (empty = valid)."""
     errors: List[str] = []
-    raw = _load_yaml(path)
+    try:
+        raw = _load_yaml(path)
+    except Exception as exc:
+        return [f"Invalid YAML in {path}: {exc}"]
     if raw is None:
         return [f"Cannot read {path}"]
+    if not isinstance(raw, dict):
+        return [f"Invalid policy in {path}: expected a YAML mapping at the top level"]
 
     if "version" not in raw:
         errors.append("Missing required field: version")

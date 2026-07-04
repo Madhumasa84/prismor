@@ -38,7 +38,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_GLOBAL_IAM_PATH = Path.home() / ".prismor" / "iam.yaml"
+def _global_iam_path() -> Path:
+    """Global iam.yaml path, honoring $PRISMOR_HOME (see PrismorSec/prismor#131)."""
+    from prismor.runtime.store import prismor_home
+    return prismor_home() / "iam.yaml"
+
+
 _PROJECT_IAM_FILENAME = "iam.yaml"
 
 _STARTER_CONFIG = """\
@@ -111,11 +116,12 @@ def load_iam_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
     Memoized on the (path, mtime) of both config files; a change to either
     file invalidates the cache automatically on the next call.
     """
+    global_path = _global_iam_path()
     project_path = (
         workspace / ".prismor" / _PROJECT_IAM_FILENAME if workspace else None
     )
     cache_key = (
-        str(_GLOBAL_IAM_PATH), _mtime(_GLOBAL_IAM_PATH),
+        str(global_path), _mtime(global_path),
         str(project_path) if project_path else "",
         _mtime(project_path) if project_path else -1.0,
     )
@@ -125,7 +131,7 @@ def load_iam_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
 
     config: Dict[str, Any] = {}
 
-    global_cfg = _load_yaml(_GLOBAL_IAM_PATH)
+    global_cfg = _load_yaml(global_path)
     if global_cfg:
         config.update(global_cfg)
 
@@ -291,8 +297,8 @@ def format_iam_profile_box(agent_id: str, profile: Dict[str, Any]) -> str:
 
 
 def init_global_iam() -> Path:
-    """Write a starter iam.yaml to ~/.prismor/iam.yaml and return its path."""
-    path = _GLOBAL_IAM_PATH
+    """Write a starter iam.yaml to $PRISMOR_HOME/iam.yaml (default ~/.prismor) and return its path."""
+    path = _global_iam_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_STARTER_CONFIG, encoding="utf-8")
     return path

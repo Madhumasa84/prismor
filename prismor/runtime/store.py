@@ -8,6 +8,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def prismor_home() -> Path:
+    """Return Prismor's state directory, honoring $PRISMOR_HOME (default ~/.prismor).
+
+    Single source of truth for the "home" half of state resolution (secrets
+    have their own further override, $PRISMOR_SECRETS_DIR). iam.py, canary.py,
+    and agents.py all import this instead of hardcoding Path.home() — see
+    PrismorSec/prismor#131 for the inconsistency this replaces.
+    """
+    return Path(os.environ.get("PRISMOR_HOME", str(Path.home() / ".prismor")))
+
+
 # ── Re-cloaking: never persist a raw secret value to the audit store ─────────
 #
 # A decloak hook substitutes the real secret into a command for execution. The
@@ -21,7 +32,7 @@ def _secrets_dir() -> Path:
     env = os.environ.get("PRISMOR_SECRETS_DIR")
     if env:
         return Path(env)
-    return Path.home() / ".prismor" / "secrets"
+    return prismor_home() / "secrets"
 
 
 def _load_secret_map() -> List[tuple[str, str]]:
@@ -73,7 +84,7 @@ def _recloak_event(event: Dict[str, Any]) -> Dict[str, Any]:
 # ── Global workspace registry ────────────────────────────────────────────────
 
 def _registry_path() -> Path:
-    return Path.home() / ".prismor" / "workspaces.json"
+    return prismor_home() / "workspaces.json"
 
 
 def register_workspace(workspace: Path) -> None:
@@ -1193,11 +1204,20 @@ def get_findings_page(
                 params.extend([f"%{search.lower()}%"] * 2)
             where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
             # The triggering event for a finding is identified by event_index
-            # (its 0-based position in the session's event list). Resolve it
-            # via a correlated subquery so we get the actual command/prompt
-            # rather than MAX(...) across the whole session.
+            # (its 0-based position in the session's event list). SQLite does
+            # not support correlating an outer column inside a subquery's
+            # OFFSET clause (`OFFSET COALESCE(f.event_index, 0)` errors with
+            # "no such column: f.event_index" even though the column exists),
+            # so number each session's events with ROW_NUMBER() and join on
+            # equality instead — see PrismorSec/prismor#129.
             for row in conn.execute(
                 f"""
+                WITH numbered_events AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY session_id ORDER BY id
+                    ) - 1 AS rn
+                    FROM events
+                )
                 SELECT f.finding_id, f.session_id, f.title, f.category,
                        f.severity, f.evidence, f.event_index, s.agent,
                        te.ts          as trig_ts,
@@ -1210,11 +1230,9 @@ def get_findings_page(
                        s.updated_at    as session_updated
                 FROM findings f
                 JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events te ON te.id = (
-                    SELECT id FROM events
-                    WHERE session_id = f.session_id
-                    ORDER BY id LIMIT 1 OFFSET COALESCE(f.event_index, 0)
-                )
+                LEFT JOIN numbered_events te
+                    ON te.session_id = f.session_id
+                    AND te.rn = COALESCE(f.event_index, 0)
                 {where}
                 ORDER BY COALESCE(te.ts, s.updated_at) DESC
                 LIMIT 5000
@@ -1286,20 +1304,32 @@ def get_events_page(
                 where_clauses.append("s.agent = ?")
                 params.append(agent)
             if verdict == "blocked":
-                where_clauses.append("s.findings_count > 0")
+                where_clauses.append("f.finding_id IS NOT NULL")
             elif verdict == "allowed":
-                where_clauses.append("s.findings_count = 0")
+                where_clauses.append("f.finding_id IS NULL")
             where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+            # verdict/severity must reflect THIS event, not the session as a
+            # whole — the previous `s.findings_count > 0` check plus an
+            # unscoped `LEFT JOIN findings ON session_id` marked every event
+            # in a flagged session as "blocked", including ones that were
+            # actually allowed. Number events per session and join findings
+            # on the matching event_index instead — see PrismorSec/prismor#130.
             for row in conn.execute(
                 f"""
+                WITH numbered_events AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY session_id ORDER BY id
+                    ) - 1 AS rn
+                    FROM events
+                )
                 SELECT e.ts, e.session_id, s.agent, s.workspace_path,
                        e.type as action_type,
                        e.command_text, e.path_text, e.url_text,
-                       f.severity,
-                       CASE WHEN s.findings_count > 0 THEN 'blocked' ELSE 'allowed' END as verdict
-                FROM events e
+                       f.finding_id, f.severity,
+                       CASE WHEN f.finding_id IS NOT NULL THEN 'blocked' ELSE 'allowed' END as verdict
+                FROM numbered_events e
                 JOIN sessions s ON s.session_id = e.session_id
-                LEFT JOIN findings f ON f.session_id = e.session_id
+                LEFT JOIN findings f ON f.session_id = e.session_id AND f.event_index = e.rn
                 {where}
                 GROUP BY e.id
                 ORDER BY e.ts DESC LIMIT 5000
@@ -1770,7 +1800,7 @@ def get_agents_overview() -> List[Dict[str, Any]]:
 # ── Policy management helpers ─────────────────────────────────────────────────
 
 def _global_policy_path() -> Path:
-    return Path.home() / ".prismor" / "policy.yaml"
+    return prismor_home() / "policy.yaml"
 
 
 def _project_policy_path(workspace: Path) -> Path:
@@ -1779,7 +1809,7 @@ def _project_policy_path(workspace: Path) -> Path:
 
 def get_enrollment() -> Optional[Dict[str, Any]]:
     """Return enterprise enrollment info, or None if unenrolled."""
-    identity = Path.home() / ".prismor" / "identity.json"
+    identity = prismor_home() / "identity.json"
     if not identity.exists():
         return None
     try:
@@ -1797,7 +1827,7 @@ def get_enrollment() -> Optional[Dict[str, Any]]:
 
 
 def _enterprise_remote_cache() -> Optional[str]:
-    cache = Path.home() / ".prismor" / "remote_policy_cache.json"
+    cache = prismor_home() / "remote_policy_cache.json"
     if not cache.exists():
         return None
     try:

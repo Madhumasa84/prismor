@@ -654,6 +654,24 @@ rules:
       - '(^|\n)/usr/lib/systemd/system/'
     action: warn
 
+  # ── CRITICAL: Direct writes to core auth files ─────────────────────
+  # path-traversal (above) flags READS of these paths but only for
+  # shell/file_read events. A file_write straight to /etc/passwd,
+  # /etc/shadow, or /etc/sudoers is a full system compromise and had no
+  # coverage at all — see PrismorSec/prismor#127.
+  - id: auth-file-write
+    severity: CRITICAL
+    category: privilege_escalation
+    title: Blocks direct writes to /etc/passwd, /etc/shadow, /etc/sudoers
+    event_types: [shell, file_write]
+    fields: [command, path]
+    patterns:
+      - '(^|\n)/etc/passwd(\s|$)'
+      - '(^|\n)/etc/shadow(\s|$)'
+      - '(^|\n)/etc/sudoers(\.d/[^\n]*)?(\s|$)'
+      - '>>?\s*/etc/(passwd|shadow|sudoers)\b'
+    action: block
+
   # ── HIGH: Persistence — cron jobs via filesystem ──────────────────
   # Paths anchored on `(^|\n)` because _resolve_path may prepend the
   # original path and append the resolved one on a new line.

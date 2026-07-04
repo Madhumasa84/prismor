@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Fixed (security)
+
+- **Direct writes to `/etc/passwd`, `/etc/shadow`, and `/etc/sudoers` are now blocked.** The `path-traversal` rule flagged reads of these paths but never `file_write`, and no other rule covered writes — a `Write`/`Edit`-style tool call (or any SDK adapter call) targeting them passed silently in enforce mode. New `auth-file-write` rule (CRITICAL/block) covers both the shell-redirect and direct-path-write forms. (#127)
+- **`PRISMOR_HOME` is now honored consistently across subsystems.** IAM, canary, and named-agent global config all hardcoded `Path.home()` regardless of `$PRISMOR_HOME`. More importantly, `store.py` had its own duplicate `_secrets_dir()` (missing the `$PRISMOR_HOME` fallback tier that cloak's `secrets_dir()` has — used by the session-store's own secret-scrubbing safety net) and duplicate `get_enrollment()` (no override at all, used by the dashboard) that disagreed with the versions used elsewhere in the CLI. All now resolve through a single `prismor_home()` helper. (#131)
+- **`uninstall-hooks --agent claude`/`all` now announces when it also removes cloaking hooks.** This was already happening silently (cloak hooks share `.claude/settings.json` with the runtime-monitor hooks and get cleaned up as a side effect) with no indication that secret protection had been disabled; it's now called out explicitly in the command output, `--help`, and the CLI reference. (#126)
+
+### Fixed
+
+- Dashboard "Findings" tab (`/api/findings`) always returned zero results — the query correlated an outer column inside a subquery's `OFFSET` clause, which SQLite rejects (`no such column`), and the exception was silently swallowed. Rewritten using a `ROW_NUMBER()` join instead of the unsupported correlated `OFFSET`. (#129)
+- Dashboard "Events" tab (`/api/events`) showed every event in a session as `verdict: "blocked"`/`severity: "critical"` if the session contained *any* finding, even fully-allowed actions — verdict/severity are now resolved per event instead of per session. (#130)
+- `prismor policy validate` crashed with an unhandled Python traceback on malformed YAML instead of reporting a clean validation error. (#128)
+- `docs/cli-reference.md` no longer lists `workspace show` / `exempt status` as subcommands — neither exists (`workspace` with no argument shows status; `exempt` only has `request`). (#132)
+
 ## [1.15.1] — 2026-07-04
 
 ### Fixed

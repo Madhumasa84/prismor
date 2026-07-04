@@ -32,7 +32,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_GLOBAL_AGENTS_PATH = Path.home() / ".prismor" / "agents.yaml"
+def _global_agents_path() -> Path:
+    """Global agents.yaml path, honoring $PRISMOR_HOME (see PrismorSec/prismor#131)."""
+    from prismor.runtime.store import prismor_home
+    return prismor_home() / "agents.yaml"
+
+
 _PROJECT_AGENTS_FILE = "agents.yaml"
 
 # Module-level seen-set: throttle record_seen() so we only update the YAML
@@ -69,11 +74,12 @@ def _mtime(path: Path) -> float:
 
 def load_agents_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Load agents config, project overrides global. (path+mtime)-memoized."""
+    global_path = _global_agents_path()
     project_path = (
         workspace / ".prismor" / _PROJECT_AGENTS_FILE if workspace else None
     )
     cache_key = (
-        str(_GLOBAL_AGENTS_PATH), _mtime(_GLOBAL_AGENTS_PATH),
+        str(global_path), _mtime(global_path),
         str(project_path) if project_path else "",
         _mtime(project_path) if project_path else -1.0,
     )
@@ -82,7 +88,7 @@ def load_agents_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
         return cached
 
     config: Dict[str, Any] = {}
-    global_cfg = _load_yaml(_GLOBAL_AGENTS_PATH)
+    global_cfg = _load_yaml(global_path)
     if global_cfg:
         config.update(global_cfg)
     if project_path is not None:
