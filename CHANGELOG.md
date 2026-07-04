@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [1.16.0] — 2026-07-04
+
+Batches five PRs of fixes found during an extended feature-by-feature security
+audit (framework adapters, exemption/policy-layer floor protections, the
+skill scanner, the learning engine, and the Codex integration), including two
+live security bypasses.
+
 ### Fixed (security)
 
 - **Codex hooks never dispatched at all unless `[features].hooks` was already manually enabled in `~/.codex/config.toml` — a complete, silent bypass.** `prismor install-hooks --agent codex` correctly wrote `.codex/hooks.json`, but Codex's own hook dispatcher requires this separate, undocumented opt-in (previously `codex_hooks`, deprecated in current stable) in the *user-level* config only — not even a project-scoped `.codex/config.toml`. Without it, `PreToolUse`/`PostToolUse`/etc. are silent no-ops: no error, no warning, every tool call passes straight through. Verified live against `codex-cli 0.142.5`: on a fresh install with the flag unset, a command matching the `lockfile-deletion` rule ran and deleted its target file. `install_hooks()` now sets/migrates this flag automatically whenever codex hooks are installed. (#149)
