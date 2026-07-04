@@ -11,7 +11,7 @@ This is the in-process **SDK adapter** surface from the
 ## Install
 
 ```bash
-pip install prismor-langchain      # + the Prismor runtime (immunity-agent)
+pip install "prismor[langchain]"      # Prismor runtime + adapter + langchain-core
 ```
 
 ## Use

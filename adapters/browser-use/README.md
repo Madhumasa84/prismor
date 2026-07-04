@@ -9,8 +9,7 @@ same observe/enforce model and per-user attribution as the other Prismor adapter
 ## Install
 
 ```bash
-pip install prismor-browser-use
-pip install "prismor-browser-use[browser]"  # + browser-use itself
+pip install "prismor[browser-use]"   # Prismor runtime + adapter + browser-use
 ```
 
 ## Usage

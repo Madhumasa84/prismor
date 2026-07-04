@@ -12,7 +12,7 @@ on your existing agent or controller object, with no changes to your tool logic.
 | LangChain / LangGraph | Python | `pip install "prismor[langchain]"` | `guard_tools([...])` | `use_subject("user:alice")` |
 | CrewAI | Python | `pip install "prismor[crewai]"` | `guard_tools([...])` | `use_subject("user:alice")` |
 | browser-use | Python | `pip install "prismor[browser-use]"` | `guard_controller(controller)` | `use_subject("user:alice")` |
-| Vercel AI SDK | TypeScript | `npm install prismor` | `prismorTools(tools, opts)` | `{ subject: "user:alice" }` |
+| Vercel AI SDK | TypeScript | `npm install prismor-warden` | `prismorTools(tools, opts)` | `{ subject: "user:alice" }` |
 
 > The Python adapters ship inside the `prismor` package (needs `>= 1.14.2`) —
 > the extra just pulls the framework itself. `prismor[frameworks]` installs all
@@ -80,7 +80,7 @@ Validated live on an Ubuntu EC2 instance with real OpenAI function calls:
 
 | Language | Adapter size | Dependencies |
 |---|---|---|
-| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor` |
+| TypeScript (Vercel AI SDK) | ~80 lines | `npm install prismor-warden` |
 | Node.js (raw) | ~25 lines | built-in `fetch` |
 | Ruby | ~20 lines | stdlib `Net::HTTP` |
 | Java 21 | ~25 lines | stdlib `java.net.http` |

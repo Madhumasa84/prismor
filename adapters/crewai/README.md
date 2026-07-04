@@ -8,7 +8,7 @@ other adapters. Registry entry: `id: crewai`.
 ## Install
 
 ```bash
-pip install prismor-crewai      # + the Prismor runtime (immunity-agent)
+pip install "prismor[crewai]"      # Prismor runtime + adapter + crewai
 ```
 
 ## Use

@@ -2,7 +2,7 @@
  * Prismor adapter for the Vercel AI SDK.
  *
  * Wraps tool `execute` functions to call the Prismor eval-server
- * (immunity eval-server) before the tool body runs. A denied call
+ * (prismor eval-server) before the tool body runs. A denied call
  * throws PrismorBlocked (enforce mode) or logs and proceeds (observe mode).
  *
  * Quick start:
