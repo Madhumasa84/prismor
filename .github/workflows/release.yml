@@ -26,6 +26,20 @@ jobs:
           pip install hatchling build
           python -m build --outdir dist
 
+      - name: Sync immunity-agent shim version with prismor
+        # The shim's version/dependency floor are hand-maintained in
+        # packaging/immunity-agent-shim/pyproject.toml — a manual step that
+        # was previously missed on a release, causing "400 File already
+        # exists" when PyPI rejected re-uploading the prior version. Derive
+        # it from prismor/runtime/__init__.py instead of trusting it stayed
+        # in sync.
+        run: |
+          VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' prismor/runtime/__init__.py)
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" packaging/immunity-agent-shim/pyproject.toml
+          sed -i "s/prismor>=[0-9][0-9.]*/prismor>=$VERSION/" packaging/immunity-agent-shim/pyproject.toml
+          echo "Synced immunity-agent shim to version $VERSION"
+          grep -E "^version|prismor>=" packaging/immunity-agent-shim/pyproject.toml
+
       - name: Build immunity-agent redirect package
         run: python -m build packaging/immunity-agent-shim --outdir dist-shim
 
@@ -41,8 +55,10 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
 
       - name: Publish immunity-agent redirect to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-shim
+          skip-existing: true

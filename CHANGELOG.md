@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [1.15.1] — 2026-07-04
+
+### Fixed
+
+- `release.yml` now derives the `immunity-agent` redirect shim's version and `prismor>=` dependency floor from `prismor/runtime/__init__.py` at release time instead of relying on a hand-maintained copy in `packaging/immunity-agent-shim/pyproject.toml`. The `1.15.0` release published `prismor` correctly but the shim publish step failed (`400 File already exists`) because its hardcoded version hadn't been bumped past `1.14.2`. Both PyPI publish steps also now pass `skip-existing: true` so a re-run after a partial failure doesn't hard-fail on the artifact(s) that already published successfully.
+
 ## [1.15.0] — 2026-07-04
 
 First release published under the **`prismor.runtime`** namespace — the internal `warden` package name is fully retired. Also closes several cloak and policy gaps that shipped in source after `1.14.2` was cut but were never released.
