@@ -1,4 +1,4 @@
-# prismor
+# prismor-warden
 
 Prismor adapter for the [Vercel AI SDK](https://sdk.vercel.ai).
 
@@ -8,16 +8,16 @@ Next.js, Remix, Node.js, edge runtimes.
 
 ## Prerequisites
 
-Start the eval-server (Python, from the `immunity-agent` repo):
+Start the eval-server (Python — `pip install prismor`):
 
 ```bash
-immunity eval-server --port 7071 --workspace /path/to/project
+prismor eval-server --port 7071 --workspace /path/to/project
 ```
 
 ## Install
 
 ```bash
-npm install prismor
+npm install prismor-warden
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ npm install prismor
 import { generateText, tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { prismorTools } from "prismor";
+import { prismorTools } from "prismor-warden";
 
 const run_shell = tool({
   description: "Run a shell command",
@@ -49,7 +49,7 @@ const result = await generateText({
 A blocked call throws `PrismorBlocked`. In a Next.js API route:
 
 ```typescript
-import { PrismorBlocked } from "prismor";
+import { PrismorBlocked } from "prismor-warden";
 
 try {
   const result = await generateText({ model, tools, prompt });

@@ -14,7 +14,7 @@ wrapper around tool execution that calls the same
 ## Install
 
 ```bash
-pip install prismor-openai      # pulls in the Prismor runtime (immunity-agent)
+pip install "prismor[openai-agents]"   # Prismor runtime + adapter + the Agents SDK
 pip install "prismor-openai[sdk]"   # also installs openai-agents
 ```
 
