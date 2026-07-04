@@ -471,7 +471,10 @@ rules:
     event_types: [shell]
     fields: [command]
     patterns:
-      - '\b(--host|--bind|--listen|-[a-zA-Z]*H)\s+0\.0\.0\.0\b'
+      # \b before a `--flag` never matches — `-` isn't a word character, so
+      # there's no boundary between it and the preceding whitespace. Anchor on
+      # whitespace/start-of-string instead. See PrismorSec/prismor#142.
+      - '(?:^|\s)(--host|--bind|--listen|-[a-zA-Z]*H)\s+0\.0\.0\.0\b'
       - '\b0\.0\.0\.0:\d+'
       - "LISTEN_ADDR.*0\\.0\\.0\\.0"
       - '\bBIND_ADDRESS.*0\.0\.0\.0'
@@ -542,7 +545,12 @@ rules:
     fields: [combined_text]
     patterns:
       - '\b(curl|wget)\b[^|;\n]*\|\s*(bash|sh|python)\b'
-      - '\$\(.*\)|`[^`]+`'
+      # Real command substitution only — a bare `` `[^`]+` `` alternative used
+      # to also match here, which fires on ANY markdown inline-code span
+      # (near-universal in a Skill's prose/docs body) now that skill_manifest
+      # events are actually synthesized from real SKILL.md files instead of
+      # only JSON configs. See PrismorSec/prismor#144.
+      - '\$\([^)\n]*\)'
       - '\bsubprocess\b|\bos\.system\b|\bchild_process\b'
       - '\bexec\s*\(|\beval\s*\('
     action: block
