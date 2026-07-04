@@ -1,16 +1,26 @@
 ## [Unreleased]
 
-### Added
+## [1.15.0] — 2026-07-04
 
+First release published under the **`prismor.runtime`** namespace — the internal `warden` package name is fully retired. Also closes several cloak and policy gaps that shipped in source after `1.14.2` was cut but were never released.
+
+### Changed
+
+- **Renamed the runtime package to `prismor.runtime`** (from `warden`) — the `prismor`/`immunity` (deprecated alias) console scripts now point at `prismor.runtime.immunity_cli:main`. No command-line behavior changes.
 - **`prismor.*` namespace imports for framework adapters** — the Python adapters are now importable as `from prismor.openai import guard_agent`, `from prismor.langchain import guard_tool`, `prismor.crewai`, and `prismor.browser_use` (PEP 420 namespace packages; adapter distributions bumped to 0.2.0). The old flat `prismor_*` module names keep working as aliases of the same module objects.
+- Dashboard: new agent control tab, enterprise upsell panel, refreshed site fonts.
+- Telemetry: guard-eval latency and matched-pattern fields, tamper-evident hash chain, new `prismor doctor` command for a one-shot health check (hooks, policy, enrollment, remote policy signature, telemetry sink/spool, integrity chain).
+- CI now gates cloaking + policy tests as a dedicated security-regression suite on every PR.
 
-### Fixed
+### Fixed (security)
 
-- Adapter distributions now depend on `prismor>=1.13.0` instead of the deprecated `immunity-agent` package name.
-- The wheel now bundles the framework docs (`frameworks-*.md`), `sdk-integration.md`, and `connecting-to-the-platform.md` under `prismor/runtime/data/docs/`, so links from the installed skill's `SKILL.md` resolve.
-- **`destructive-command` policy now catches world-writable chmod/chown in the live YAML-based `PolicyEngine`**, not just the legacy `evaluate_event()` path — `chmod 666`, `chmod 0777`/`1777`, `chmod -R 777 <any dir>`, and symbolic grants (`a+rwx`, `o+w`, `ugo+rwx`) are now blocked in enforce mode across `prismor check`, hook dispatch, and every SDK adapter, matching what `ae7e22e` already fixed in the legacy path. (#121)
+- **Cloak now scrubs secrets from all Bash output, not just placeholder substitutions.** `decloak.sh` wraps every Bash command's combined stdout/stderr once any secret is registered, closing the leak path where a value is read straight out of a file (`cat .env`, `grep KEY config`) without ever passing through an `@@SECRET:name@@` placeholder. New `read-guard.sh` hook denies a `Read` of any file that contains a registered secret.
+- Cloak blocks `@file` mentions of secret-bearing files (Claude Code's `@`-mention shorthand), closing another path a raw secret could reach the model's context.
+- **World-writable `chmod`/`chown` bypass closed in the live policy engine, not just the legacy pattern set** — `chmod 666`, `chmod 0777`/`1777`, `chmod -R 777 <any dir>`, and symbolic grants (`a+rwx`, `o+w`, `ugo+rwx`) are now blocked in enforce mode across `prismor check`, real hook dispatch, and every SDK adapter. (#121)
 - CLI `--help`/usage output and `--version` no longer say `immunity` / `immunity-agent` — both now report `prismor`. (#124)
 - `scripts/install.sh` now verifies the `prismor` resolved on `$PATH` actually matches the version it just installed, and fails loudly instead of reporting success when a stale/conflicting prior install (e.g. an old `easy_install` script or leftover `immunity-agent` venv) shadows it. (#123)
+- Adapter distributions now depend on `prismor>=1.13.0` instead of the deprecated `immunity-agent` package name.
+- The wheel now bundles the framework docs (`frameworks-*.md`), `sdk-integration.md`, and `connecting-to-the-platform.md` under `prismor/runtime/data/docs/`, so links from the installed skill's `SKILL.md` resolve.
 - Post-install banner and `scripts/init.sh` no longer reference the old `immunity-agent` name/repo; `package.json` metadata updated to `prismor`.
 
 ## [1.13.0] — 2026-06-29
