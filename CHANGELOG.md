@@ -10,6 +10,7 @@
 
 - Dashboard "Findings" tab (`/api/findings`) always returned zero results — the query correlated an outer column inside a subquery's `OFFSET` clause, which SQLite rejects (`no such column`), and the exception was silently swallowed. Rewritten using a `ROW_NUMBER()` join instead of the unsupported correlated `OFFSET`. (#129)
 - Dashboard "Events" tab (`/api/events`) showed every event in a session as `verdict: "blocked"`/`severity: "critical"` if the session contained *any* finding, even fully-allowed actions — verdict/severity are now resolved per event instead of per session. (#130)
+- `write_supply_chain_event()` never set `event_index` on the findings it recorded, so a blocked `supplychain npm install`/`pip install`/etc. showed as `verdict: "allowed"` in the dashboard's Events tab (its finding could never resolve back to its own event). (#134)
 - `prismor policy validate` crashed with an unhandled Python traceback on malformed YAML instead of reporting a clean validation error. (#128)
 - `docs/cli-reference.md` no longer lists `workspace show` / `exempt status` as subcommands — neither exists (`workspace` with no argument shows status; `exempt` only has `request`). (#132)
 

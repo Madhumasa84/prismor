@@ -20,7 +20,11 @@ from prismor.runtime.store import (
     get_events_page,
     get_findings_page,
     save_session_snapshot,
+    write_supply_chain_event,
 )
+from supplychain.ecosystems.detector import PackageSpec
+from supplychain.ecosystems.metadata import PackageMetadata
+from supplychain.scoring.engine import PackageVerdict, Signal
 
 
 class TestDashboardQueries(unittest.TestCase):
@@ -84,6 +88,53 @@ class TestDashboardQueries(unittest.TestCase):
         actions = [item["action"] for item in blocked_only["items"]]
         self.assertIn("shell: rm -rf /", actions)
         self.assertNotIn("shell: ls -la", actions)
+
+
+class TestSupplyChainEventIndex(unittest.TestCase):
+    """write_supply_chain_event() inserted findings without event_index, so
+    the matching event in get_events_page() could never resolve to a
+    finding — those events fell back to "allowed" even when a package was
+    actually blocked. Discovered while verifying #130's fix.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.workspace = Path(self._tmp.name)
+        patcher = patch("prismor.runtime.store.list_registered_workspaces", return_value=[self.workspace])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        spec = PackageSpec(raw="lodash@4.17.19", name="lodash", source="registry", version="4.17.19")
+        meta = PackageMetadata(
+            name="lodash", ecosystem="npm", version="4.17.19", age_days=5185,
+            maintainer_count=1, has_install_script=False, source="registry",
+        )
+        verdict = PackageVerdict(
+            spec=spec, meta=meta, score=75, verdict="block",
+            signals=[Signal(id="ioc_ghsa", points=30, description="Command Injection in lodash")],
+        )
+        write_supply_chain_event(
+            workspace=self.workspace,
+            session_id="supply-chain-test",
+            ts="2026-01-01T00:00:00Z",
+            ecosystem="npm",
+            install_cmd="supplychain npm install lodash@4.17.19",
+            verdicts=[verdict],
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_blocked_package_event_shows_as_blocked(self):
+        data = get_events_page()
+        blocked = [i for i in data["items"] if "lodash" in i["action"]]
+        self.assertEqual(len(blocked), 1)
+        self.assertEqual(blocked[0]["verdict"], "blocked")
+
+    def test_finding_is_returned_and_linked_to_its_event(self):
+        data = get_findings_page()
+        self.assertEqual(data["total"], 1)
+        self.assertIn("lodash", data["items"][0]["trigger"]["detail"])
 
 
 if __name__ == "__main__":

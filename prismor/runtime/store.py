@@ -1435,7 +1435,7 @@ def write_supply_chain_event(
                 ),
             )
 
-            for v in verdicts:
+            for event_index, v in enumerate(verdicts):
                 ioc_id = next(
                     (s.id[len("ioc_"):] for s in v.signals if s.id.startswith("ioc_")),
                     None,
@@ -1494,12 +1494,13 @@ def write_supply_chain_event(
                     cursor.execute(
                         """
                         INSERT INTO findings (
-                            finding_id, session_id, severity, category, title, evidence
-                        ) VALUES (?, ?, ?, 'supply_chain_block', ?, ?)
+                            finding_id, session_id, event_index, severity, category, title, evidence
+                        ) VALUES (?, ?, ?, ?, 'supply_chain_block', ?, ?)
                         """,
                         (
                             str(_uuid.uuid4()),
                             session_id,
+                            event_index,
                             severity,
                             title,
                             " | ".join(evidence_parts),
