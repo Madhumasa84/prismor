@@ -2,6 +2,9 @@
 
 ### Fixed (security)
 
+- **browser-use adapter: real network/file actions were misclassified and their URLs/paths silently dropped.** `_extract_event_fields()` only handled pydantic-model-shaped or plain-object params, not the plain `dict` the current browser-use `Registry.execute_action` actually passes — every extracted field fell back to the literal string `"{}"`. The hardcoded action names were also stale (`go_to_url`→now `navigate`, `search_google`→`search`, `save_pdf`→`save_as_pdf`). Together this meant `suspicious-network`/`secret-in-url-params` never saw real URLs against current browser-use, despite docs claiming this was "live-validated." Existing tests mocked params with `MagicMock`, which auto-satisfies the pydantic-shaped branch and never exercised the real path. (#135)
+- **vercel-ai adapter: fail-open didn't cover the eval-server-unreachable case.** The documented fail-open guarantee only handled a non-2xx HTTP response; an actual `fetch()` failure (connection refused — i.e. eval-server not started, the literal scenario named in the docs) threw uncaught and crashed the calling code instead of failing open. (#136)
+
 - **Direct writes to `/etc/passwd`, `/etc/shadow`, and `/etc/sudoers` are now blocked.** The `path-traversal` rule flagged reads of these paths but never `file_write`, and no other rule covered writes — a `Write`/`Edit`-style tool call (or any SDK adapter call) targeting them passed silently in enforce mode. New `auth-file-write` rule (CRITICAL/block) covers both the shell-redirect and direct-path-write forms. (#127)
 - **`PRISMOR_HOME` is now honored consistently across subsystems.** IAM, canary, and named-agent global config all hardcoded `Path.home()` regardless of `$PRISMOR_HOME`. More importantly, `store.py` had its own duplicate `_secrets_dir()` (missing the `$PRISMOR_HOME` fallback tier that cloak's `secrets_dir()` has — used by the session-store's own secret-scrubbing safety net) and duplicate `get_enrollment()` (no override at all, used by the dashboard) that disagreed with the versions used elsewhere in the CLI. All now resolve through a single `prismor_home()` helper. (#131)
 - **`uninstall-hooks --agent claude`/`all` now announces when it also removes cloaking hooks.** This was already happening silently (cloak hooks share `.claude/settings.json` with the runtime-monitor hooks and get cleaned up as a side effect) with no indication that secret protection had been disabled; it's now called out explicitly in the command output, `--help`, and the CLI reference. (#126)
@@ -13,6 +16,12 @@
 - `write_supply_chain_event()` never set `event_index` on the findings it recorded, so a blocked `supplychain npm install`/`pip install`/etc. showed as `verdict: "allowed"` in the dashboard's Events tab (its finding could never resolve back to its own event). (#134)
 - `prismor policy validate` crashed with an unhandled Python traceback on malformed YAML instead of reporting a clean validation error. (#128)
 - `docs/cli-reference.md` no longer lists `workspace show` / `exempt status` as subcommands — neither exists (`workspace` with no argument shows status; `exempt` only has `request`). (#132)
+- `docs/frameworks-crewai.md`'s examples imported `from crewai_tools import tool` — a separate package not installed by `pip install "prismor[crewai]"` and not mentioned anywhere in the doc. Changed to `from crewai.tools import tool`, which ships built-in with current `crewai` and requires no extra install. (#137)
+
+### Added
+
+- Regression tests for all four framework adapters now exercise their real framework's actual objects (`agents.Agent`/`FunctionTool`, `langchain_core.tools.Tool`, `crewai.tools.tool`/`BaseTool`, `browser_use.Controller`) rather than bare callables or mocks — gated with `importorskip`/`skipif` so they run when the framework is installed and skip cleanly otherwise. `langchain` and `crewai` had no adapter tests at all before this; `openai-agents` and `browser-use` only tested the framework-agnostic fallback path. This is exactly the gap that let #135 ship undetected. (#138)
+- `adapters/vercel-ai` gained its first test suite (`npm test`, Node's built-in test runner, no live eval-server needed — global `fetch` is stubbed), covering the fail-open fix above.
 
 ## [1.15.1] — 2026-07-04
 

@@ -18,7 +18,7 @@ pip install "prismor[crewai]"
 
 ```python
 from crewai import Agent, Task, Crew
-from crewai_tools import tool
+from crewai.tools import tool
 from prismor.crewai import guard_tools
 
 @tool("Shell runner")
@@ -88,7 +88,7 @@ CrewAI tools come in two shapes; the adapter handles both automatically:
 **Structured tools** (decorated with `@tool`):
 
 ```python
-from crewai_tools import tool
+from crewai.tools import tool
 
 @tool("Shell runner")
 def run_shell(command: str) -> str: ...

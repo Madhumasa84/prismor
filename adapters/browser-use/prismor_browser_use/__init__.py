@@ -44,17 +44,23 @@ from prismor.runtime.runtime import Decision, evaluate_tool_call
 __all__ = ["guard_controller", "use_subject", "PrismorBlocked"]
 
 # Actions whose primary risk is a network destination — map to event_type="network"
+# Includes both older ("go_to_url", "search_google", "save_pdf") and current
+# ("navigate", "search", "save_as_pdf") browser-use action names — the
+# registered action set has been renamed across releases (confirmed against
+# browser-use 0.13.3), and the old names may still be reachable via user code
+# targeting an older pinned version. See PrismorSec/prismor#135.
 _NETWORK_ACTIONS = {
-    "go_to_url",
-    "search_google",
+    "go_to_url", "navigate",
+    "search_google", "search",
     "open_tab",
 }
 
 # Actions whose primary risk is a file path — map to event_type="file_write"
 _FILE_ACTIONS = {
     "upload_file",
-    "save_pdf",
+    "save_pdf", "save_as_pdf",
     "download_file",
+    "write_file", "replace_file",
 }
 
 
@@ -67,7 +73,13 @@ class PrismorBlocked(Exception):
 def _extract_event_fields(action_name: str, params: Any) -> tuple[str, str, str]:
     """Return (event_type, field_name, field_value) for a browser-use action."""
     dump: dict = {}
-    if hasattr(params, "model_dump"):
+    if isinstance(params, dict):
+        # The current Registry.execute_action signature (browser-use 0.13.x)
+        # passes params as a plain dict, not a pydantic model — a dict has
+        # neither .model_dump() nor __dict__, so without this branch every
+        # field silently fell back to str({}) = "{}". See PrismorSec/prismor#135.
+        dump = params
+    elif hasattr(params, "model_dump"):
         dump = params.model_dump()
     elif hasattr(params, "__dict__"):
         dump = vars(params)

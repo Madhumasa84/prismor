@@ -132,3 +132,67 @@ def test_per_user_iam_scoping(tmp_path, monkeypatch):
     alice = prismor_guard(tool, workspace=tmp_path, mode="enforce", subject="user:alice")
     assert alice(command="echo hi") == "ran: echo hi"
     assert calls["ran"] == 1
+
+
+try:
+    import agents as _agents_sdk  # noqa: F401
+    _HAS_AGENTS_SDK = True
+except ImportError:
+    _HAS_AGENTS_SDK = False
+
+
+@pytest.mark.skipif(not _HAS_AGENTS_SDK, reason="openai-agents not installed")
+class TestRealAgentSDK:
+    """guard_agent's actual job is wrapping a real Agent's FunctionTool
+    (on_invoke_tool) — the tests above only exercise prismor_guard's plain-
+    callable fallback path, which is a different code path entirely. See
+    PrismorSec/prismor#138."""
+
+    def _make_ctx(self, tool_name="run_shell"):
+        from agents.tool_context import ToolContext
+        return ToolContext(context=None, tool_name=tool_name, tool_call_id="call_1", tool_arguments="{}")
+
+    def test_guard_agent_wraps_real_function_tool(self, tmp_path):
+        import asyncio
+        import json
+        from agents import Agent, function_tool
+        from prismor.openai import guard_agent
+
+        @function_tool
+        def run_shell(command: str) -> str:
+            return f"ran: {command}"
+
+        agent = Agent(name="ops", tools=[run_shell])
+        guard_agent(agent, workspace=tmp_path, raise_on_block=True)
+        tool = agent.tools[0]
+        assert getattr(tool, "__prismor_guarded__", False)
+
+        result = asyncio.run(tool.on_invoke_tool(self._make_ctx(), json.dumps({"command": "echo hi"})))
+        assert result == "ran: echo hi"
+
+        with pytest.raises(PrismorBlocked):
+            asyncio.run(tool.on_invoke_tool(self._make_ctx(), json.dumps({"command": "rm -rf /"})))
+
+    def test_guard_agent_per_user_iam(self, tmp_path, monkeypatch):
+        import asyncio
+        import json
+        from agents import Agent, function_tool
+        from prismor.openai import guard_agent, use_subject
+
+        monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
+        _write_iam(tmp_path)
+
+        @function_tool
+        def run_shell(command: str) -> str:
+            return f"ran: {command}"
+
+        agent = Agent(name="ops", tools=[run_shell])
+        guard_agent(agent, workspace=tmp_path, raise_on_block=True)
+        tool = agent.tools[0]
+
+        with use_subject("user:alice"):
+            result = asyncio.run(tool.on_invoke_tool(self._make_ctx(), json.dumps({"command": "echo hi"})))
+        assert result == "ran: echo hi"
+
+        with use_subject("user:bob"), pytest.raises(PrismorBlocked):
+            asyncio.run(tool.on_invoke_tool(self._make_ctx(), json.dumps({"command": "echo hi"})))

@@ -52,36 +52,50 @@ export class PrismorBlocked extends Error {
   }
 }
 
+const FAIL_OPEN_DECISION: PrismorDecision = {
+  allow: true, reason: null, findings: [], blocking: null, subject: null,
+};
+
 async function evaluate(
   toolName: string,
   args: Record<string, unknown>,
   opts: Required<PrismorOptions>,
   sessionId: string,
 ): Promise<PrismorDecision> {
-  const res = await fetch(`${opts.evalUrl}/v1/evaluate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(opts.subject ? { "X-Prismor-Subject": opts.subject } : {}),
-      ...(opts.agentName ? { "X-Prismor-Agent-Name": opts.agentName } : {}),
-    },
-    body: JSON.stringify({
-      tool_name: toolName,
-      arguments: args,
-      event_type: opts.eventType,
-      agent: opts.agent,
-      agent_name: opts.agentName,
-      mode: opts.mode,
-      session_id: sessionId,
-      subject: opts.subject,
-      workspace: opts.workspace,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${opts.evalUrl}/v1/evaluate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(opts.subject ? { "X-Prismor-Subject": opts.subject } : {}),
+        ...(opts.agentName ? { "X-Prismor-Agent-Name": opts.agentName } : {}),
+      },
+      body: JSON.stringify({
+        tool_name: toolName,
+        arguments: args,
+        event_type: opts.eventType,
+        agent: opts.agent,
+        agent_name: opts.agentName,
+        mode: opts.mode,
+        session_id: sessionId,
+        subject: opts.subject,
+        workspace: opts.workspace,
+      }),
+    });
+  } catch (err) {
+    // eval-server unreachable (not started, crashed, network error) — this is
+    // the documented fail-open case. `fetch` throws for connection failures
+    // rather than resolving with a bad status, so it needs its own catch
+    // alongside the !res.ok branch below. See PrismorSec/prismor#136.
+    console.warn(`[prismor] eval-server unreachable (${(err as Error).message}) — failing open`);
+    return FAIL_OPEN_DECISION;
+  }
 
   if (!res.ok) {
     // Server error — fail open (don't break the agent on infrastructure issues)
     console.warn(`[prismor] eval-server returned ${res.status} — failing open`);
-    return { allow: true, reason: null, findings: [], blocking: null, subject: null };
+    return FAIL_OPEN_DECISION;
   }
   return res.json() as Promise<PrismorDecision>;
 }
