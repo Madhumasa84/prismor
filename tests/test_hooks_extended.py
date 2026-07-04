@@ -169,8 +169,14 @@ class TestInstallUninstallRoundtrip(unittest.TestCase):
         self.workspace = Path(self.tmpdir) / "project"
         self.workspace.mkdir()
         self.repo_root = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # install_hooks(agent="codex") also touches $CODEX_HOME/config.toml
+        # (see PrismorSec/prismor#149) -- redirect it into the tmpdir so this
+        # test never writes to the real machine's ~/.codex/config.toml.
+        self._codex_home_patch = patch.dict(os.environ, {"CODEX_HOME": str(Path(self.tmpdir) / "codex-home")})
+        self._codex_home_patch.start()
 
     def tearDown(self):
+        self._codex_home_patch.stop()
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -224,6 +230,47 @@ class TestInstallUninstallRoundtrip(unittest.TestCase):
 
     def test_codex_roundtrip(self):
         self._roundtrip("codex")
+
+    def test_codex_install_enables_hooks_feature_flag_on_fresh_config(self):
+        # Regression for PrismorSec/prismor#149: without [features].hooks set
+        # in Codex's OWN user-level config.toml, Codex's hook dispatcher is a
+        # silent no-op -- verified live against codex-cli 0.142.5, a blocked
+        # command actually ran and deleted its target file. install_hooks()
+        # must set this up itself rather than assume the user already has.
+        install_hooks(
+            repo_root=self.repo_root, workspace=self.workspace,
+            agent="codex", scope="project", mode="enforce",
+        )
+        codex_home = Path(os.environ["CODEX_HOME"])
+        config_toml = (codex_home / "config.toml").read_text()
+        self.assertIn("hooks = true", config_toml)
+
+    def test_codex_install_migrates_deprecated_codex_hooks_key(self):
+        codex_home = Path(os.environ["CODEX_HOME"])
+        codex_home.mkdir(parents=True)
+        (codex_home / "config.toml").write_text(
+            'model = "gpt-5.4"\n\n[features]\ncodex_hooks = true\njs_repl = false\n'
+        )
+        install_hooks(
+            repo_root=self.repo_root, workspace=self.workspace,
+            agent="codex", scope="project", mode="enforce",
+        )
+        config_toml = (codex_home / "config.toml").read_text()
+        self.assertIn("hooks = true", config_toml)
+        self.assertNotIn("codex_hooks", config_toml)
+        self.assertIn("js_repl = false", config_toml)  # unrelated settings preserved
+        self.assertIn('model = "gpt-5.4"', config_toml)
+
+    def test_codex_install_leaves_already_correct_config_untouched(self):
+        codex_home = Path(os.environ["CODEX_HOME"])
+        codex_home.mkdir(parents=True)
+        original = "[features]\nhooks = true\njs_repl = false\n"
+        (codex_home / "config.toml").write_text(original)
+        install_hooks(
+            repo_root=self.repo_root, workspace=self.workspace,
+            agent="codex", scope="project", mode="enforce",
+        )
+        self.assertEqual((codex_home / "config.toml").read_text(), original)
 
     def test_uninstall_nonexistent_config(self):
         results = uninstall_hooks(

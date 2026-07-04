@@ -60,7 +60,60 @@ def install_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str, m
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         results.append({"agent": current_agent, "configPath": str(config_path)})
+        if current_agent == "codex":
+            # Codex only reads [features].hooks from the USER-level config.toml
+            # -- verified live: with a project-scoped .codex/config.toml setting
+            # hooks=true but the user config unavailable, hooks still never
+            # dispatched. So this always targets $CODEX_HOME (Codex's own home-dir
+            # override, default ~/.codex) even when scope == "project" (hooks.json
+            # itself is correctly scoped).
+            codex_home = Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME") else Path.home() / ".codex"
+            _ensure_codex_hooks_feature_enabled(codex_home / "config.toml")
     return results
+
+
+def _ensure_codex_hooks_feature_enabled(config_toml_path: Path) -> None:
+    """Ensure Codex's own ``[features].hooks`` flag is set in the USER-level
+    config.toml (``config_toml_path`` must always be ``~/.codex/config.toml``
+    — Codex does not read this flag from a project-scoped config.toml, even
+    when hooks.json itself is correctly project-scoped; verified live).
+
+    Without it, Codex's hook dispatcher never runs at all — PreToolUse/
+    PostToolUse/etc. are silently no-ops and every tool call passes straight
+    through, with no error and no indication hooks aren't active. This is
+    a *complete* silent bypass, verified live against codex-cli 0.142.5: a
+    destructive command that should have been blocked ran and deleted the
+    target file when this flag was unset. See PrismorSec/prismor#149.
+
+    Written as a targeted text patch rather than a full TOML parse+rewrite
+    so it never reformats or drops comments/sections in a config.toml that
+    may carry substantial unrelated user configuration (plugins, MCP
+    servers, project trust state, ...).
+    """
+    import re
+
+    if not config_toml_path.exists():
+        config_toml_path.parent.mkdir(parents=True, exist_ok=True)
+        config_toml_path.write_text("[features]\nhooks = true\n", encoding="utf-8")
+        return
+
+    text = config_toml_path.read_text(encoding="utf-8")
+    if re.search(r"^\s*hooks\s*=\s*true\s*$", text, re.MULTILINE):
+        return  # Already using the modern key.
+
+    if re.search(r"^\s*codex_hooks\s*=\s*true\s*$", text, re.MULTILINE):
+        # Migrate the deprecated key name in place.
+        text = re.sub(
+            r"^(\s*)codex_hooks(\s*=\s*true\s*)$", r"\1hooks\2", text, flags=re.MULTILINE
+        )
+    elif re.search(r"^\[features\]\s*$", text, re.MULTILINE):
+        text = re.sub(r"^\[features\]\s*$", "[features]\nhooks = true", text, count=1, flags=re.MULTILINE)
+    else:
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n[features]\nhooks = true\n"
+
+    config_toml_path.write_text(text, encoding="utf-8")
 
 
 def uninstall_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str) -> List[Dict[str, Any]]:
