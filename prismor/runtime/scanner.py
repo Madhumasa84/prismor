@@ -202,7 +202,25 @@ def _claude_configs(workspace: Path) -> List[Path]:
         # Per-project MCP config (Claude Code supports a dedicated file)
         workspace / ".mcp.json",
     ]
+    candidates.extend(_claude_skill_files(workspace))
     return [p for p in _dedupe(candidates) if p.exists()]
+
+
+def _claude_skill_files(workspace: Path) -> List[Path]:
+    """Return installed Claude Code Skill manifests (user + project-level).
+
+    Skills (.claude/skills/<name>/SKILL.md) are a distinct mechanism from MCP
+    servers and were not previously discovered at all — see
+    PrismorSec/prismor#144. This is the actual "community skill contains a
+    malicious pattern" attack surface the skill-exfil-url/skill-encoded-payload
+    rules exist for.
+    """
+    home = Path.home()
+    found: List[Path] = []
+    for root in (home / ".claude" / "skills", workspace / ".claude" / "skills"):
+        if root.is_dir():
+            found.extend(sorted(root.glob("*/SKILL.md")))
+    return found
 
 
 def _cursor_configs(workspace: Path) -> List[Path]:
@@ -339,29 +357,70 @@ def _extract_mcp_servers(data: Dict[str, Any], agent: str) -> List[Dict[str, Any
     return servers
 
 
-def parse_config(config_path: Path) -> List[Dict[str, Any]]:
-    """Parse a single config file and return extracted skill/server entries."""
-    try:
-        text = config_path.read_text(encoding="utf-8")
-        if config_path.suffix == ".toml":
-            data = tomllib.loads(text)
-        else:
-            data = json.loads(text)
-    except (json.JSONDecodeError, tomllib.TOMLDecodeError, OSError):
-        return []
+def parse_config(config_path: Path, agent: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Parse a single config file and return extracted skill/server entries.
 
-    agent = "unknown"
-    path_str = str(config_path)
-    for a in _AGENT_DISCOVERERS:
-        if a in path_str.lower() or (a == "claude" and ".claude" in path_str):
-            agent = a
-            break
+    ``agent`` should be passed by callers that already know it (e.g.
+    discover_configs() knows which discoverer found this path) rather than
+    left to be re-guessed here. The guess is a fallback for callers with no
+    agent context: it substring-matches agent names anywhere in the full
+    path, in a fixed order, so a path that merely *contains* another agent's
+    name (a username, a project folder) earlier in that order was silently
+    mislabeled even when the real agent was already known — see
+    PrismorSec/prismor#143.
+    """
+    if agent is None:
+        agent = "unknown"
+        path_str = str(config_path)
+        for a in _AGENT_DISCOVERERS:
+            if a in path_str.lower() or (a == "claude" and ".claude" in path_str):
+                agent = a
+                break
 
-    entries = _extract_mcp_servers(data, agent)
+    if config_path.name == "SKILL.md":
+        try:
+            text = config_path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        entries = [_extract_skill_manifest(text, config_path)]
+    else:
+        try:
+            text = config_path.read_text(encoding="utf-8")
+            if config_path.suffix == ".toml":
+                data = tomllib.loads(text)
+            else:
+                data = json.loads(text)
+        except (json.JSONDecodeError, tomllib.TOMLDecodeError, OSError):
+            return []
+        entries = _extract_mcp_servers(data, agent)
+
     for entry in entries:
         entry["source"] = str(config_path)
         entry["agent"] = agent
     return entries
+
+
+def _extract_skill_manifest(text: str, path: Path) -> Dict[str, Any]:
+    """Turn a SKILL.md's frontmatter + body into a scannable entry.
+
+    Frontmatter (---\\nname: ...\\n---) is parsed for a display name; the
+    entire file (frontmatter + body) is kept as `raw` so skill-exfil-url /
+    skill-encoded-payload / prompt-injection patterns can match anywhere in
+    the instructions, not just in whatever fields we happen to enumerate.
+    """
+    name = path.parent.name  # directory name, e.g. .claude/skills/<name>/SKILL.md
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            frontmatter_text = text[3:end]
+            try:
+                import yaml
+                frontmatter = yaml.safe_load(frontmatter_text)
+                if isinstance(frontmatter, dict) and frontmatter.get("name"):
+                    name = str(frontmatter["name"])
+            except Exception:
+                pass
+    return {"name": name, "config": {}, "raw": text, "kind": "skill"}
 
 
 # ── Source code resolution ──────────────────────────────────────────────────
@@ -869,7 +928,7 @@ def scan_skills(
 
     all_entries: List[Dict[str, Any]] = []
     for cfg in configs:
-        entries = parse_config(cfg["path"])
+        entries = parse_config(cfg["path"], agent=cfg["agent"])
         all_entries.extend(entries)
 
     findings: List[Dict[str, Any]] = []

@@ -873,7 +873,7 @@ def _mcp_server_index(workspace: Path) -> Dict[str, Dict[str, Any]]:
     try:
         from prismor.runtime.scanner import discover_configs, parse_config
         for cfg in discover_configs(workspace=workspace):
-            for entry in parse_config(cfg["path"]):
+            for entry in parse_config(cfg["path"], agent=cfg["agent"]):
                 nm = str(entry.get("name", "")).lower()
                 if nm:
                     index[nm] = _mcp_endpoint_meta(entry.get("config") or {})

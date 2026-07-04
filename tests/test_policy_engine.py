@@ -67,6 +67,23 @@ class TestPolicyEngineDefaults(unittest.TestCase):
         categories = [f["category"] for f in findings]
         self.assertIn("privilege_escalation", categories)
 
+    def test_bind_all_interfaces_generic_flag_form(self):
+        # Regression for PrismorSec/prismor#142: `\b` before a `--flag` never
+        # matches (`-` isn't a word char), so this pattern was previously dead
+        # code — only the hardcoded framework-name/colon-port patterns caught
+        # anything. These commands name no framework and use no colon:port
+        # suffix, so only the flag pattern itself can catch them.
+        for cmd in (
+            "myserver --host 0.0.0.0",
+            "./webserver --bind 0.0.0.0 --port 9000",
+            "go run main.go --listen 0.0.0.0",
+            "some-tool -H 0.0.0.0",
+            "--bind 0.0.0.0",  # flag at the very start of the command
+        ):
+            findings = self.engine.check_command(cmd)
+            categories = [f["category"] for f in findings]
+            self.assertIn("network_isolation", categories, msg=cmd)
+
     def test_similar_but_safe_paths_not_flagged_as_auth_file_write(self):
         for path in ("/etc/passwd.bak", "/home/user/passwd-notes.txt"):
             findings = self.engine.check_path(path, event_type="file_write")

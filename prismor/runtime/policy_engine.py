@@ -354,20 +354,38 @@ class PolicyEngine:
         """
         for rule in override_raw.get("rules", []) or []:
             rule_id = rule.get("id", "")
-            if rule_id in _NON_OVERRIDABLE_RULE_IDS:
+            default = rules_by_id.get(rule_id)
+            # A rule is floor-protected if its own id is hand-listed OR its
+            # default category is one of the core block categories — matching
+            # by category too closes the gap where a rule's category was added
+            # to _CORE_BLOCK_CATEGORIES (protecting its finding `mode`) without
+            # also adding its id to _NON_OVERRIDABLE_RULE_IDS (protecting
+            # `enabled`/`patterns`/`action`), which let an override fully
+            # disable "remote-execution" outright — see PrismorSec/prismor#140.
+            _is_floor = rule_id in _NON_OVERRIDABLE_RULE_IDS or (
+                default is not None and default.get("category") in _CORE_BLOCK_CATEGORIES
+            )
+            if _is_floor:
                 if not rule.get("enabled", True):
                     sys.stderr.write(
                         f"[prismor] Ignoring {source} override for non-overridable "
                         f"rule '{rule_id}' (cannot be disabled)\n"
                     )
                     continue
-                default = rules_by_id.get(rule_id)
                 if default:
                     merged = {**default, **rule}
                     merged["enabled"] = True  # force enabled
-                    # Core protections are ADD-ONLY: their default patterns can
-                    # never be replaced or disabled, only extended.
+                    # Core protections are ADD-ONLY: their default patterns,
+                    # action, and severity can never be replaced or weakened,
+                    # only extended. Without restoring action/severity here, an
+                    # override could leave the rule "enabled" with its original
+                    # patterns but set action=allow/severity=LOW — should_block()
+                    # is protected via the separate mode clamp below, but
+                    # anything that reads the finding's action directly (e.g.
+                    # `prismor check`'s exit code) would not be — see #141.
                     merged["patterns"] = default["patterns"]  # block full-replace neuter
+                    merged["action"] = default["action"]
+                    merged["severity"] = default["severity"]
                     if merged.pop("disable_patterns", None) is not None:
                         sys.stderr.write(
                             f"[prismor] Ignoring disable_patterns on core rule '{rule_id}' (cannot be weakened)\n"
