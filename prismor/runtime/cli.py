@@ -1684,6 +1684,11 @@ def main(argv: Optional[List[str]] = None) -> None:
             policy: Dict[str, Any] = {}
             if policy_path.exists():
                 policy = yaml.safe_load(policy_path.read_text()) or {}
+            # A freshly-created file needs the same required `version` field
+            # `prismor policy init` stamps — otherwise the very next step the
+            # docs recommend (`prismor policy validate`) fails immediately.
+            # See PrismorSec/prismor#147.
+            policy.setdefault("version", "1.0")
             rules_list = policy.setdefault("rules", [])
             rules_list.append(rule)
             policy_path.parent.mkdir(parents=True, exist_ok=True)

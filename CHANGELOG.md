@@ -22,6 +22,8 @@
 - `docs/cli-reference.md` no longer lists `workspace show` / `exempt status` as subcommands — neither exists (`workspace` with no argument shows status; `exempt` only has `request`). (#132)
 - `docs/frameworks-crewai.md`'s examples imported `from crewai_tools import tool` — a separate package not installed by `pip install "prismor[crewai]"` and not mentioned anywhere in the doc. Changed to `from crewai.tools import tool`, which ships built-in with current `crewai` and requires no extra install. (#137)
 - `prismor scan` mislabeled the `agent` for any config whose full path happened to contain another agent's name as a substring (e.g. a workspace path containing "claude" anywhere caused a real Cursor/Windsurf/etc. config's findings to be reported under `agent: "claude"`) — `parse_config()` re-guessed the agent via path substring matching instead of using the value `discover_configs()` already knew. (#143)
+- `docs/learning.md`'s own worked example (a recurring `psql ... prod` command) could never actually be mined — no database client was in the learning engine's `_SENSITIVE_COMMANDS` allowlist. Added `psql`/`mysql`/`mysqlsh`/`redis-cli`/`mongosh`/`sqlite3`. (#146)
+- `prismor learn --apply` wrote `.prismor/policy.yaml` without the required `version` field when no policy file existed yet, so the docs' own next step (`prismor policy validate`) failed immediately with "Missing required field: version" — even though the learned rule worked correctly at runtime. (#147)
 
 ### Added
 

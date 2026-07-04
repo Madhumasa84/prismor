@@ -601,6 +601,11 @@ _SENSITIVE_COMMANDS = {
     "docker", "podman", "kubectl",
     "pip", "pip3", "npm", "yarn", "gem", "cargo",
     "eval", "exec", "source",
+    # Database clients — direct prod-DB access is exactly the kind of
+    # recurring, un-ruled pattern the learning engine is meant to surface
+    # (this is docs/learning.md's own worked example, which previously
+    # could never actually fire). See PrismorSec/prismor#146.
+    "psql", "mysql", "mysqlsh", "redis-cli", "mongosh", "sqlite3",
 }
 
 
