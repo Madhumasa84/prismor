@@ -9,7 +9,8 @@ Unlike the `secret-access` rule which flags reads of sensitive-named files,
 canarytokens trigger even when the file name looks mundane — the agent
 has to actually OPEN the file to hit the marker.
 
-Registered canaries live in `$HOME/.prismor/canaries.json`. Each entry:
+Registered canaries live in `$PRISMOR_HOME/canaries.json` (default
+`$HOME/.prismor/canaries.json`). Each entry:
   { "id": "<uuid>", "path": "<file>", "type": "aws|ssh|env|generic",
     "marker": "<random-string>", "webhook": "<optional-url>",
     "created": "<iso-timestamp>" }
@@ -27,8 +28,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-CANARY_REGISTRY = Path.home() / ".prismor" / "canaries.json"
 MARKER_PREFIX = "PRISMOR-CANARY-"
+
+
+def _canary_registry_path() -> Path:
+    """Canary registry path, honoring $PRISMOR_HOME (see PrismorSec/prismor#131)."""
+    from prismor.runtime.store import prismor_home
+    return prismor_home() / "canaries.json"
 
 
 # ── Templates ──────────────────────────────────────────────────────────────
@@ -71,20 +77,22 @@ def _new_marker() -> str:
 # ── Registry ───────────────────────────────────────────────────────────────
 
 def _load_registry() -> List[Dict[str, Any]]:
-    if not CANARY_REGISTRY.exists():
+    registry = _canary_registry_path()
+    if not registry.exists():
         return []
     try:
-        return json.loads(CANARY_REGISTRY.read_text(encoding="utf-8"))
+        return json.loads(registry.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
 
 
 def _save_registry(entries: List[Dict[str, Any]]) -> None:
-    CANARY_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
-    CANARY_REGISTRY.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    registry = _canary_registry_path()
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps(entries, indent=2), encoding="utf-8")
     # Registry contains markers that bypass detection if leaked — restrict.
     try:
-        os.chmod(CANARY_REGISTRY, 0o600)
+        os.chmod(registry, 0o600)
     except OSError:
         pass
 

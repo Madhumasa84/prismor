@@ -92,18 +92,27 @@ def uninstall_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str)
         # Claude Code also installs separate cloaking hooks (decloak.sh,
         # recloak-mcp.sh, userprompt-guard.sh). The detection-hook strip
         # above only removes entries that reference cli.py, so cloaking
-        # stays behind unless we explicitly uninstall it too.
+        # stays behind unless we explicitly uninstall it too. Tracked
+        # separately (cloak_removed) so the CLI can call this out — see
+        # PrismorSec/prismor#126.
+        cloak_removed = False
         if current_agent == "claude":
             try:
                 from prismor.runtime.cloaking import uninstall as cloak_uninstall
                 cloak_result = cloak_uninstall(workspace=workspace, scope=scope)
                 if cloak_result.get("removed"):
                     removed = True
+                    cloak_removed = True
             except Exception:
                 # Cloaking is optional — swallow any error so detection-hook
                 # removal still reports cleanly.
                 pass
-        results.append({"agent": current_agent, "configPath": str(config_path), "removed": removed})
+        results.append({
+            "agent": current_agent,
+            "configPath": str(config_path),
+            "removed": removed,
+            "cloakRemoved": cloak_removed,
+        })
     return results
 
 

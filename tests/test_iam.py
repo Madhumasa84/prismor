@@ -59,15 +59,15 @@ class _IamTestBase(unittest.TestCase):
         iam_mod._CONFIG_CACHE.clear()
         iam_mod._WARNED_UNKNOWN_IDS.clear()
         # Isolate from any real ~/.prismor/iam.yaml on the test machine.
-        self._orig_global = iam_mod._GLOBAL_IAM_PATH
-        iam_mod._GLOBAL_IAM_PATH = self.tmp / "no-such-global-iam.yaml"
+        self._orig_global = iam_mod._global_iam_path
+        iam_mod._global_iam_path = lambda: self.tmp / "no-such-global-iam.yaml"
         proj = self.tmp / ".prismor"
         proj.mkdir(parents=True, exist_ok=True)
         (proj / "iam.yaml").write_text(_PROFILES, encoding="utf-8")
         self._orig_env = os.environ.get("PRISMOR_AGENT_ID")
 
     def tearDown(self):
-        iam_mod._GLOBAL_IAM_PATH = self._orig_global
+        iam_mod._global_iam_path = self._orig_global
         if self._orig_env is None:
             os.environ.pop("PRISMOR_AGENT_ID", None)
         else:
@@ -105,8 +105,9 @@ class TestCheckIamFinding(_IamTestBase):
 
     def test_project_config_overrides_global(self):
         # Global defines readonly-bot as allowing writes; project locks it down.
-        iam_mod._GLOBAL_IAM_PATH = self.tmp / "global.yaml"
-        iam_mod._GLOBAL_IAM_PATH.write_text(
+        global_path = self.tmp / "global.yaml"
+        iam_mod._global_iam_path = lambda: global_path
+        global_path.write_text(
             "agents:\n  readonly-bot:\n    allowed_tools: [Read, Write]\n"
             "    deny_tools: []\n    deny_network: true\n    allowed_paths: ['**']\n",
             encoding="utf-8",

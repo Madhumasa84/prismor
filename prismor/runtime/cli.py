@@ -843,6 +843,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         for item in results:
             if item["removed"]:
                 print(f"Removed {item['agent']} hooks from {item['configPath']}")
+                if item.get("cloakRemoved"):
+                    print(
+                        "  Also removed cloaking hooks — secrets are no longer protected "
+                        "at the tool boundary. Re-enable with: prismor cloak install"
+                    )
             else:
                 print(f"No Prismor hooks found for {item['agent']} at {item['configPath']}")
         return
@@ -1943,7 +1948,14 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--mode", choices=["observe", "enforce"], default="observe", help="observe=log only, enforce=block dangerous actions")
 
     # ── uninstall-hooks ────────────────────────────────────────────────
-    uninstall_parser = subparsers.add_parser("uninstall-hooks", help="Remove IDE hooks")
+    uninstall_parser = subparsers.add_parser(
+        "uninstall-hooks",
+        help="Remove IDE hooks",
+        description="Remove Prismor runtime-monitor hooks for an agent. For --agent claude "
+        "(or all), this also removes cloaking hooks installed by `prismor cloak install` — "
+        "secrets are no longer protected at the tool boundary until you re-run "
+        "`prismor cloak install`.",
+    )
     uninstall_parser.add_argument("--workspace", help="Workspace path")
     uninstall_parser.add_argument("--agent", choices=["claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "all"], required=True, help="Which agent/IDE")
     uninstall_parser.add_argument("--scope", choices=["project", "user"], default="project", help="Hook scope")

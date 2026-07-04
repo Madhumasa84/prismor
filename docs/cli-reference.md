@@ -92,7 +92,7 @@ prismor
 |---|---|---|
 | `prismor setup [DIR]` | `--non-interactive`, `--mode`, `--agents`, `--cloak/--no-cloak` | Interactive wizard (or scripted with flags / `PRISMOR_MODE`, `PRISMOR_CLOAK` env vars). Picks mode, toggles rules, selects agents, enables cloaking. |
 | `prismor install-hooks` | `--agent <name\|all>` (required), `--mode <observe\|enforce>`, `--scope <project\|user>` | Writes hook config for the chosen agent so Prismor sees tool calls. Without hooks, nothing is monitored. |
-| `prismor uninstall-hooks` | `--agent <name\|all>`, `--scope` | Removes Prismor hooks for an agent. Clean rollback. |
+| `prismor uninstall-hooks` | `--agent <name\|all>`, `--scope` | Removes Prismor hooks for an agent. For `claude`/`all`, this also removes cloaking hooks (`prismor cloak install`) — secrets are no longer protected at the tool boundary until you reinstall with `prismor cloak install`. |
 | `prismor status` | `--workspace`, `--all`, `--days N` | Health check: hooks, mode, cloak state, latest session, and the single next action. Run this first every session. `--all` shows every registered workspace. |
 | `prismor update` | `--check` | Check for (or install) a newer prismor release. |
 | `prismor info` | `--workspace` | _Deprecated_ alias of `status`. |
@@ -201,8 +201,8 @@ Deep dive: [Learning](learning.md).
 |---|---|---|
 | `prismor enroll <token>` | `--label`, `--api-base` | Exchange a single-use org token (minted in the dashboard) for this machine's device identity; pulls the signed org policy. |
 | `prismor enroll-status` | — | Show enrollment state, device label, and the applied policy version. |
-| `prismor workspace <show\|managed\|personal>` | — | Show or set whether this workspace is org-managed (org policy + telemetry) or personal (local-only). Org-claimed repos can't be downgraded. |
-| `prismor exempt <request\|status>` | `--reason` | Ask an org admin to relax specific non-floor rules for this repo; served back in the signed policy. |
+| `prismor workspace [managed\|personal\|auto]` | — | With no argument, shows whether this workspace is org-managed (org policy + telemetry) or personal (local-only). Pass `managed`/`personal`/`auto` to set it. Org-claimed repos can't be downgraded. |
+| `prismor exempt request` | `--reason` | Ask an org admin to relax specific non-floor rules for this repo; served back in the signed policy. |
 | `prismor logout` | — | Un-enroll: removes the device identity and cached remote policy. Local protection stays on. |
 
 Deep dive: [Connecting to the platform](connecting-to-the-platform.md) · [Policy layers & exemptions](policy-layers-and-exemptions.md).
