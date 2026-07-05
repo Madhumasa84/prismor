@@ -47,6 +47,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -124,6 +125,96 @@ def _color(text: str, color: str) -> str:
     if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         return text
     return f"{color}{text}{_NC}"
+
+
+# Utilities whose combined output routinely surfaces a whole file's contents to
+# the model. A command invoking one of these on a secret-bearing file is what
+# leaks the raw value into context on agents that cannot scrub tool output.
+_READER_UTILS = frozenset({
+    "cat", "bat", "less", "more", "head", "tail", "grep", "egrep", "fgrep",
+    "rg", "ag", "base64", "xxd", "od", "hexdump", "strings", "nl", "tac",
+    "sort", "uniq", "awk", "sed", "cut", "source", ".",
+})
+
+
+def _codex_secret_read_guard(event: Dict[str, Any]) -> Optional[str]:
+    """Deny reason if a Codex Bash command would surface a registered secret.
+
+    Codex hooks are block-only: unlike Claude's decloak hook, which rewrites a
+    Bash command to pipe its output through a scrubber, a Codex PreToolUse hook
+    cannot mutate the command or its output (verified against codex-cli 0.141 —
+    ``updatedInput`` is ignored). So the only way to keep a registered secret's
+    raw value out of model context is to block the read, mirroring the Claude
+    read-guard containment for tools without an output-rewrite channel.
+
+    Returns a human-readable reason to deny, or ``None`` to allow. Fails open
+    (returns ``None``) on any error so the guard never breaks a normal command.
+    """
+    try:
+        if event.get("type") != "shell":
+            return None
+        command = str(event.get("command") or "")
+        if not command.strip():
+            return None
+        from prismor.runtime.cloaking.secrets_store import secrets_dir
+        sdir = secrets_dir()
+        if not sdir.is_dir():
+            return None
+        # name -> raw value, for every registered secret long enough to match.
+        secrets: Dict[str, str] = {}
+        for f in sdir.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                val = f.read_text(encoding="utf-8", errors="ignore").strip()
+            except OSError:
+                continue
+            if len(val) >= 8:
+                secrets[f.name] = val
+        if not secrets:
+            return None
+        # Resolve file arguments relative to the command's working directory.
+        cwd = (event.get("metadata") or {}).get("cwd") or os.getcwd()
+        try:
+            tokens = shlex.split(command, comments=False, posix=True)
+        except ValueError:
+            tokens = command.split()
+        # shlex keeps shell operators glued to adjacent tokens (e.g. "file;");
+        # strip that punctuation so file arguments resolve.
+        def _clean(t: str) -> str:
+            return t.strip(";|&<>()`'\" ")
+        cleaned = [_clean(t) for t in tokens]
+        uses_reader = any(
+            os.path.basename(t) in _READER_UTILS for t in cleaned if t and not t.startswith("-")
+        )
+        for tok in cleaned:
+            if not tok:
+                continue
+            cand = tok if os.path.isabs(tok) else os.path.join(cwd, tok)
+            if not os.path.isfile(cand):
+                continue
+            # Only guard files a reader utility (or a bare redirect) would dump;
+            # skip a file merely named on the line for an unrelated purpose.
+            if not uses_reader and "<" not in tokens:
+                continue
+            try:
+                # Cap the read so a huge file can't stall the hot path.
+                content = ""
+                with open(cand, "r", encoding="utf-8", errors="ignore") as fh:
+                    content = fh.read(1_000_000)
+            except OSError:
+                continue
+            for name, val in secrets.items():
+                if val in content:
+                    return (
+                        f"'{tok}' contains the registered secret '{name}'. Reading it "
+                        f"would place the raw value in model context. Reference it as "
+                        f"@@SECRET:{name}@@ in the command instead — Prismor substitutes "
+                        f"the real value at execution time."
+                    )
+        return None
+    except Exception:
+        return None
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -870,6 +961,17 @@ def main(argv: Optional[List[str]] = None) -> None:
         payload = json.loads(sys.stdin.read() or "{}")
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
+
+        # ── Cloak read-guard for block-only agents ────────────────────
+        # Codex hooks cannot rewrite a command or its output, so Claude's
+        # decloak-and-scrub wrap is unavailable there. Block a Bash command
+        # that would dump a registered secret into context, and point the model
+        # at the @@SECRET@@ placeholder. Runs only in enforce mode.
+        if args.agent == "codex" and args.mode != "observe":
+            _cloak_reason = _codex_secret_read_guard(event)
+            if _cloak_reason:
+                sys.stderr.write(f"Prismor cloaking blocked this action: {_cloak_reason}\n")
+                raise SystemExit(2)
 
         # ── Scoped agent: synthesize rules on first prompt ────────────
         if event.get("agent_event") == "UserPromptSubmit":
