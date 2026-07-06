@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -231,6 +232,29 @@ class TestImmunityUmbrella(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         for action in ("install", "uninstall", "add", "list", "remove", "status"):
             self.assertIn(action, r.stdout)
+
+    def test_repo_shim_beats_shadowing_prismor_package(self):
+        # Simulate an unrelated installed `prismor` package ahead of site-packages.
+        # The repo shim must still import THIS checkout.
+        with tempfile.TemporaryDirectory() as td:
+            shadow_root = Path(td)
+            shadow_pkg = shadow_root / "prismor"
+            shadow_pkg.mkdir()
+            (shadow_pkg / "__init__.py").write_text("__version__ = 'shadowed'\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(shadow_root)
+            r = subprocess.run(
+                [sys.executable, IMMUNITY_CLI, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("prismor ", r.stdout)
+        self.assertNotIn("shadowed", r.stdout)
 
 
 class TestSkillInstall(unittest.TestCase):

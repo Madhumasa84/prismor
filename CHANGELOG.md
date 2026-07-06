@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Repo-local CLI entry points can no longer be shadowed by an unrelated installed `prismor` package.** The source checkout previously relied on a PEP 420 namespace package at the top-level `prismor/` directory. On hosts that already had another `prismor` distribution on `sys.path`, `bin/prismor` could import that foreign package first and then fail with `ModuleNotFoundError: prismor.runtime`, leaving operators testing the wrong runtime or no runtime at all. The checkout now ships a real top-level `prismor/__init__.py`, and `tests/test_cli.py` covers the shadowing case directly. This was reproduced during a live runtime-enforcement benchmark on July 6, 2026. (#150)
+
 ## [1.16.0] — 2026-07-04
 
 Batches five PRs of fixes found during an extended feature-by-feature security
