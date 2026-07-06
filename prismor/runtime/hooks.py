@@ -1101,7 +1101,18 @@ def _normalize_claude(payload: Dict[str, Any], session_id: str, workspace: Path)
         "metadata": {"cwd": payload.get("cwd"), "tool_name": tool_name, "raw": payload},
     }
     if hook_event == "SessionStart":
-        memory = _read_project_memory(workspace)
+        # payload["cwd"] is the live directory of *this* session, sent by
+        # Claude on every hook call. `workspace` is whatever was configured
+        # at `install-hooks` time (often a fixed dir for --scope user
+        # installs) — falling back to it when cwd is absent, but preferring
+        # cwd means the scan actually covers the project the agent is
+        # running in, not wherever hooks happened to be installed from. See
+        # PrismorSec/prismor#155 follow-up: a user-scope install pointed at
+        # $HOME meant every session's memory scan silently read $HOME's
+        # CLAUDE.md instead of the real project's, regardless of cwd.
+        raw_cwd = payload.get("cwd")
+        memory_root = Path(raw_cwd) if raw_cwd else workspace
+        memory = _read_project_memory(memory_root)
         base["metadata"]["memory_files"] = memory["files"]
         return {**base, "type": "memory", "content": memory["content"]}
     if hook_event == "UserPromptSubmit":
