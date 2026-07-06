@@ -271,7 +271,7 @@
         },
         "event_types": {
           "type": "array",
-          "description": "Event types this rule applies to (shell, file_read, file_write, network, prompt, tool_result)",
+          "description": "Event types this rule applies to (shell, file_read, file_write, network, prompt, tool_result, memory, skill_manifest). A rule listing tool_result is automatically applied to memory (CLAUDE.md/AGENTS.md) content too.",
           "items": {
             "type": "string",
             "enum": [
@@ -280,7 +280,9 @@
               "file_write",
               "network",
               "prompt",
-              "tool_result"
+              "tool_result",
+              "memory",
+              "skill_manifest"
             ]
           },
           "minItems": 1

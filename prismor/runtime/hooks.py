@@ -334,6 +334,14 @@ def _merge_claude(config: Dict[str, Any], command: str, workspace: Path) -> Dict
         hooks.get("PostToolUse", []),
         {"matcher": "Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch", "hooks": [{"type": "command", "command": command}]},
     )
+    # SessionStart carries the project-memory files (CLAUDE.md/AGENTS.md) that
+    # Claude auto-loads before any tool call. Scanning them here brings their
+    # directives under the same content rules as untrusted tool output so a
+    # poisoned memory file is detected at session start. See issue #155.
+    hooks["SessionStart"] = _merge_claude_entries(
+        hooks.get("SessionStart", []),
+        {"matcher": "startup|resume|clear|compact", "hooks": [{"type": "command", "command": command}]},
+    )
     # Skip "Stop" hook — the payload contains the full assistant response which
     # exceeds OS argument limits (E2BIG) on long conversations. Stop fires after
     # all actions are complete so it has no security enforcement value.
@@ -1029,6 +1037,58 @@ def _classify_mcp_event(
     return {**base, "type": "tool_result", "response": args_text, **mcp_meta}
 
 
+# Project-memory files auto-loaded by the agent at session start. Their
+# directives are trusted implicitly by the model, so Prismor treats them as an
+# untrusted content source (issue #155).
+_MEMORY_FILENAMES = ("CLAUDE.md", "AGENTS.md")
+# Cap total scanned memory content so a huge memory file can't blow the OS
+# argument limit / telemetry payload. Detection patterns fire on the leading
+# directive-shaped text; a truncated tail is acceptable.
+_MEMORY_SCAN_LIMIT = 64_000
+
+
+def _read_project_memory(workspace: Path) -> Dict[str, Any]:
+    """Collect CLAUDE.md/AGENTS.md content the agent loads at session start.
+
+    Searches the workspace and its ancestors (project-scoped memory) plus the
+    user's ~/.claude directory (global memory). Returns the concatenated text
+    and the list of files it came from. Best-effort: unreadable files are
+    skipped rather than failing the hook.
+    """
+    seen: set[Path] = set()
+    parts: List[str] = []
+    files: List[str] = []
+
+    search_dirs: List[Path] = []
+    try:
+        ws = workspace.resolve()
+        search_dirs.append(ws)
+        search_dirs.extend(ws.parents[:3])
+    except Exception:
+        search_dirs.append(workspace)
+    search_dirs.append(Path.home() / ".claude")
+
+    for directory in search_dirs:
+        for name in _MEMORY_FILENAMES:
+            candidate = directory / name
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                resolved = candidate
+            if resolved in seen or not candidate.is_file():
+                continue
+            seen.add(resolved)
+            try:
+                text = candidate.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            files.append(str(candidate))
+            parts.append(f"# {candidate}\n{text}")
+
+    content = "\n\n".join(parts)[:_MEMORY_SCAN_LIMIT]
+    return {"content": content, "files": files}
+
+
 def _normalize_claude(payload: Dict[str, Any], session_id: str, workspace: Path) -> Dict[str, Any]:
     hook_event = payload.get("hook_event_name", "unknown")
     tool_name = payload.get("tool_name", "")
@@ -1040,6 +1100,10 @@ def _normalize_claude(payload: Dict[str, Any], session_id: str, workspace: Path)
         "agent_event": hook_event,
         "metadata": {"cwd": payload.get("cwd"), "tool_name": tool_name, "raw": payload},
     }
+    if hook_event == "SessionStart":
+        memory = _read_project_memory(workspace)
+        base["metadata"]["memory_files"] = memory["files"]
+        return {**base, "type": "memory", "content": memory["content"]}
     if hook_event == "UserPromptSubmit":
         return {**base, "type": "prompt", "prompt": payload.get("prompt", "")}
     if tool_name == "Bash":
