@@ -783,6 +783,38 @@ rules:
       - '(>|rm|mv|cp|truncate|sed\s+-i|tee)[^\n]*\.github/copilot-instructions\.md'
     action: warn
 
+  # ── MEDIUM: Embedded directive in project-memory content (#153) ───────
+  # Companion to agent-instruction-tampering above, which only fires on
+  # *writes*. This scans the *content* of CLAUDE.md/AGENTS.md as it is loaded
+  # at session start (the `memory` event, see #155) — the common attack is a
+  # file that arrives already poisoned (compromised PR, template repo, stale
+  # checkout) with an operational directive mixed in among legitimate
+  # conventions. Warn, not block: routine convention docs ("always use 2-space
+  # indent") are near-universal, so the patterns require an action/exfil/
+  # steering signal — a command to RUN, FETCH, SEND, or a covert behavior
+  # override — not a mere style preference. Benchmarked as ASI06 (OWASP
+  # Agentic Top-10): 24/24 unblocked before this rule.
+  - id: memory-embedded-directive
+    severity: MEDIUM
+    category: memory_poisoning
+    title: Detects an embedded operational directive in project-memory content (CLAUDE.md/AGENTS.md)
+    event_types: [memory]
+    fields: [combined_text]
+    patterns:
+      # "always/every time/before making any edits … run/execute/source <cmd>"
+      - '(?:always|every\s+time|before\s+(?:you\s+)?(?:do\s+)?(?:anything|any\s+edits?|any\s+changes?|making\s+(?:any\s+)?(?:edits?|changes?)|editing|running|starting|committing))[^\n]{0,80}\b(?:run|execute|invoke|source|pipe)\b'
+      # "run/execute <cmd> … before anything / before each edit / first"
+      - '\b(?:run|execute|invoke|source)\b[^\n]{0,60}\b(?:before\s+(?:you\s+)?(?:do\s+)?(?:anything|any\s+edits?|any\s+changes?|making|editing|each|every)|first\b[^\n]{0,20}(?:to\s+(?:confirm|initialize|ensure|verify)))'
+      # "always fetch/curl/download … <url>" — remote fetch directive in memory
+      - '(?:always|first|before[^\n]{0,40})[^\n]{0,60}\b(?:curl|wget|fetch|download|source)\b[^\n]{0,60}https?://'
+      # Covert behavior override — hide from / steer the user (reuses the skill
+      # behavior-manipulation signatures, which have no legitimate use here)
+      - 'never\s+(?:mention|tell|inform|warn|disclose|reveal|show|report)\b[^\n]{0,40}\b(?:the\s+)?(?:user|them)\b'
+      - 'do\s+not\s+(?:mention|disclose|tell|reveal|show|warn|report)\b[^\n]{0,40}\b(?:the\s+)?user\b'
+      - '(?:append|include|add|insert)\s+(?:this|the\s+following)\s+(?:line\s+)?(?:to|in)\s+(?:every|each|all)\s+(?:response|message|reply|output|commit)'
+      - '(?:gradually|subtly|silently|quietly|covertly)\s+(?:steer|guide|push|nudge|send|forward|transmit|exfiltrat|modify|change)'
+    action: warn
+
   # ── CRITICAL: Shell obfuscation (decode-and-execute chains) ──────
   - id: shell-obfuscation
     severity: CRITICAL

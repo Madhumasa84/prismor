@@ -67,7 +67,28 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "network": ["url"],
     "prompt": ["combined_text"],
     "tool_result": ["combined_text"],
+    # Project-memory files (CLAUDE.md/AGENTS.md) auto-loaded at session start.
+    # Their directives are untrusted the same way tool output is, so they match
+    # against the same combined_text field. See issue #155.
+    "memory": ["combined_text"],
     "skill_manifest": ["combined_text"],
+}
+
+# Event sources whose content is untrusted and must be scrutinized by every
+# content rule that scrutinizes tool output. `memory` (CLAUDE.md/AGENTS.md,
+# loaded at session start) is folded in here so no rule can silently exempt the
+# project-memory source from block-category evaluation (issue #155).
+_UNTRUSTED_CONTENT_ALIASES: Dict[str, set[str]] = {
+    "tool_result": {"memory"},
+}
+
+# Human-readable provenance tag attached to each finding, so telemetry and the
+# dashboard can attribute an action to where its authorizing instruction came
+# from (live user turn, untrusted tool output, or project memory). Issue #155.
+_EVENT_SOURCE: Dict[str, str] = {
+    "prompt": "user_prompt",
+    "tool_result": "tool_output",
+    "memory": "project_memory",
 }
 
 
@@ -177,6 +198,15 @@ class CompiledRule:
         self.category: str = raw["category"]
         self.title: str = raw["title"]
         self.event_types: set[str] = set(raw["event_types"])
+        # #155: don't special-case the source at the point an action is
+        # authorized. A rule that treats tool-output content as untrusted must
+        # treat project-memory content (CLAUDE.md/AGENTS.md) the same way. Doing
+        # this at load time — rather than per-rule in YAML — makes it a
+        # structural invariant: no current or future block-category rule can
+        # silently exempt the project-memory source.
+        for base_type, aliases in _UNTRUSTED_CONTENT_ALIASES.items():
+            if base_type in self.event_types:
+                self.event_types |= aliases
         self.fields: List[str] = raw.get("fields") or []
         self.action: str = raw.get("action", "warn")
         self.enabled: bool = raw.get("enabled", True)
@@ -660,6 +690,10 @@ class PolicyEngine:
                 "ruleId": rule.id,
                 "action": rule.action,
                 "subject": subject_dict,
+                # Provenance of the authorizing instruction — lets telemetry and
+                # the dashboard distinguish a directive from live user input,
+                # untrusted tool output, or project memory (issue #155).
+                "source": _EVENT_SOURCE.get(event_type, event_type),
                 # Effective observe/enforce for this finding — per-rule override
                 # else the policy's default_mode. should_block() blocks only when
                 # this is "enforce". EXCEPTION: the non-overridable floor (core
