@@ -194,6 +194,7 @@ def build_record(
         # org policy). Only managed/company repos report, so the repo identifier
         # is org-owned context, not the developer's private data.
         "repo": extra.get("repo"),
+        "workspace_path": extra.get("workspace"),
         "policy_scope": extra.get("policy_scope") or "org",
         # Title: in redacted mode sanitized to its static description (paths /
         # hosts / URLs / secrets stripped); in full mode the raw (secret-scrubbed)

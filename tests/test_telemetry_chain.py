@@ -109,14 +109,20 @@ def test_chain_recovers_from_corrupt_state(tmp_path, monkeypatch):
 
 def test_record_carries_eval_ms_and_session_seq():
     rec = telemetry.build_record(
-        FINDING, EVENT, extra={"eval_ms": 12, "session_seq": 7})
+        FINDING, EVENT, extra={
+            "eval_ms": 12,
+            "session_seq": 7,
+            "workspace": "/Users/alice/work/acme-api",
+        })
     assert rec["eval_ms"] == 12
     assert rec["session_seq"] == 7
+    assert rec["workspace_path"] == "/Users/alice/work/acme-api"
     telemetry.assert_redacted(rec)  # operational metadata, never evidence
 
     legacy = telemetry.build_record(FINDING, EVENT, extra={})
     assert legacy["eval_ms"] is None
     assert legacy["session_seq"] is None
+    assert legacy["workspace_path"] is None
 
 
 def test_record_carries_matched_pattern_not_evidence():
