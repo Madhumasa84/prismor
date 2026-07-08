@@ -459,9 +459,17 @@
   .rule-row:last-child { border-bottom:none; }
   .rule-row.off { background: var(--gray-50, #fafafa); }
   .rule-row.off .rule-id, .rule-row.off .rule-title { opacity:.5; }
+  .rule-row.locked { background:#fcfcfd; }
   .rule-main { flex:1; min-width:0; }
+  .rule-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .rule-id { font-family:var(--font-mono); font-size:12.5px; font-weight:600; color:var(--gray-900); }
   .rule-title { font-size:12px; color:var(--gray-500); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rule-lock {
+    display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border-radius:999px;
+    font-size:10px; font-weight:700; letter-spacing:.02em; border:1px solid #e5e7eb;
+    color:#475569; background:#f8fafc;
+  }
+  .rule-lock .icon { width:10px; height:10px; }
   .rule-sev {
     font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
     border-radius:4px; white-space:nowrap;
@@ -472,6 +480,7 @@
   .rule-sev.LOW      { background:var(--gray-100); color:var(--gray-500); }
   /* toggle switch */
   .rule-toggle { position:relative; width:38px; height:22px; flex:0 0 auto; cursor:pointer; }
+  .rule-toggle.locked { cursor:not-allowed; opacity:.6; }
   .rule-toggle input { opacity:0; width:0; height:0; position:absolute; }
   .rule-track {
     position:absolute; inset:0; background:var(--gray-300,#cbd5e1); border-radius:22px;
@@ -1288,6 +1297,7 @@
 
   <div id="enrollBanner"></div>
   <div id="workspaceBanner"></div>
+  <div id="policyPrecedenceCard" class="drawer-event-card" style="margin-bottom:14px"></div>
 
   <div class="policy-scope-nav">
     <button class="policy-scope-btn active" data-pscope="rules">Rules</button>
@@ -1303,17 +1313,17 @@
       <span class="banner-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
       <div class="banner-text">
         <strong>Detection rules</strong>
-        Toggle individual rules for <strong>this project</strong>. Disabling a rule stops it
-        blocking <em>and</em> flagging. Saved to <code>.prismor/policy.yaml</code>;
-        live agents pick it up within 30&nbsp;s.
+        Toggle individual rules for <strong>this project</strong>. Core safety-floor rules stay pinned on even if
+        a project tries to disable them. Saved to <code>.prismor/policy.yaml</code>; live agents pick it up within
+        30&nbsp;s.
       </div>
     </div>
     <div class="rules-toolbar">
       <input id="rulesSearch" class="rules-search" type="text" spellcheck="false"
              placeholder="Search rules by name, category, or description…" />
       <span id="rulesCount" class="rules-count">—</span>
-      <button class="btn-ghost" id="rulesAll">Enable all</button>
-      <button class="btn-ghost" id="rulesNone">Disable all</button>
+      <button class="btn-ghost" id="rulesAll">Enable editable</button>
+      <button class="btn-ghost" id="rulesNone">Disable editable</button>
     </div>
     <div id="rulesList" class="rules-list"><div class="empty">Loading…</div></div>
     <div class="policy-actions">
@@ -1788,6 +1798,19 @@ function renderDrawerContent(sessId, ws, data) {
     bodyEl.appendChild(evSec);
   }
 
+  if (data.policy_precedence) {
+    const policySec = document.createElement('div');
+    policySec.className = 'drawer-section';
+    policySec.innerHTML = renderPolicyPrecedenceHtml(
+      data.policy_precedence,
+      {
+        title: 'Policy precedence for this session',
+        intro: 'Session scope, if present, sits on top of the base policy chain.',
+      },
+    );
+    bodyEl.appendChild(policySec);
+  }
+
   if (trail.length) {
     const trailSec = document.createElement('div');
     trailSec.className = 'drawer-section';
@@ -2094,14 +2117,25 @@ async function drawerAction(action) {
 // ── Policy scope tabs ──────────────────────────────────────────────────────
 document.querySelectorAll('.policy-scope-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.policy-scope-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.policy-scope-pane').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('pscope-' + btn.dataset.pscope)?.classList.add('active');
+    setPolicyScopeTab(btn.dataset.pscope);
   });
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+function setPolicyScopeTab(scope) {
+  document.querySelectorAll('.policy-scope-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.policy-scope-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector('.policy-scope-btn[data-pscope="' + scope + '"]')?.classList.add('active');
+  document.getElementById('pscope-' + scope)?.classList.add('active');
+}
+function policyScopeTarget(scope) {
+  return ['global', 'project', 'enterprise', 'rules', 'effective'].includes(scope) ? scope : 'effective';
+}
+function openPolicyScope(scope) {
+  document.querySelector('.tab-btn[data-tab="policy"]')?.click();
+  setPolicyScopeTab(policyScopeTarget(scope));
+  document.getElementById('policyPrecedenceCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 function safe(s) {
   const el = document.createElement('span');
   el.textContent = String(s || '');
@@ -2112,6 +2146,34 @@ function safeAttr(s) {
 }
 function safeJsArg(s) {
   return safeAttr(String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n'));
+}
+function renderPolicyPrecedenceHtml(precedence, opts = {}) {
+  const chain = (precedence && precedence.chain) || [];
+  const title = opts.title || 'Policy precedence';
+  const intro = opts.intro || 'Highest active layer wins.';
+  if (!chain.length) {
+    return '<div class="drawer-section-title">' + safe(title) + '</div>' +
+      '<div style="font-size:11px;color:var(--gray-500);margin-top:4px">' + safe(intro) + '</div>' +
+      '<div style="font-size:11px;color:var(--gray-400);margin-top:8px">No policy layers loaded yet.</div>';
+  }
+  return '<div class="drawer-section-title">' + safe(title) + '</div>' +
+    '<div style="font-size:11px;color:var(--gray-500);margin-top:4px;margin-bottom:10px">' + safe(intro) + '</div>' +
+    chain.map(entry => {
+      const badges = [
+        entry.winning ? '<span class="scoped-tag tag-allow">takes precedence</span>' : '',
+        entry.exists ? '<span class="scoped-tag tag-net">active</span>' : '<span class="scoped-tag">not set</span>',
+        entry.mode ? '<span class="scoped-tag ' + (entry.mode === 'enforce' ? 'tag-deny' : 'tag-allow') + '">' + safe(entry.mode) + '</span>' : '',
+      ].filter(Boolean).join('');
+      const openBtn = entry.scope === 'session'
+        ? (entry.exists ? '<button class="btn-ghost" style="padding:5px 8px" onclick="document.getElementById(\'scopeEditSection\')?.scrollIntoView({behavior:\'smooth\',block:\'start\'})">View scope</button>' : '')
+        : '<button class="btn-ghost" style="padding:5px 8px" onclick="openPolicyScope(' + safeJsArg(policyScopeTarget(entry.scope)) + ')">Open</button>';
+      return '<div class="drawer-policy-card ' + (entry.winning ? '' : ' allowed') + '" style="margin-bottom:8px">' +
+        '<div class="drawer-rule-row"><span class="drawer-rule-label">' + safe(entry.label || entry.scope) + '</span>' +
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + badges + openBtn + '</div></div>' +
+        '<div style="font-size:11px;color:var(--gray-600);line-height:1.5">' + safe(entry.summary || '') + '</div>' +
+        (entry.path ? '<div style="font-size:10px;color:var(--gray-400);margin-top:4px;word-break:break-all">' + safe(entry.path) + '</div>' : '') +
+      '</div>';
+    }).join('');
 }
 function tsCell(rel, abs, color) {
   const c = color || 'var(--gray-400)';
@@ -2960,6 +3022,16 @@ function setMode(scope, mode) {
 
 function renderPolicyTab(data) {
   updateModeChip(data);
+  const precedenceHost = document.getElementById('policyPrecedenceCard');
+  if (precedenceHost) {
+    precedenceHost.innerHTML = renderPolicyPrecedenceHtml(
+      data.precedence,
+      {
+        title: 'Policy precedence',
+        intro: 'Highest active layer wins. Click Open to jump straight to the governing layer.',
+      },
+    );
+  }
 
   // Global
   const g = data.global || {};
@@ -3014,9 +3086,10 @@ function renderPolicyTab(data) {
   if (g.exists) effectiveStatus.push('global');
   if (p.exists) effectiveStatus.push('project');
   if (e.exists) effectiveStatus.push('enterprise');
+  const winningLayer = ((data.precedence || {}).chain || []).find(item => item.winning && item.scope !== 'session');
   document.getElementById('effectivePolicyStatus').textContent = effectiveStatus.length
-    ? 'Active layers: ' + effectiveStatus.join(' + ')
-    : 'No custom policies — all built-in defaults';
+    ? 'Current winner: ' + (winningLayer ? winningLayer.label : 'Built-in defaults') + ' · Active layers: ' + effectiveStatus.join(' + ')
+    : 'Current winner: Built-in defaults';
 
   // Runtime state is intentionally single-source under ~/.prismor. Do not show
   // a project selector; workspace paths are internal metadata on sessions.
@@ -3065,18 +3138,24 @@ function renderRules() {
        || (r.title || '').toLowerCase().includes(q)
        || (r.category || '').toLowerCase().includes(q));
   const onCount = _rulesCatalog.filter(r => _rulesState[r.id]).length;
+  const lockedCount = _rulesCatalog.filter(r => r.locked).length;
   document.getElementById('rulesCount').innerHTML =
     onCount + '/' + _rulesCatalog.length + ' on'
+    + (lockedCount ? ' · ' + lockedCount + ' pinned' : '')
     + (_rulesDirty() ? ' <span class="rules-dirty">• unsaved</span>' : '');
   if (!vis.length) { list.innerHTML = '<div class="empty">No rules match.</div>'; return; }
   list.innerHTML = vis.map(r => {
     const on = _rulesState[r.id];
-    return '<div class="rule-row ' + (on ? '' : 'off') + '">'
+    const locked = !!r.locked;
+    const lockBadge = locked
+      ? '<span class="rule-lock" title="' + safeAttr(r.lockReason || 'Pinned rule') + '"><svg class="icon"><use href="#i-lock"/></svg> Pinned</span>'
+      : '';
+    return '<div class="rule-row ' + (on ? '' : 'off') + (locked ? ' locked' : '') + '">'
       + '<span class="rule-sev ' + safeAttr(r.severity) + '">' + safe(r.severity) + '</span>'
-      + '<div class="rule-main"><div class="rule-id">' + safe(r.id) + '</div>'
+      + '<div class="rule-main"><div class="rule-meta"><div class="rule-id">' + safe(r.id) + '</div>' + lockBadge + '</div>'
       + '<div class="rule-title">' + safe(r.title) + '</div></div>'
-      + '<label class="rule-toggle"><input type="checkbox" data-rid="' + safeAttr(r.id) + '"'
-      + (on ? ' checked' : '') + '><span class="rule-track"></span></label>'
+      + '<label class="rule-toggle' + (locked ? ' locked' : '') + '"><input type="checkbox" data-rid="' + safeAttr(r.id) + '"'
+      + (on ? ' checked' : '') + (locked ? ' disabled' : '') + '><span class="rule-track"></span></label>'
       + '</div>';
   }).join('');
   list.querySelectorAll('input[data-rid]').forEach(cb => {
@@ -3089,10 +3168,10 @@ function renderRules() {
 
 document.getElementById('rulesSearch').addEventListener('input', renderRules);
 document.getElementById('rulesAll').addEventListener('click', () => {
-  _rulesCatalog.forEach(r => { _rulesState[r.id] = true; }); renderRules();
+  _rulesCatalog.forEach(r => { if (!r.locked) _rulesState[r.id] = true; }); renderRules();
 });
 document.getElementById('rulesNone').addEventListener('click', () => {
-  _rulesCatalog.forEach(r => { _rulesState[r.id] = false; }); renderRules();
+  _rulesCatalog.forEach(r => { if (!r.locked) _rulesState[r.id] = false; }); renderRules();
 });
 document.getElementById('rulesDiscard').addEventListener('click', () => {
   _rulesCatalog.forEach(r => { _rulesState[r.id] = r.enabled; }); renderRules();
@@ -3110,8 +3189,16 @@ document.getElementById('rulesSave').addEventListener('click', async () => {
       body: JSON.stringify({ workspace: ws, disabled }),
     });
     if (result.ok) {
-      _rulesCatalog.forEach(r => { r.enabled = _rulesState[r.id]; });
-      setPolicySaveStatus('rulesSaveStatus', '✓ Saved · ' + disabled.length + ' disabled', 'status-ok');
+      _rulesCatalog.forEach(r => {
+        r.enabled = _rulesState[r.id];
+        if (r.locked) _rulesState[r.id] = true;
+      });
+      const ignored = Array.isArray(result.ignored) ? result.ignored.length : 0;
+      setPolicySaveStatus(
+        'rulesSaveStatus',
+        '✓ Saved · ' + disabled.length + ' requested off' + (ignored ? ' · ' + ignored + ' pinned and kept on' : ''),
+        'status-ok'
+      );
       renderRules();
     } else {
       setPolicySaveStatus('rulesSaveStatus', '✗ ' + (result.error || 'Save failed'), 'status-err');

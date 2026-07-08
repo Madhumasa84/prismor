@@ -2286,6 +2286,128 @@ def read_policy_layer(scope: str, workspace: Optional[Path] = None) -> Dict[str,
     return {"exists": False, "yaml": "", "error": "unknown scope"}
 
 
+def _policy_default_mode(yaml_text: str) -> str:
+    match = re.search(r"^\s*default_mode\s*:\s*([A-Za-z0-9_-]+)\s*$", yaml_text or "", re.MULTILINE)
+    return (match.group(1).strip().lower() if match else "observe")
+
+
+def _policy_rule_override_count(yaml_text: str) -> int:
+    return len(re.findall(r"^\s*-\s*id\s*:\s*.+$", yaml_text or "", re.MULTILINE))
+
+
+def _session_scope_summary(scoped: Dict[str, Any]) -> str:
+    if not scoped:
+        return "No session scope. This session follows the base policy chain below."
+    if scoped.get("paused"):
+        return "Prismor is paused for this session. No tool calls are blocked or flagged until resumed."
+    parts: List[str] = []
+    allowed = scoped.get("allowed_tools") or []
+    denied = scoped.get("deny_tools") or []
+    if allowed:
+        parts.append(f"{len(allowed)} allowed tool tag{'s' if len(allowed) != 1 else ''}")
+    if denied:
+        parts.append(f"{len(denied)} denied tool tag{'s' if len(denied) != 1 else ''}")
+    if scoped.get("deny_network"):
+        parts.append("network denied")
+    if scoped.get("allowed_paths"):
+        parts.append("path allowlist active")
+    if not parts:
+        return "Session scope file exists but does not override tools or network."
+    return "Session scope overlays the base policy with " + ", ".join(parts) + "."
+
+
+def _policy_layer_summary(scope: str, layer: Dict[str, Any]) -> str:
+    if scope == "default":
+        return "Built-in Prismor defaults apply when no higher layer overrides them."
+    if scope == "enterprise":
+        if layer.get("exists"):
+            return (
+                f"Org-managed policy is active. Default mode: {_policy_default_mode(layer.get('yaml') or '')}. "
+                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+            )
+        if layer.get("enrollment"):
+            return "This device is enrolled, but no enterprise policy has been pushed yet."
+        return "No enterprise policy. Enroll this device to receive org-managed controls."
+    if scope == "project":
+        if layer.get("exists"):
+            return (
+                f"Project overrides are active for this workspace. Default mode: "
+                f"{_policy_default_mode(layer.get('yaml') or '')}. "
+                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+            )
+        return "No project override file for this workspace."
+    if scope == "global":
+        if layer.get("exists"):
+            return (
+                f"Machine-wide policy is active. Default mode: {_policy_default_mode(layer.get('yaml') or '')}. "
+                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+            )
+        return "No custom global policy on this machine."
+    return ""
+
+
+def get_policy_precedence(workspace: Optional[Path] = None, scoped: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    global_layer = read_policy_layer("global")
+    project_layer = read_policy_layer("project", workspace)
+    enterprise_layer = read_policy_layer("enterprise")
+
+    winner = "default"
+    for scope, layer in (
+        ("enterprise", enterprise_layer),
+        ("project", project_layer),
+        ("global", global_layer),
+    ):
+        if layer.get("exists"):
+            winner = scope
+            break
+
+    chain: List[Dict[str, Any]] = []
+    if scoped is not None:
+        has_scope = bool(
+            scoped.get("paused")
+            or scoped.get("allowed_tools")
+            or scoped.get("deny_tools")
+            or scoped.get("allowed_paths")
+            or scoped.get("deny_network")
+        )
+        chain.append({
+            "scope": "session",
+            "label": "Session scope",
+            "exists": has_scope,
+            "winning": has_scope,
+            "mode": "paused" if scoped.get("paused") else "scoped",
+            "path": "",
+            "summary": _session_scope_summary(scoped),
+        })
+
+    for scope, label, layer in (
+        ("enterprise", "Enterprise policy", enterprise_layer),
+        ("project", "Project policy", project_layer),
+        ("global", "Global policy", global_layer),
+    ):
+        chain.append({
+            "scope": scope,
+            "label": label,
+            "exists": bool(layer.get("exists")),
+            "winning": winner == scope,
+            "mode": _policy_default_mode(layer.get("yaml") or ""),
+            "path": layer.get("path") or "",
+            "summary": _policy_layer_summary(scope, layer),
+        })
+
+    chain.append({
+        "scope": "default",
+        "label": "Built-in defaults",
+        "exists": True,
+        "winning": winner == "default",
+        "mode": "observe",
+        "path": "",
+        "summary": _policy_layer_summary("default", {}),
+    })
+
+    return {"winner": winner, "chain": chain}
+
+
 def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Write a policy layer.  Returns {ok, path?, error?}"""
     if scope == "enterprise":
@@ -2313,7 +2435,7 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
     enabled state — the data behind the dashboard's per-rule toggle list.
     A rule is "off" when the project override lists it with enabled: false.
     """
-    from prismor.runtime.policy_engine import _load_yaml
+    from prismor.runtime.policy_engine import _load_yaml, is_floor_protected_rule
 
     disabled: set = set()
     if workspace:
@@ -2335,13 +2457,21 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
             rid = r.get("id")
             if not rid:
                 continue
+            locked = is_floor_protected_rule(rid, r)
+            requested_enabled = rid not in disabled
             rules.append({
                 "id": rid,
                 "severity": r.get("severity", "MEDIUM"),
                 "category": r.get("category", ""),
                 "title": r.get("title", rid),
                 "action": r.get("action", ""),
-                "enabled": rid not in disabled,
+                "enabled": True if locked else requested_enabled,
+                "locked": locked,
+                "requestedEnabled": requested_enabled,
+                "lockReason": (
+                    "Pinned by Prismor's core safety floor and cannot be disabled at the project level."
+                    if locked else ""
+                ),
             })
     except Exception:
         pass
@@ -2354,7 +2484,7 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
     the list of rule ids to turn off; everything else stays enabled."""
     if not workspace:
         return {"ok": False, "error": "workspace required"}
-    from prismor.runtime.policy_engine import _load_yaml
+    from prismor.runtime.policy_engine import _load_yaml, is_floor_protected_rule
 
     ppath = _project_policy_path(workspace)
     data: Dict[str, Any] = {}
@@ -2366,13 +2496,30 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
         except Exception:
             data = {}
 
+    default_rules_by_id: Dict[str, Dict[str, Any]] = {}
+    try:
+        default_path = Path(__file__).resolve().parent / "default_policy.yaml"
+        default_data = _load_yaml(default_path) or {}
+        default_rules_by_id = {
+            str(rule.get("id")): rule
+            for rule in default_data.get("rules", [])
+            if isinstance(rule, dict) and rule.get("id")
+        }
+    except Exception:
+        default_rules_by_id = {}
+
     data.setdefault("version", "1.0")
     seen: List[str] = []
     rules_block: List[Dict[str, Any]] = []
+    ignored: List[str] = []
     for rid in disabled_ids or []:
-        if rid and rid not in seen:
-            seen.append(rid)
-            rules_block.append({"id": rid, "enabled": False})
+        if not rid or rid in seen:
+            continue
+        seen.append(rid)
+        if is_floor_protected_rule(rid, default_rules_by_id.get(rid)):
+            ignored.append(rid)
+            continue
+        rules_block.append({"id": rid, "enabled": False})
     data["rules"] = rules_block
 
     try:
@@ -2388,7 +2535,10 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
             lines[-1] = "rules: []"
         content = "\n".join(lines) + "\n"
 
-    return write_policy_layer("project", content, workspace)
+    result = write_policy_layer("project", content, workspace)
+    if result.get("ok"):
+        result["ignored"] = ignored
+    return result
 
 
 def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any]:
@@ -2526,6 +2676,7 @@ def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any
         "session_id": session_id,
         "scoped": scoped,
         "paused": bool(scoped.get("paused")) if scoped else False,
+        "policy_precedence": get_policy_precedence(workspace, scoped),
         "recent_blocked": recent_blocked,
         "recent_events": recent_events,
     }

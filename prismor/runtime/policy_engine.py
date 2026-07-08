@@ -100,6 +100,22 @@ _EVENT_SOURCE: Dict[str, str] = {
 }
 
 
+def is_floor_protected_rule(
+    rule_id: str,
+    default_rule: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return whether a rule is part of Prismor's non-disableable safety floor.
+
+    The floor is keyed both by explicit rule id and by core block category so
+    newly-added core rules inherit the protection even if their ids have not
+    yet been hand-listed.
+    """
+    return rule_id in _NON_OVERRIDABLE_RULE_IDS or (
+        default_rule is not None
+        and default_rule.get("category") in _CORE_BLOCK_CATEGORIES
+    )
+
+
 class _TaintStore:
     """Per-session taint state persisted across hook invocations.
 
@@ -401,9 +417,7 @@ class PolicyEngine:
             # also adding its id to _NON_OVERRIDABLE_RULE_IDS (protecting
             # `enabled`/`patterns`/`action`), which let an override fully
             # disable "remote-execution" outright — see PrismorSec/prismor#140.
-            _is_floor = rule_id in _NON_OVERRIDABLE_RULE_IDS or (
-                default is not None and default.get("category") in _CORE_BLOCK_CATEGORIES
-            )
+            _is_floor = is_floor_protected_rule(rule_id, default)
             if _is_floor:
                 if not rule.get("enabled", True):
                     sys.stderr.write(

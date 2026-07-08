@@ -20,9 +20,13 @@ from prismor.runtime.scoped_agent import save_scoped_rules
 from prismor.runtime.store import (
     get_events_page,
     get_findings_page,
+    get_policy_precedence,
+    get_policy_rule_catalog,
     get_session_scoped_detail,
     persist_runtime_findings,
     save_session_snapshot,
+    set_project_rule_states,
+    write_policy_layer,
     write_supply_chain_event,
 )
 from supplychain.ecosystems.detector import PackageSpec
@@ -217,6 +221,34 @@ class TestDashboardQueries(unittest.TestCase):
 
         detail = get_session_scoped_detail(self.workspace, session_id)
         self.assertEqual(detail["recent_blocked"][0]["category"], "scoped_agent")
+
+    def test_rule_catalog_marks_floor_rules_as_pinned(self):
+        result = set_project_rule_states(self.workspace, ["destructive-command", "prompt-injection"])
+        self.assertEqual(result.get("ignored"), ["destructive-command"])
+
+        rules = {item["id"]: item for item in get_policy_rule_catalog(self.workspace)}
+        self.assertTrue(rules["destructive-command"]["locked"])
+        self.assertTrue(rules["destructive-command"]["enabled"])
+        self.assertTrue(rules["destructive-command"]["requestedEnabled"])
+        self.assertFalse(rules["prompt-injection"]["locked"])
+        self.assertFalse(rules["prompt-injection"]["enabled"])
+
+    def test_policy_precedence_reports_session_overlay_and_winner(self):
+        write_policy_layer("global", 'version: "1.0"\nsettings:\n  default_mode: observe\n')
+        write_policy_layer("project", 'version: "1.0"\nsettings:\n  default_mode: enforce\n', self.workspace)
+
+        with patch("prismor.runtime.store.get_enrollment", return_value={"org_id": "org_123", "device_id": "dev_123"}), \
+             patch("prismor.runtime.store._enterprise_remote_cache", return_value='version: "1.0"\nsettings:\n  default_mode: enforce\n'):
+            precedence = get_policy_precedence(
+                self.workspace,
+                {"allowed_tools": ["Read"], "deny_tools": ["Bash"], "deny_network": True},
+            )
+
+        self.assertEqual(precedence["winner"], "enterprise")
+        self.assertEqual(precedence["chain"][0]["scope"], "session")
+        self.assertTrue(precedence["chain"][0]["exists"])
+        self.assertTrue(precedence["chain"][0]["winning"])
+        self.assertEqual(next(item for item in precedence["chain"] if item["scope"] == "enterprise")["mode"], "enforce")
 
 
 class TestSupplyChainEventIndex(unittest.TestCase):

@@ -28,6 +28,19 @@ _READ_GUARD = _HOOKS_SUBDIR / "read-guard.sh"
 _RECLOAK_MCP = _HOOKS_SUBDIR / "recloak-mcp.sh"
 _USERPROMPT_GUARD = _HOOKS_SUBDIR / "userprompt-guard.sh"
 _SWEEP_ON_STOP = _HOOKS_SUBDIR / "sweep-on-stop.sh"
+_KNOWN_HOOK_FILENAMES = {
+    _DECLOAK.name,
+    _SECRET_GUARD.name,
+    _READ_GUARD.name,
+    _RECLOAK_MCP.name,
+    _USERPROMPT_GUARD.name,
+    _SWEEP_ON_STOP.name,
+}
+_LEGACY_MARKERS = (
+    "prismor/runtime/cloaking/hooks/",
+    "/site-packages/warden/cloaking/hooks/",
+    "/.prismor/warden/cloaking/hooks/",
+)
 
 # Tools the detect-and-block guard scans for raw secrets. Bash is covered so
 # raw secrets in shell commands are caught; the guard is order-independent vs
@@ -36,6 +49,26 @@ _SECRET_GUARD_MATCHER = "Bash|Write|Edit|MultiEdit|mcp__.*"
 
 # All cloaking hook commands share this marker so uninstall can find them.
 _MARKER = "prismor/runtime/cloaking/hooks/"
+
+
+def _managed_hook_name(command: Any) -> str | None:
+    text = str(command or "")
+    if not any(marker in text for marker in _LEGACY_MARKERS):
+        return None
+    name = Path(text).name
+    return name if name in _KNOWN_HOOK_FILENAMES else None
+
+
+def _dedupe_hook_list(hooks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    deduped: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for hook in hooks:
+        key = _managed_hook_name(hook.get("command")) or str(hook.get("command", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(hook)
+    return deduped
 
 
 def _claude_settings_path(workspace: Path, scope: str) -> Path:
@@ -69,12 +102,20 @@ def _merge_claude_entries(
         None,
     )
     if existing is None:
-        next_entries.append(new_entry)
+        next_entries.append({**new_entry, "hooks": _dedupe_hook_list(list(new_entry.get("hooks", [])))})
         return next_entries
-    existing_commands = {h.get("command") for h in existing.get("hooks", [])}
+    existing_hooks = list(existing.get("hooks", []))
     for hook in new_entry["hooks"]:
-        if hook.get("command") not in existing_commands:
-            existing.setdefault("hooks", []).append(hook)
+        managed_name = _managed_hook_name(hook.get("command"))
+        if managed_name is not None:
+            existing_hooks = [
+                h for h in existing_hooks
+                if _managed_hook_name(h.get("command")) != managed_name
+            ]
+        elif hook.get("command") in {h.get("command") for h in existing_hooks}:
+            continue
+        existing_hooks.append(hook)
+    existing["hooks"] = _dedupe_hook_list(existing_hooks)
     return next_entries
 
 
@@ -241,9 +282,7 @@ def uninstall(*, workspace: Path, scope: str = "project") -> Dict[str, Any]:
         cleaned: List[Dict[str, Any]] = []
         for entry in entries:
             inner = entry.get("hooks", [])
-            filtered = [
-                h for h in inner if _MARKER not in str(h.get("command", ""))
-            ]
+            filtered = [h for h in inner if _managed_hook_name(h.get("command")) is None]
             if len(filtered) < len(inner):
                 removed_any = True
             if filtered:
@@ -293,7 +332,7 @@ def status(*, workspace: Path, scope: str = "project") -> Dict[str, Any]:
             continue
         for entry in entries:
             for h in entry.get("hooks", []):
-                if _MARKER in str(h.get("command", "")):
+                if _managed_hook_name(h.get("command")) is not None:
                     label = f"{event_name}"
                     matcher = entry.get("matcher")
                     if matcher:
