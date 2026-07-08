@@ -33,13 +33,15 @@ def _resolve_tool_name(event: Dict[str, Any]) -> Optional[str]:
 
     Prefers the original tool name carried in ``metadata.tool_name`` (set by the
     hook normalizer) so deny_tools can target the specific tool that ran — e.g.
-    distinguishing Edit from Write within a single file_write event. Falls back
-    to the event-type mapping for synthetic events that carry no metadata (the
-    CLI ``iam check`` path and unit tests).
+    distinguishing Edit from Write within a single file_write event, and
+    allowing operators to scope arbitrary MCP tool tags such as
+    ``mcp__node_repl__js`` from the dashboard. Falls back to the event-type
+    mapping for synthetic events that carry no metadata (the CLI ``iam check``
+    path and unit tests).
     """
     meta_tool = (event.get("metadata") or {}).get("tool_name") or ""
-    if meta_tool in _KNOWN_TOOLS:
-        return meta_tool
+    if isinstance(meta_tool, str) and meta_tool.strip():
+        return meta_tool.strip()
     return _EVENT_TYPE_TO_TOOL.get(event.get("type", ""))
 
 

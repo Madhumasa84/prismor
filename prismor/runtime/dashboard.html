@@ -1676,6 +1676,7 @@ let _drawerWs      = null;
 let _drawerScoped  = null;   // live copy being edited
 let _drawerEditing = false;
 let _drawerSelectedEvent = null;
+let _drawerRecentEvents = [];
 let _drawerAbort = null;
 
 function navigateToSession(sessionId, workspace) {
@@ -1702,6 +1703,7 @@ function closeSessDrawer() {
   document.getElementById('sessDrawer').classList.remove('open');
   _drawerSessId = null;
   _drawerSelectedEvent = null;
+  _drawerRecentEvents = [];
 }
 
 async function fetchAndRenderDrawer() {
@@ -1729,6 +1731,7 @@ function renderDrawerContent(sessId, ws, data) {
   const blocks = data.recent_blocked || [];
   const trail = data.recent_events || [];
   const paused = scoped && scoped.paused;
+  _drawerRecentEvents = trail;
 
   // Cache scoped for edit operations
   _drawerScoped = scoped ? JSON.parse(JSON.stringify(scoped)) : null;
@@ -1896,18 +1899,34 @@ function renderScopeEditor(container, scoped) {
   const allowed = [...(scoped.allowed_tools || [])];
   const denied  = [...(scoped.deny_tools   || [])];
   const netOk   = !scoped.deny_network;
+  const seenToolTags = Array.from(new Set([
+    ...(_drawerRecentEvents || []).map(item => (item.toolTag || '').trim()).filter(Boolean),
+    ((_drawerSelectedEvent && _drawerSelectedEvent.toolTag) || '').trim(),
+  ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   function tagX(list, t, cls) {
     return '<span class="tag-removable ' + cls + '" data-tool="' + safeAttr(t) + '" data-list="' + list + '">' +
       safe(t) + '<span class="tag-x" onclick="scopeRemoveTool(\'' + list + '\',\'' + safeAttr(t) + '\')">✕</span></span>';
   }
 
-  // Available tools not yet in either list
+  // Available tools not yet in either list. Include any concrete tool tags we
+  // observed in this session so MCP tools and custom integrations can be
+  // scoped directly from the drawer instead of being trapped behind the fixed
+  // built-in tool list.
   const usedInAllowed = new Set(allowed);
   const usedInDenied  = new Set(denied);
-  const addOpts = (list) => ALL_TOOLS
+  const toolUniverse = Array.from(new Set([...ALL_TOOLS, ...seenToolTags])).sort((a, b) => a.localeCompare(b));
+  const addOpts = (list) => toolUniverse
     .filter(t => list === 'allow' ? !usedInAllowed.has(t) : !usedInDenied.has(t))
     .map(t => '<option value="' + safeAttr(t) + '">' + safe(t) + '</option>').join('');
+  const seenTagsHtml = seenToolTags.length
+    ? '<div class="drawer-rule-row" style="align-items:flex-start;margin-top:10px">' +
+        '<span class="drawer-rule-label" style="padding-top:4px">Seen tool tags</span>' +
+        '<div class="drawer-rule-tags">' +
+          seenToolTags.map(t => '<button class="scoped-tag tag-net" style="cursor:pointer" onclick="scopeSeedTool(\'' + safeAttr(t) + '\')">' + safe(t) + '</button>').join('') +
+        '</div>' +
+      '</div>'
+    : '';
 
   container.innerHTML =
     // Allowed
@@ -1919,6 +1938,7 @@ function renderScopeEditor(container, scoped) {
         '</div>' +
         '<div class="tool-add-row">' +
           '<select class="tool-add-select" id="addToolAllow"><option value="">+ add tool…</option>' + addOpts('allow') + '</select>' +
+          '<input class="tool-add-select" id="addToolAllowCustom" placeholder="or type tool tag…" style="min-width:170px" />' +
           '<button class="tool-add-do" onclick="scopeAddTool(\'allow\')">Allow</button>' +
         '</div>' +
       '</div>' +
@@ -1932,10 +1952,12 @@ function renderScopeEditor(container, scoped) {
         '</div>' +
         '<div class="tool-add-row">' +
           '<select class="tool-add-select" id="addToolDeny"><option value="">+ add tool…</option>' + addOpts('deny') + '</select>' +
+          '<input class="tool-add-select" id="addToolDenyCustom" placeholder="or type tool tag…" style="min-width:170px" />' +
           '<button class="tool-add-do" onclick="scopeAddTool(\'deny\')">Deny</button>' +
         '</div>' +
       '</div>' +
     '</div>' +
+    seenTagsHtml +
     // Network
     '<div class="drawer-rule-row" style="margin-top:10px">' +
       '<span class="drawer-rule-label">Network</span>' +
@@ -1978,8 +2000,10 @@ function scopeRemoveTool(list, tool) {
 function scopeAddTool(list) {
   if (!_drawerScoped) return;
   const selId = list === 'allow' ? 'addToolAllow' : 'addToolDeny';
+  const customId = list === 'allow' ? 'addToolAllowCustom' : 'addToolDenyCustom';
   const sel = document.getElementById(selId);
-  const tool = sel?.value;
+  const custom = document.getElementById(customId);
+  const tool = (custom?.value || sel?.value || '').trim();
   if (!tool) return;
   if (list === 'allow') {
     if (!(_drawerScoped.allowed_tools || []).includes(tool))
@@ -1992,7 +2016,16 @@ function scopeAddTool(list) {
     // Remove from allow if it was there
     _drawerScoped.allowed_tools = (_drawerScoped.allowed_tools || []).filter(t => t !== tool);
   }
+  if (sel) sel.value = '';
+  if (custom) custom.value = '';
   renderScopeEditor(document.getElementById('scopeRulesView'), _drawerScoped);
+}
+
+function scopeSeedTool(tool) {
+  const allowInput = document.getElementById('addToolAllowCustom');
+  const denyInput = document.getElementById('addToolDenyCustom');
+  if (allowInput) allowInput.value = tool;
+  if (denyInput) denyInput.value = tool;
 }
 
 function scopeToggleNet() {

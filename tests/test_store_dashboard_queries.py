@@ -137,6 +137,45 @@ class TestDashboardQueries(unittest.TestCase):
         self.assertEqual(detail["recent_events"][0]["verdict"], "blocked")
         self.assertEqual(detail["recent_events"][0]["policy"]["ruleId"], "scoped-agent")
 
+    def test_scoped_rules_can_block_concrete_mcp_tool_tags(self):
+        session_id = "scoped-mcp-session"
+        save_scoped_rules(
+            self.workspace,
+            session_id,
+            {
+                "allowed_tools": ["Read"],
+                "deny_tools": ["mcp__node_repl__js"],
+                "allowed_paths": ["**"],
+                "deny_network": False,
+            },
+        )
+        save_session_snapshot(
+            workspace=self.workspace,
+            session_id=session_id,
+            agent="codex",
+            source="hook",
+            repo_url=None,
+            events=[
+                {
+                    "type": "tool_result",
+                    "agent_event": "PostToolUse",
+                    "ts": "2026-01-01T00:00:02Z",
+                    "metadata": {"tool_name": "mcp__node_repl__js"},
+                }
+            ],
+            analysis={"summary": {"riskScore": 0, "totalFindings": 0}, "findings": []},
+        )
+
+        blocked = get_events_page(verdict="blocked")
+        event = next(item for item in blocked["items"] if item["sessionId"] == session_id)
+        self.assertEqual(event["toolTag"], "mcp__node_repl__js")
+        self.assertEqual(event["policy"]["ruleId"], "scoped-agent")
+        self.assertIn("explicitly denied", event["policy"]["evidence"])
+
+        detail = get_session_scoped_detail(self.workspace, session_id)
+        self.assertEqual(detail["recent_events"][0]["verdict"], "blocked")
+        self.assertEqual(detail["recent_events"][0]["toolTag"], "mcp__node_repl__js")
+
     def test_runtime_findings_are_persisted_for_dashboard(self):
         session_id = "runtime-finding-session"
         save_session_snapshot(
