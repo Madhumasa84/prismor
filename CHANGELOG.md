@@ -1,3 +1,9 @@
+## [1.17.10] — 2026-07-08
+
+### Fixed
+
+- **Scoped session controls now support the exact observed tool tags Prismor records, including MCP-style tags like `mcp__node_repl__js`.** The session drilldown editor no longer limits operators to a narrow preset when the live event stream shows a concrete tool tag; arbitrary observed tags are accepted end-to-end, persisted in scoped session policy, and enforced by the runtime so teams can deny or allow the exact tool they just saw in the dashboard.
+
 ## [1.17.9] — 2026-07-08
 
 ### Fixed
