@@ -152,6 +152,7 @@ prismor cloak install                           # install prevention hooks
 prismor cloak add stripe_key                    # register a secret (stdin)
 prismor cloak list                              # registered placeholders
 prismor cloak status
+prismor cloak run -- <command>                  # Codex-safe decloak + execute + scrub
 
 # CI/export
 prismor analyze --json                          # output most recent session as JSON

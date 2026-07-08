@@ -12,7 +12,7 @@ AI coding agents execute shell commands, read files, call APIs, and install pack
 
 - **Block dangerous actions** before they run — destructive commands, privilege escalation, reverse shells, secret exfiltration
 - **Intercept package installs** and score them for supply-chain risk before they touch your disk
-- **Prevent secrets from reaching the model** — register a secret under a placeholder name; the hook substitutes the real value at execution time
+- **Prevent secrets from reaching the model** — register a secret under a placeholder name; Prismor resolves it locally through supported hooks or `prismor cloak run`
 - **Log every tool call** to a local SQLite store for session review and auditing
 
 Supports Claude Code, Cursor, Windsurf, and more.
@@ -130,7 +130,11 @@ Reference it in agent instructions:
 Run: curl https://api.stripe.com -H "Authorization: Bearer @@SECRET:stripe_key@@"
 ```
 
-The pre-tool-use hook substitutes the real value at execution time. The post-tool-use hook scrubs any echoed value from output before it returns to the model.
+Claude/Hermes cloaking can substitute the real value at execution time and scrub echoed values before they return to the model. Codex hooks are block-only, so Prismor blocks literal placeholder execution there; use the Prismor-owned runner instead:
+
+```bash
+prismor cloak run -- curl https://api.stripe.com -H "Authorization: Bearer @@SECRET:stripe_key@@"
+```
 
 ---
 

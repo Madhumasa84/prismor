@@ -4,7 +4,7 @@ Prismor has three components that work together to protect AI coding agent sessi
 
 **Prismor** hooks into the agent's tool-use pipeline and evaluates every command against your policy before it reaches the OS. If the policy says block, the shell never sees the command.
 
-**Cloak** prevents secrets from entering model context. You register a real secret once under a placeholder. A PreToolUse hook substitutes the real value only at execution time, then scrubs it from captured output before the model sees it.
+**Cloak** prevents secrets from entering model context. You register a real secret once under a placeholder. Agents with mutation/scrub hooks, such as Claude Code and Hermes, can substitute the real value only at execution time and scrub it from captured output. Block-only agents such as Codex use `prismor cloak run -- <command>` for that path; direct placeholder execution is blocked.
 
 **Sweep** scans local config directories used by Claude, Cursor, Windsurf, Codex, and others for secrets that have already leaked into AI tool caches, then redacts or removes them.
 
@@ -30,7 +30,7 @@ flowchart TD
 
     subgraph Cloak["Cloak — Secret Prevention"]
         Store["Secrets Store\n(~/.prismor/secrets/)"]
-        Cloak_Hook["Substitute at\nexecution time"]
+        Cloak_Hook["Resolve locally\n+ scrub output"]
         Store --> Cloak_Hook
     end
 

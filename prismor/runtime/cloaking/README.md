@@ -98,6 +98,9 @@ prismor cloak remove stripe_key
 
 # Show install state
 prismor cloak status
+
+# Codex-safe execution path: resolves placeholders locally and scrubs output
+prismor cloak run -- curl https://api.example.com -H "Authorization: Bearer @@SECRET:api_key@@"
 ```
 
 Secrets live under `$PRISMOR_HOME/secrets/` (default `~/.prismor/secrets/`) with the directory at `0700` and each file at `0600`. The directory should be **excluded from backups and sync** (Time Machine, iCloud, Dropbox). Override the location with `PRISMOR_SECRETS_DIR`.
@@ -189,7 +192,8 @@ Enumerated honestly so you know what to layer on top:
 2. **Secrets generated mid-turn** (`openssl rand`, `aws iam create-access-key`, `ssh-keygen`). The `sed`-wrap scrubber only knows about values already in `$PRISMOR_SECRETS_DIR`, so a freshly minted value flows through the *generating* command's output unscrubbed. `secret-guard.sh` does catch it on the *next* tool call if the value matches a known pattern (e.g. a generated `AKIA…` reused in a later command) — but a value with no recognizable shape still slips through.
 3. **The secrets directory itself**, if committed, synced, or backed up without exclusion. Treat it as a single point of failure.
 4. **Built-in `Read` of secret-bearing files.** `PostToolUse` can only rewrite MCP tool output, not built-in Read, so a Read cannot be scrubbed after the fact. `read-guard.sh` (a `PreToolUse:Read` hook, on by default) closes this by *denying* a Read whose target file contains a registered secret and directing the model to the `@@SECRET:name@@` placeholder instead. Disable with `prismor cloak install --no-read-guard` if a deny is too strict for your workflow.
-5. **Assistant-side narration.** If the model already saw a real value (through paste, Read, or a command that bypassed the wrapper), it can echo the value in prose. Hooks cannot filter assistant text. Use `/clear` immediately after any suspected leak.
+5. **Codex hook mutation.** Codex hooks can block, but cannot rewrite Bash commands or scrub Bash output. In Codex enforce mode, Prismor blocks commands containing `@@SECRET:name@@` so placeholders do not execute literally. Use `prismor cloak run -- <command>` for a first-class decloak + execute + scrub path.
+6. **Assistant-side narration.** If the model already saw a real value (through paste, Read, or a command that bypassed the wrapper), it can echo the value in prose. Hooks cannot filter assistant text. Use `/clear` immediately after any suspected leak.
 
 For residue that slips through despite all of the above, run:
 

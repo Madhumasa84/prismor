@@ -674,8 +674,10 @@ def persist_runtime_findings(
             if idx is None:
                 idx = event_index
             fid = str(finding.get("id") or finding.get("finding_id") or f"{session_id}:runtime-{idx}-{i}")
-            if fid == f"{session_id}:scoped-agent":
-                fid = f"{session_id}:scoped-agent-{idx}"
+            for singleton in ("scoped-agent", "codex-cloak-placeholder", "codex-cloak-read-guard"):
+                if fid == f"{session_id}:{singleton}":
+                    fid = f"{session_id}:{singleton}-{idx}"
+                    break
             rows.append((
                 fid,
                 session_id,

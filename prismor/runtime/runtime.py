@@ -217,6 +217,18 @@ def evaluate_tool_call(
     _session_seq = len(events) - 1
     findings = engine.evaluate(event, _session_seq, session_id=session_id, subject=subject)
 
+    # Codex cannot mutate Bash input or scrub Bash output from hooks. Block
+    # literal cloak placeholders/read leaks before they execute, and persist the
+    # finding so the dashboard explains the decision.
+    if agent == "codex":
+        try:
+            from prismor.runtime.cloaking.runtime import codex_cloak_finding
+            cloak_finding = codex_cloak_finding(event, session_id)
+            if cloak_finding:
+                findings.append(cloak_finding)
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] codex cloak guard error: {exc}\n")
+
     # Session-scoped rules.
     try:
         from prismor.runtime.scoped_agent import load_scoped_rules, check_scoped_rules

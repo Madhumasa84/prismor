@@ -66,7 +66,7 @@ Rules:
 - If the task involves reading/editing code, allow Read/Edit/Write for relevant paths
 - If the task does NOT mention network, web, fetch, install, or download, set deny_network: true
 - Always include Read in allowed_tools (agents need to read files to orient)
-- If the task prompt contains @@SECRET:name@@ placeholders, always include Bash in allowed_tools — the runtime cloaking layer requires shell execution (curl/bash) to substitute and scrub secrets at execution time
+- If the task prompt contains @@SECRET:name@@ placeholders, include Bash so shell-based secret use can go through the agent's decloak hook or `prismor cloak run`.
 """
 
 
@@ -141,12 +141,13 @@ def _apply_cloak_invariant(rules: Dict[str, Any], goal: str) -> Dict[str, Any]:
     """Enforce the cloaking invariant deterministically, regardless of how the
     rules were produced (LLM or static heuristic).
 
-    A prompt that references a cloaked secret (``@@SECRET:name@@``) can only be
-    fulfilled by a shell tool call — the decloak hook substitutes the real value
-    into a Bash command at execution time. So Bash MUST be allowed and network
-    MUST be permitted whenever the goal carries a placeholder. The LLM path is
-    advisory and sometimes drops Bash; this code-level guard makes the
-    invariant non-negotiable so the secret-cloaking flow never self-blocks.
+    A prompt that references a cloaked secret (``@@SECRET:name@@``) usually
+    needs shell execution: Claude/Hermes can use their decloak hooks, while
+    block-only agents such as Codex must use ``prismor cloak run``. So Bash MUST
+    be allowed and network MUST be permitted whenever the goal carries a
+    placeholder. The LLM path is advisory and sometimes drops Bash; this
+    code-level guard makes the invariant non-negotiable so the secret-cloaking
+    flow never self-blocks.
     """
     if "@@secret:" not in goal.lower():
         return rules

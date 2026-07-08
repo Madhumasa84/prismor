@@ -152,6 +152,7 @@ Full policy model, rule schema, and the default rule list: [Prismor](prismor-run
 | `prismor cloak list` | — | List registered placeholder names (never values). |
 | `prismor cloak remove <name>` | — | Delete a registered secret. |
 | `prismor cloak status` | `--scope` | Show whether cloaking hooks are installed + secret count. |
+| `prismor cloak run -- <command>` | — | Run a command with `@@SECRET:name@@` placeholders resolved locally and stdout/stderr scrubbed. Use this for Codex, whose hooks are block-only. |
 | `prismor cloak pattern <list\|add\|remove>` | — | Manage the secret-detection regexes. |
 | `prismor sweep` | `--redact`, `--clean`, `--restore`, `--show-vault`, `--purge` | Find secrets already leaked into AI tool configs and vault/redact them. |
 

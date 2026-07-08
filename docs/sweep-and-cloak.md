@@ -11,10 +11,12 @@ tool caches.
 ## Cloak
 
 Cloak works at the tool boundary. You register a real secret once under a
-placeholder (`@@SECRET:name@@`). A `PreToolUse` hook substitutes the real value
-only at execution time, then scrubs it back out of captured output before the
-model sees it. The value never appears in the conversation transcript or any
-upstream API request. Pasted secrets are intercepted automatically.
+placeholder (`@@SECRET:name@@`). Agents with mutation/scrub hooks, such as
+Claude Code and Hermes, substitute the real value only at execution time and
+scrub it back out of captured output before the model sees it. Block-only agents
+such as Codex use `prismor cloak run -- <command>` for the same local
+decloak/execute/scrub path; direct placeholder execution is blocked in enforce
+mode. Pasted secrets are intercepted automatically.
 
 ### Setup (once)
 
@@ -37,8 +39,8 @@ You mostly do nothing. The flow is automatic:
   `@@SECRET:auto_xxxx@@`.
 - **The model emits a raw secret in a command, file, or MCP call** → the call is
   denied, the value is vaulted, and the model is told to use the placeholder.
-- **The model uses a placeholder** → the hook substitutes the real value at run
-  time and scrubs it back out of the output.
+- **The model uses a placeholder** → Claude/Hermes hooks substitute and scrub
+  automatically; in Codex, run the command through `prismor cloak run -- ...`.
 
 Register a secret deliberately (value read from stdin, never argv):
 
@@ -48,6 +50,7 @@ prismor cloak add aws_prod --from-file ~/.keys/aws
 prismor cloak add --env-file .env            # import each KEY=VALUE as @@SECRET:KEY@@
 prismor cloak list                           # placeholder names only — never values
 prismor cloak status
+prismor cloak run -- <command>               # Codex-safe decloak + execute + scrub
 ```
 
 ### Custom detection patterns
