@@ -52,6 +52,25 @@ def test_not_enrolled_is_local(tmp_path):
     assert info["scope"] == "local" and info["reason"] == "not_enrolled"
 
 
+def test_revoked_device_falls_back_to_local(tmp_path, monkeypatch):
+    from prismor.runtime.enterprise import workspace_scope as ws
+    from prismor.runtime.enterprise import identity
+    _enroll()
+    identity.mark_revoked("device deleted by admin")
+    monkeypatch.setattr(ws, "org_managed_patterns", lambda: ["github.com/acme/*"])
+    info = ws.resolve_scope(_git_repo(tmp_path, "https://github.com/acme/payments"))
+    assert info["scope"] == "local" and info["reason"] == "revoked"
+
+
+def test_revoked_device_is_not_reported_as_enrolled():
+    from prismor.runtime.enterprise import identity
+    from prismor.runtime.store import get_enrollment
+    _enroll()
+    identity.mark_revoked("device deleted by admin")
+    assert identity.is_enrolled() is False
+    assert get_enrollment() is None
+
+
 def test_no_patterns_manages_everything(tmp_path, monkeypatch):
     from prismor.runtime.enterprise import workspace_scope as ws
     _enroll()

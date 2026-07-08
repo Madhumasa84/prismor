@@ -135,6 +135,8 @@ def resolve_scope(workspace: Path) -> Dict[str, Any]:
     remote = detect_git_remote(workspace)
     if not ident:
         return {"scope": "local", "reason": "not_enrolled", "remote": remote, "org_id": None}
+    if _identity.revoked_info():
+        return {"scope": "local", "reason": "revoked", "remote": remote, "org_id": None}
 
     org_id = ident.get("org_id")
     patterns = org_managed_patterns()

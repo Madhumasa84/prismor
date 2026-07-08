@@ -132,6 +132,15 @@ def test_no_remote_policy_is_inert(tmp_path, monkeypatch):
     assert engine.agent_controls == {}
 
 
+def test_revoked_device_ignores_cached_remote_policy(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
+    _write_remote(tmp_path / ".prismor", REMOTE_POLICY)
+    _enroll()
+    from prismor.runtime.enterprise import identity, remote_policy
+    identity.mark_revoked("policy fetch rejected (401)")
+    assert remote_policy.verify_and_load() is None
+
+
 AGENT_CONTROL_POLICY = """
 settings:
   agent_controls:

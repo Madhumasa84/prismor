@@ -2207,7 +2207,10 @@ def _project_policy_path(workspace: Path) -> Path:
 
 
 def get_enrollment() -> Optional[Dict[str, Any]]:
-    """Return enterprise enrollment info, or None if unenrolled."""
+    """Return active enterprise enrollment info, or None if unenrolled/revoked."""
+    from prismor.runtime.enterprise import identity as _identity
+    if _identity.revoked_info():
+        return None
     identity = prismor_home() / "identity.json"
     if not identity.exists():
         return None
@@ -2269,6 +2272,8 @@ def read_policy_layer(scope: str, workspace: Optional[Path] = None) -> Dict[str,
             return {"exists": False, "yaml": "", "path": str(path), "error": str(exc)}
 
     if scope == "enterprise":
+        if get_enrollment() is None:
+            return {"exists": False, "yaml": "", "enrollment": None, "readonly": False}
         yaml_content = _enterprise_remote_cache()
         enrollment = get_enrollment()
         return {

@@ -64,7 +64,7 @@ def load_identity() -> Optional[Dict[str, Any]]:
 
 
 def is_enrolled() -> bool:
-    return load_identity() is not None
+    return load_identity() is not None and revoked_info() is None
 
 
 def save_identity(identity: Dict[str, Any]) -> Path:

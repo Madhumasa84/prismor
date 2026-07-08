@@ -345,6 +345,8 @@ def verify_and_load() -> Optional[Dict[str, Any]]:
 
     Called by the PolicyEngine on every load — must be cheap and never raise.
     """
+    if _identity.revoked_info():
+        return None
     policy_path = cached_policy_path()
     sig_path = _cached_sig_path()
     if not policy_path.exists() or not sig_path.exists():
