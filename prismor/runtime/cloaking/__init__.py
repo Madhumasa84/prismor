@@ -33,8 +33,10 @@ from prismor.runtime.cloaking.patterns import (
     remove_pattern,
 )
 from prismor.runtime.cloaking.secrets_store import (
+    add_env_secrets,
     add_secret,
     list_secrets,
+    parse_env_file,
     remove_secret,
     secrets_dir,
 )
@@ -46,8 +48,10 @@ __all__ = [
     "hermes_install",
     "hermes_uninstall",
     "hermes_status",
+    "add_env_secrets",
     "add_secret",
     "list_secrets",
+    "parse_env_file",
     "remove_secret",
     "secrets_dir",
     "add_pattern",

@@ -29,6 +29,7 @@ Commands:
   cloak install   Install secret-cloaking hooks (Claude Code)
   cloak uninstall Remove cloaking hooks
   cloak add NAME  Register a real secret under a placeholder name
+  cloak add --env-file .env  Register every .env entry as its own placeholder
   cloak list      List registered placeholder names (never values)
   cloak remove NAME  Delete a registered secret
   cloak status    Show whether cloaking hooks are installed
@@ -1427,6 +1428,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             hermes_install,
             hermes_uninstall,
             hermes_status,
+            add_env_secrets,
             add_secret,
             list_secrets,
             remove_secret,
@@ -1512,6 +1514,27 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
         if sub == "add":
+            if args.env_file:
+                if args.name or args.value_file:
+                    sys.stderr.write("error: --env-file cannot be combined with a placeholder name or --from-file\n")
+                    raise SystemExit(1)
+                try:
+                    created = add_env_secrets(Path(args.env_file))
+                except (OSError, ValueError) as exc:
+                    sys.stderr.write(f"error: {exc}\n")
+                    raise SystemExit(1)
+                print(f"Imported {len(created)} secret(s) from {args.env_file}:")
+                print()
+                for entry in created:
+                    placeholder = f"@@SECRET:{entry['name']}@@"
+                    print(f"  {_color(placeholder, _CYAN)} ({entry['bytes']} bytes)")
+                print()
+                print("The model can now reference these values by placeholder name.")
+                return
+
+            if not args.name:
+                sys.stderr.write("error: cloak add requires either NAME or --env-file\n")
+                raise SystemExit(1)
             name = args.name
             if args.value_file:
                 value = Path(args.value_file).read_text(encoding="utf-8").rstrip("\n")
@@ -2160,10 +2183,12 @@ def build_parser() -> argparse.ArgumentParser:
     t_uninstall.add_argument("--scope", choices=["project", "user"], default="project",
                              help="Hook scope (default: project)")
 
-    t_add = cloak_sub.add_parser("add", help="Register a real secret under a placeholder name")
-    t_add.add_argument("name", help="Placeholder name (used as @@SECRET:name@@ in tool calls)")
+    t_add = cloak_sub.add_parser("add", help="Register one secret or import all entries from a dotenv file")
+    t_add.add_argument("name", nargs="?", help="Placeholder name (used as @@SECRET:name@@ in tool calls)")
     t_add.add_argument("--from-file", dest="value_file",
                        help="Read value from this file (otherwise read from stdin / hidden prompt)")
+    t_add.add_argument("--env-file", dest="env_file",
+                       help="Import every KEY=VALUE entry from this dotenv file as @@SECRET:KEY@@")
 
     cloak_sub.add_parser("list", help="List registered placeholder names (never values)")
 

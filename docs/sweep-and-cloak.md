@@ -45,6 +45,7 @@ Register a secret deliberately (value read from stdin, never argv):
 ```bash
 prismor cloak add stripe_key                 # reference anywhere as @@SECRET:stripe_key@@
 prismor cloak add aws_prod --from-file ~/.keys/aws
+prismor cloak add --env-file .env            # import each KEY=VALUE as @@SECRET:KEY@@
 prismor cloak list                           # placeholder names only — never values
 prismor cloak status
 ```

@@ -148,6 +148,7 @@ Full policy model, rule schema, and the default rule list: [Prismor](prismor-run
 |---|---|---|
 | `prismor cloak install` | `--scope`, `--no-userprompt-guard`, `--no-secret-guard`, `--sweep-on-stop` | Install cloaking hooks so real secrets stay out of model context. |
 | `prismor cloak add <name>` | `--from-file` | Register a secret under a placeholder. Value read from stdin / hidden prompt — never argv. |
+| `prismor cloak add --env-file .env` | — | Import every `KEY=VALUE` entry from a dotenv file as `@@SECRET:KEY@@`. |
 | `prismor cloak list` | — | List registered placeholder names (never values). |
 | `prismor cloak remove <name>` | — | Delete a registered secret. |
 | `prismor cloak status` | `--scope` | Show whether cloaking hooks are installed + secret count. |

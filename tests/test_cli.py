@@ -25,6 +25,18 @@ def run_cli(*args, stdin=None):
     return result
 
 
+def run_cli_env(*args, stdin=None, env=None):
+    result = subprocess.run(
+        [sys.executable, CLI, *args],
+        capture_output=True,
+        text=True,
+        stdin=stdin,
+        timeout=30,
+        env=env,
+    )
+    return result
+
+
 def run_immunity(*args, stdin=None):
     result = subprocess.run(
         [sys.executable, IMMUNITY_CLI, *args],
@@ -165,6 +177,51 @@ class TestCliAnalyzeCleanSession(unittest.TestCase):
                 self.assertEqual(data["summary"]["totalEvents"], 2)
             finally:
                 os.unlink(f.name)
+
+
+class TestCloakEnvImport(unittest.TestCase):
+    """Bulk-import dotenv entries into the cloak secret store."""
+
+    def test_cloak_add_env_file_imports_each_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            env_file = Path(td) / ".env"
+            env_file.write_text(
+                "# comment\n"
+                "OPENAI_API_KEY=sk-test-123\n"
+                "export STRIPE_KEY=\"stripe value\"\n"
+                "EMPTY_IGNORED=kept # inline comment\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["PRISMOR_HOME"] = td
+
+            r = run_cli_env("cloak", "add", "--env-file", str(env_file), env=env)
+
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("Imported 3 secret(s)", r.stdout)
+            self.assertIn("@@SECRET:OPENAI_API_KEY@@", r.stdout)
+            self.assertIn("@@SECRET:STRIPE_KEY@@", r.stdout)
+            self.assertIn("@@SECRET:EMPTY_IGNORED@@", r.stdout)
+            self.assertEqual((Path(td) / "secrets" / "OPENAI_API_KEY").read_text(encoding="utf-8"), "sk-test-123")
+            self.assertEqual((Path(td) / "secrets" / "STRIPE_KEY").read_text(encoding="utf-8"), "stripe value")
+            self.assertEqual((Path(td) / "secrets" / "EMPTY_IGNORED").read_text(encoding="utf-8"), "kept")
+
+    def test_cloak_add_env_file_rejects_malformed_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            env_file = Path(td) / ".env"
+            env_file.write_text("BROKEN_LINE\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PRISMOR_HOME"] = td
+
+            r = run_cli_env("cloak", "add", "--env-file", str(env_file), env=env)
+
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("expected KEY=VALUE", r.stderr)
+
+    def test_cloak_add_requires_name_or_env_file(self):
+        r = run_cli("cloak", "add")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("requires either NAME or --env-file", r.stderr)
 
 
 class TestImmunityUmbrella(unittest.TestCase):

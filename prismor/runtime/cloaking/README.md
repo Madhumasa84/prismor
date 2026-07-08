@@ -88,6 +88,7 @@ prismor cloak uninstall
 prismor cloak add stripe_key          # prompts you to paste the value
 printf '%s' "$(cat ~/.keys/stripe)" | prismor cloak add stripe_key
 prismor cloak add aws_prod --from-file ~/.keys/aws
+prismor cloak add --env-file .env     # imports each KEY=VALUE as @@SECRET:KEY@@
 
 # List registered placeholder names — NEVER shows values
 prismor cloak list

@@ -146,7 +146,7 @@ stale package earlier on `sys.path`.
 
 > On externally-managed Pythons (PEP 668 — Ubuntu 23.04+, Homebrew) `pip3 install` refuses to run; install PyYAML from your system package manager instead (`sudo apt install python3-yaml`, `brew install pyyaml`, …). `init.sh` will tell you if it's missing.
 
-This installs enforce-mode Prismor hooks and the Cloak prevention layer. To register a secret, run `prismor cloak add stripe_key` and enter the value when prompted. Reference it in tool calls as `@@SECRET:stripe_key@@` and the hook handles the rest.
+This installs enforce-mode Prismor hooks and the Cloak prevention layer. To register a secret, run `prismor cloak add stripe_key` and enter the value when prompted. To import an entire dotenv file at once, run `prismor cloak add --env-file .env`. Reference values in tool calls as `@@SECRET:stripe_key@@` and the hook handles the rest.
 
 Prefer the interactive wizard? Drop the env vars:
 
