@@ -72,7 +72,15 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
     # against the same combined_text field. See issue #155.
     "memory": ["combined_text"],
     "skill_manifest": ["combined_text"],
+    # Synthetic type for ad-hoc validation of arbitrary agent I/O
+    # (PolicyEngine.check_text / `prismor check --type text`). It has no rules
+    # of its own; evaluate() routes it through the agent-I/O content rules.
+    # See PrismorSec/prismor#163.
+    "text": ["combined_text"],
 }
+
+# Rule event-types a synthetic "text" check is evaluated against.
+_TEXT_CONTENT_TYPES = frozenset({"prompt", "tool_result"})
 
 # Event sources whose content is untrusted and must be scrutinized by every
 # content rule that scrutinizes tool output. `memory` (CLAUDE.md/AGENTS.md,
@@ -646,7 +654,13 @@ class PolicyEngine:
         findings: List[Dict[str, Any]] = []
 
         for rule in self.rules:
-            if event_type not in rule.event_types:
+            # A synthetic "text" event has no rules of its own; route it through
+            # the agent-I/O content rules so check_text / `--type text` actually
+            # validate arbitrary text. See PrismorSec/prismor#163.
+            if event_type == "text":
+                if _TEXT_CONTENT_TYPES.isdisjoint(rule.event_types):
+                    continue
+            elif event_type not in rule.event_types:
                 continue
 
             # Determine which fields to check.
