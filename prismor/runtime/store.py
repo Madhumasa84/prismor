@@ -1075,9 +1075,9 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
             row = conn.execute(
                 """
                 SELECT COUNT(*) FROM findings f
-                LEFT JOIN events e ON e.session_id = f.session_id
+                JOIN sessions s ON s.session_id = f.session_id
                 WHERE f.category IN ('destructive_command','dos_resource_exhaustion')
-                  AND e.ts >= datetime('now', ?)
+                  AND s.updated_at >= datetime('now', ?)
                 """,
                 (f"-{hours} hours",),
             ).fetchone()
@@ -1086,10 +1086,10 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
             row = conn.execute(
                 """
                 SELECT COUNT(*) FROM findings f
-                LEFT JOIN events e ON e.session_id = f.session_id
+                JOIN sessions s ON s.session_id = f.session_id
                 WHERE f.category IN ('destructive_command','dos_resource_exhaustion')
-                  AND e.ts >= datetime('now', ?)
-                  AND e.ts < datetime('now', ?)
+                  AND s.updated_at >= datetime('now', ?)
+                  AND s.updated_at < datetime('now', ?)
                 """,
                 (f"-{hours * 2} hours", f"-{hours} hours"),
             ).fetchone()
@@ -1103,9 +1103,8 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 """
                 SELECT f.category, COUNT(*) as cnt
                 FROM findings f
-                LEFT JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
-                WHERE COALESCE(e.ts, s.updated_at) >= datetime('now', ?)
+                JOIN sessions s ON s.session_id = f.session_id
+                WHERE s.updated_at >= datetime('now', ?)
                 GROUP BY f.category
                 """,
                 (f"-{hours} hours",),
@@ -1118,10 +1117,9 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 """
                 SELECT COUNT(*) as cnt
                 FROM findings f
-                LEFT JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
-                WHERE COALESCE(e.ts, s.updated_at) >= datetime('now', ?)
-                  AND COALESCE(e.ts, s.updated_at) <  datetime('now', ?)
+                JOIN sessions s ON s.session_id = f.session_id
+                WHERE s.updated_at >= datetime('now', ?)
+                  AND s.updated_at <  datetime('now', ?)
                 """,
                 (f"-{hours * 2} hours", f"-{hours} hours"),
             ):
@@ -1130,11 +1128,8 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
             # ── Block rate timeseries (30 days) ───────────────────────────
             for row in conn.execute(
                 """
-                SELECT date(e.ts) as day,
-                       COUNT(DISTINCT e.id) as total_events,
-                       COUNT(DISTINCT f.rowid) as flagged_events
+                SELECT date(ts) as day, COUNT(*) as total_events
                 FROM events e
-                LEFT JOIN findings f ON f.session_id = e.session_id
                 WHERE e.ts >= datetime('now', '-30 days')
                 GROUP BY day
                 """
@@ -1143,6 +1138,18 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 if day not in timeseries_acc:
                     timeseries_acc[day] = [0, 0]
                 timeseries_acc[day][0] += row["total_events"] or 0
+            for row in conn.execute(
+                """
+                SELECT date(s.updated_at) as day, COUNT(*) as flagged_events
+                FROM findings f
+                JOIN sessions s ON s.session_id = f.session_id
+                WHERE s.updated_at >= datetime('now', '-30 days')
+                GROUP BY day
+                """
+            ):
+                day = row["day"] or ""
+                if day not in timeseries_acc:
+                    timeseries_acc[day] = [0, 0]
                 timeseries_acc[day][1] += row["flagged_events"] or 0
 
             # ── Agent blocked commands (24h, per-finding event) ───────────
@@ -1153,8 +1160,7 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 SELECT s.agent, COUNT(*) as blocked
                 FROM findings f
                 JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
-                WHERE COALESCE(e.ts, s.updated_at) >= datetime('now', ?)
+                WHERE s.updated_at >= datetime('now', ?)
                 GROUP BY s.agent
                 """,
                 (f"-{hours} hours",),
@@ -1177,15 +1183,9 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 """
                 SELECT f.title, f.category, f.severity,
                        COUNT(*) as count,
-                       MAX(COALESCE(e.ts, s.updated_at)) as last_seen_ts
+                       MAX(s.updated_at) as last_seen_ts
                 FROM findings f
                 LEFT JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
-                                  AND e.id = (
-                                    SELECT id FROM events
-                                    WHERE session_id = f.session_id
-                                    ORDER BY id LIMIT 1 OFFSET COALESCE(f.event_index, 0)
-                                  )
                 GROUP BY f.title, f.category, f.severity
                 ORDER BY count DESC LIMIT 30
                 """
@@ -1218,6 +1218,11 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 FROM events e
                 JOIN sessions s ON s.session_id = e.session_id
                 LEFT JOIN findings f ON f.session_id = e.session_id
+                                    AND f.event_index = (
+                                      SELECT COUNT(*) FROM events e2
+                                      WHERE e2.session_id = e.session_id
+                                        AND e2.id < e.id
+                                    )
                 WHERE e.ts >= datetime('now', '-24 hours')
                 ORDER BY e.ts DESC LIMIT 100
                 """
@@ -1243,10 +1248,9 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 """
                 SELECT f.session_id as sid, s.agent, s.source,
                        COUNT(f.finding_id) as blocked,
-                       MAX(COALESCE(e.ts, s.updated_at)) as last_seen_ts
+                       MAX(s.updated_at) as last_seen_ts
                 FROM findings f
                 LEFT JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
                 GROUP BY f.session_id
                 ORDER BY blocked DESC LIMIT 10
                 """
@@ -1303,9 +1307,8 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
                 """
                 SELECT f.severity, COUNT(*) as cnt
                 FROM findings f
-                LEFT JOIN sessions s ON s.session_id = f.session_id
-                LEFT JOIN events e ON e.session_id = f.session_id
-                WHERE COALESCE(e.ts, s.updated_at) >= datetime('now', ?)
+                JOIN sessions s ON s.session_id = f.session_id
+                WHERE s.updated_at >= datetime('now', ?)
                 GROUP BY f.severity
                 """,
                 (f"-{hours} hours",),

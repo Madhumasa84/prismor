@@ -2103,7 +2103,22 @@ function riskClass(n) {
   return 'risk-0';
 }
 async function apiFetch(url, opts) {
-  const res = await fetch(url, opts);
+  opts = opts || {};
+  const timeoutMs = opts.timeoutMs || 8000;
+  const fetchOpts = {...opts};
+  delete fetchOpts.timeoutMs;
+  let timer = null;
+  if (!fetchOpts.signal && timeoutMs > 0) {
+    const controller = new AbortController();
+    fetchOpts.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+  }
+  let res;
+  try {
+    res = await fetch(url, fetchOpts);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${res.status}`);
@@ -3152,8 +3167,9 @@ function _dismissLoader() {
   setTimeout(() => el.remove(), 420);
 }
 
-// Pre-fetch everything in parallel; tick progress as each resolves
-Promise.all([
+// Pre-fetch everything in parallel, but never let one slow endpoint pin the
+// splash screen. Demo reliability matters more than waiting for every widget.
+const _bootTasks = [
   loadStats().then(()         => _loadTick('Stats loaded')),
   loadSessions().then(()      => _loadTick('Sessions loaded')),
   loadFindings().then(()      => _loadTick('Findings loaded')),
@@ -3161,9 +3177,11 @@ Promise.all([
   loadSupplyChain().then(()   => _loadTick('Supply chain loaded')),
   loadAgents().then(()        => _loadTick('Agents loaded')),
   loadWorkspaces()
-    .then(() => Promise.all([loadSessionControl(), loadPolicy()]))
+    .then(() => Promise.allSettled([loadSessionControl(), loadPolicy()]))
     .then(()                  => _loadTick('Policy & controls loaded')),
-]).then(_dismissLoader).catch(_dismissLoader);
+];
+setTimeout(_dismissLoader, 1800);
+Promise.allSettled(_bootTasks).then(_dismissLoader);
 setInterval(() => {
   loadStats();
   loadSessions();
