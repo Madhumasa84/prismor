@@ -1608,6 +1608,17 @@ def _extract_fields(event: Dict[str, Any]) -> Dict[str, str]:
         "path": _resolve_path(raw_path),
         "url": str(event.get("url", "")),
         "combined_text": "\n".join(combined_parts),
+        # Individual content fields, exposed so a rule can target a specific
+        # field instead of only the folded ``combined_text``. Without these,
+        # rules that declare ``fields: [prompt|response|content|stdout|stderr]``
+        # (pii-exposure, model-manipulation) never matched on prompt/
+        # tool_result/memory events, since the lookup fell through to "".
+        # See PrismorSec/prismor#162.
+        "prompt": str(event.get("prompt", "")),
+        "response": str(event.get("response", "")),
+        "content": str(event.get("content", "")),
+        "stdout": str(event.get("stdout", "")),
+        "stderr": str(event.get("stderr", "")),
     }
 
 
