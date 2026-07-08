@@ -1531,7 +1531,13 @@ def get_events_page(
             params: List[Any] = []
             limit = max(1, min(limit, 200))
             page = max(1, page)
-            fetch_limit = 5000 if (verdict or agent) else max(200, page * limit * 3)
+            if verdict == "blocked":
+                fetch_limit = max(300, page * limit * 12)
+            elif verdict == "allowed" or agent:
+                fetch_limit = max(300, page * limit * 5)
+            else:
+                fetch_limit = max(200, page * limit * 3)
+            fetch_limit = min(fetch_limit, 1200)
             if agent:
                 where_clauses.append("s.agent = ?")
                 params.append(agent)
@@ -2247,17 +2253,25 @@ def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any
     scoped = load_scoped_rules(workspace, session_id)
 
     recent_blocked: List[Dict[str, Any]] = []
-    db = get_db_path(workspace)
+    db = prismor_home() / "prismor.db"
     if db.exists():
         try:
             conn = sqlite3.connect(str(db), check_same_thread=False)
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT title, category, severity, evidence, created_at
-                FROM findings
-                WHERE session_id = ? AND action = 'block'
-                ORDER BY created_at DESC LIMIT 5
+                SELECT f.title, f.category, f.severity, f.evidence, e.ts
+                FROM findings f
+                LEFT JOIN events e
+                  ON e.session_id = f.session_id
+                 AND (
+                   SELECT COUNT(*)
+                   FROM events e2
+                   WHERE e2.session_id = e.session_id
+                     AND e2.id < e.id
+                 ) = COALESCE(f.event_index, 0)
+                WHERE f.session_id = ?
+                ORDER BY e.ts DESC LIMIT 5
                 """,
                 (session_id,),
             )

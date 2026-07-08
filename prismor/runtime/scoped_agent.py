@@ -196,9 +196,9 @@ def _static_fallback_rules(goal: str, available_tools: List[str]) -> Dict[str, A
 # ── Sidecar persistence ───────────────────────────────────────────────────
 
 def _scoped_dir(workspace: Path) -> Path:
-    from prismor.runtime.store import get_data_dir
+    from prismor.runtime.store import prismor_home
 
-    return get_data_dir(workspace) / "scoped"
+    return prismor_home() / "scoped"
 
 
 def _scoped_path(workspace: Path, session_id: str) -> Path:

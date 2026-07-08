@@ -56,7 +56,7 @@ class TestPrismorHomeHonored(unittest.TestCase):
         import prismor.runtime.store as store_mod
 
         workspace = self.home.parent / f"demo-workspace-{id(self)}"
-        workspace.mkdir()
+        workspace.mkdir(exist_ok=True)
 
         data_dir = store_mod.get_data_dir(workspace)
 

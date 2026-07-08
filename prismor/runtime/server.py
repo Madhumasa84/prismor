@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, parse_qs
@@ -298,6 +298,25 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        if path == "/api/refresh":
+            try:
+                workspace = _SERVER_WORKSPACE or Path.cwd()
+                _migrate_workspace_runtime_state(workspace, prismor_home())
+                initialize_database(workspace)
+                sessions = get_sessions_page(page=1, limit=1, sort="updatedAt", direction="desc")
+                events = get_events_page(page=1, limit=1)
+                self._send_json({
+                    "ok": True,
+                    "workspace": str(workspace),
+                    "home": str(prismor_home()),
+                    "latest_session": (sessions.get("items") or [{}])[0].get("sessionId"),
+                    "sessions": sessions.get("total", 0),
+                    "events": events.get("total", 0),
+                })
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
         # POST /api/agents/<name> — update per-agent control settings
         if path.startswith("/api/agents/"):
             agent_name = path[len("/api/agents/"):]
@@ -435,7 +454,7 @@ def run_server(
     import errno as _errno
     while True:
         try:
-            server = HTTPServer((host, port), PrismorRequestHandler)
+            server = ThreadingHTTPServer((host, port), PrismorRequestHandler)
             break
         except OSError as exc:
             if exc.errno == _errno.EADDRINUSE:
