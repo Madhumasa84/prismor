@@ -2590,7 +2590,7 @@ def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any
                 FROM numbered_events e
                 LEFT JOIN findings f ON f.session_id = e.session_id AND f.event_index = e.rn
                 ORDER BY e.ts DESC
-                LIMIT 12
+                LIMIT 60
                 """,
                 (session_id,),
             ):

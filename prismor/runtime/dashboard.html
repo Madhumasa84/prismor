@@ -890,6 +890,138 @@
     display: none; max-width: 80vw;
   }
   #prismorToast.err { background: #b91c1c; }
+  /* ═══ Sessions redesign: Agent view + Session flow graph ═══════════════ */
+  .view-topbar { display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .view-back {
+    display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600;
+    color:var(--gray-500); background:var(--gray-50); border:1px solid var(--gray-200);
+    border-radius:8px; padding:7px 12px; cursor:pointer; transition:all .12s;
+  }
+  .view-back:hover { background:#fff; color:var(--gray-800); border-color:var(--gray-300); }
+  .view-back .icon { width:13px; height:13px; }
+  .crumbs { font-size:11px; color:var(--gray-400); display:flex; align-items:center; gap:6px; }
+  .crumbs a { color:var(--gray-500); cursor:pointer; text-decoration:none; }
+  .crumbs a:hover { color:var(--gray-800); text-decoration:underline; }
+  .crumbs .sep { color:var(--gray-300); }
+
+  /* clickable agent chip */
+  .agent-pill.link { cursor:pointer; transition:all .12s; }
+  .agent-pill.link:hover { background:var(--gray-800); color:#fff; }
+
+  /* ── Agent hero ── */
+  .agent-hero {
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    padding:18px 20px; margin-bottom:18px;
+    background:linear-gradient(135deg,#fff, var(--gray-50));
+    border:1px solid var(--gray-200); border-radius:14px;
+  }
+  .agent-avatar {
+    width:52px; height:52px; border-radius:14px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--gray-900); color:#fff; font-weight:700; font-size:20px;
+  }
+  .agent-avatar.blocked { background:#b91c1c; }
+  .agent-hero-main { flex:1; min-width:180px; }
+  .agent-hero-name { font-size:18px; font-weight:700; color:var(--gray-900); display:flex; align-items:center; gap:10px; }
+  .agent-hero-sub { font-size:12px; color:var(--gray-500); margin-top:3px; }
+  .agent-switch-wrap { display:flex; align-items:center; gap:8px; }
+  .agent-switch-wrap label { font-size:11px; color:var(--gray-400); font-weight:600; }
+  .agent-switch {
+    font-family:var(--font-ui); font-size:13px; font-weight:600; color:var(--gray-800);
+    border:1px solid var(--gray-300); border-radius:9px; padding:8px 12px; background:#fff; cursor:pointer;
+    min-width:180px;
+  }
+  .agent-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .agent-stat {
+    flex:1; min-width:120px; padding:14px 16px; border:1px solid var(--gray-200);
+    border-radius:12px; background:#fff;
+  }
+  .agent-stat-label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--gray-400); font-weight:600; }
+  .agent-stat-value { font-size:24px; font-weight:700; color:var(--gray-900); margin-top:4px; }
+  .agent-stat-value.accent { color:var(--pink-600); }
+
+  /* ── Session flow page ── */
+  .session-hero {
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:16px 20px; margin-bottom:16px;
+    border:1px solid var(--gray-200); border-radius:14px; background:#fff;
+  }
+  .session-hero-main { flex:1; min-width:200px; }
+  .session-hero-title { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--gray-400); font-weight:700; }
+  .session-hero-id { font-family:var(--font-mono); font-size:14px; font-weight:600; color:var(--gray-900); margin-top:3px; word-break:break-all; }
+  .session-hero-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
+  .session-layout { display:grid; grid-template-columns:1fr 340px; gap:16px; align-items:start; }
+  .session-layout > div { min-width:0; }
+  @media (max-width:900px){ .session-layout { grid-template-columns:1fr; } }
+
+  .flow-card {
+    border:1px solid var(--gray-200); border-radius:14px; background:
+      radial-gradient(circle at 1px 1px, var(--gray-200) 1px, transparent 0) 0 0 / 22px 22px,
+      #fff;
+    padding:0; overflow:hidden;
+  }
+  .flow-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--gray-100); background:#fff; }
+  .flow-head-title { font-size:12px; font-weight:700; color:var(--gray-800); }
+  .flow-legend { display:flex; gap:12px; font-size:10px; color:var(--gray-500); }
+  .flow-legend span { display:inline-flex; align-items:center; gap:4px; }
+  .flow-legend i { width:9px; height:9px; border-radius:3px; display:inline-block; }
+  .flow-legend i.allow { background:var(--green-500); }
+  .flow-legend i.warn  { background:#f59e0b; }
+  .flow-legend i.block { background:#ef4444; }
+
+  .flow-wrap { position:relative; overflow-x:auto; overflow-y:hidden; padding:34px 24px; min-height:170px; }
+  .flow-edges { position:absolute; top:0; left:0; pointer-events:none; overflow:visible; }
+  .flow-edge { fill:none; stroke:var(--gray-300); stroke-width:2; }
+  .flow-edge.warn  { stroke:#f59e0b; stroke-width:2.5; }
+  .flow-edge.block { stroke:#ef4444; stroke-width:2.5; }
+  .flow-nodes { position:relative; display:flex; align-items:center; gap:34px; width:max-content; }
+
+  .flow-node {
+    position:relative; z-index:1; width:158px; flex-shrink:0; cursor:pointer;
+    background:#fff; border:1.5px solid var(--gray-200); border-radius:12px;
+    padding:10px 12px; transition:transform .12s, box-shadow .12s, border-color .12s;
+    box-shadow:0 1px 2px rgba(0,0,0,.04);
+  }
+  .flow-node:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.10); }
+  .flow-node.sel { border-color:var(--gray-900); box-shadow:0 0 0 3px rgba(17,24,39,.10); }
+  .flow-node.block { border-color:#fca5a5; background:#fef2f2; }
+  .flow-node.block.sel { border-color:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.18); }
+  .flow-node.warn { border-color:#fcd34d; background:#fffbeb; }
+  .flow-node.warn.sel { border-color:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.18); }
+  .flow-node.up { transform:translateY(-26px); }
+  .flow-node.up:hover { transform:translateY(-28px); }
+
+  .flow-node-top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .flow-node-chip { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--gray-500); background:var(--gray-100); border-radius:5px; padding:2px 6px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .flow-node-action { font-family:var(--font-mono); font-size:10.5px; color:var(--gray-800); line-height:1.35; max-height:28px; overflow:hidden; word-break:break-all; }
+  .flow-node-foot { display:flex; align-items:center; justify-content:space-between; margin-top:7px; }
+  .flow-node-verdict { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; padding:2px 7px; border-radius:999px; }
+  .flow-node-verdict.allow { background:#dcfce7; color:#15803d; }
+  .flow-node-verdict.warn  { background:#fef3c7; color:#b45309; }
+  .flow-node-verdict.block { background:#fee2e2; color:#b91c1c; }
+  .flow-node-ts { font-size:9px; color:var(--gray-400); }
+
+  .flow-endpoint {
+    position:relative; z-index:1; flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:6px;
+    cursor:default;
+  }
+  .flow-endpoint .dot {
+    width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700;
+  }
+  .flow-endpoint.start .dot { background:var(--gray-900); }
+  .flow-endpoint.end   .dot { background:var(--green-500); }
+  .flow-endpoint .lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--gray-400); }
+  .flow-endpoint .icon { width:18px; height:18px; }
+
+  .flow-empty { padding:40px 20px; text-align:center; color:var(--gray-400); font-size:12px; }
+
+  /* node detail side panel */
+  .node-panel { border:1px solid var(--gray-200); border-radius:14px; background:#fff; padding:16px; position:sticky; top:16px; }
+  .node-panel-empty { color:var(--gray-400); font-size:12px; text-align:center; padding:24px 8px; }
+  .node-panel h4 { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--gray-400); font-weight:700; margin:0 0 10px; }
+
 </style>
 </head>
 <body>
@@ -937,7 +1069,7 @@
 <div class="tab-nav">
   <button class="tab-btn active" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="agents">Agents</button>
-  <button class="tab-btn" data-tab="sessions">Session Drilldown</button>
+  <button class="tab-btn" data-tab="sessions">Sessions</button>
   <button class="tab-btn" data-tab="policy">Policy Control</button>
   <button class="tab-btn" data-tab="fleet">Fleet<span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
 </div>
@@ -1289,6 +1421,95 @@
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <!-- PAGE: POLICY CONTROL                                           -->
 <!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: AGENT DETAIL (sub-view)                                 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-agent" class="page">
+  <div class="view-topbar">
+    <button class="view-back" onclick="backToSessions()"><svg class="icon"><use href="#i-bot"/></svg> All sessions</button>
+    <div class="crumbs">
+      <a onclick="backToSessions()">Sessions</a><span class="sep">/</span>
+      <span id="agentCrumb">Agent</span>
+    </div>
+  </div>
+
+  <div class="agent-hero">
+    <div class="agent-avatar" id="agentAvatar">?</div>
+    <div class="agent-hero-main">
+      <div class="agent-hero-name">
+        <span id="agentHeroName">agent</span>
+        <span id="agentHeroStatus"></span>
+      </div>
+      <div class="agent-hero-sub" id="agentHeroSub">—</div>
+    </div>
+    <div class="agent-switch-wrap">
+      <label>View agent</label>
+      <select id="agentViewSelect" class="agent-switch" onchange="openAgentView(this.value)"></select>
+    </div>
+  </div>
+
+  <div class="agent-stats" id="agentStats"></div>
+
+  <div class="card">
+    <div class="bar" style="margin-bottom:14px">
+      <div class="card-title">Sessions for this agent</div>
+      <div class="bar-right"><span id="agentSessCount" class="result-count"></span></div>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Session</th><th>Workspace</th><th>Risk</th>
+          <th class="right">Findings</th><th>Last Active</th>
+        </tr></thead>
+        <tbody id="agentSessBody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE: SESSION FLOW (sub-view)                                  -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="page-session" class="page">
+  <div class="view-topbar">
+    <button class="view-back" onclick="backToSessions()"><svg class="icon"><use href="#i-database"/></svg> All sessions</button>
+    <div class="crumbs">
+      <a onclick="backToSessions()">Sessions</a><span class="sep">/</span>
+      <a id="sessAgentCrumb">agent</a><span class="sep">/</span>
+      <span>Flow</span>
+    </div>
+  </div>
+
+  <div class="session-hero">
+    <div class="session-hero-main">
+      <div class="session-hero-title">Session</div>
+      <div class="session-hero-id" id="sessFlowId">—</div>
+      <div class="session-hero-meta" id="sessFlowMeta"></div>
+    </div>
+    <div class="sess-ctrl-btns" id="sessFlowActions"></div>
+  </div>
+
+  <div class="session-layout">
+    <div>
+      <div class="flow-card">
+        <div class="flow-head">
+          <span class="flow-head-title">Session flow — click any node for details</span>
+          <div class="flow-legend">
+            <span><i class="allow"></i>allowed</span>
+            <span><i class="warn"></i>warn</span>
+            <span><i class="block"></i>blocked</span>
+          </div>
+        </div>
+        <div id="sessFlowCanvas"><div class="flow-empty">Loading session flow…</div></div>
+      </div>
+    </div>
+    <div class="node-panel" id="sessNodePanel">
+      <div class="node-panel-empty">Select a node in the flow to inspect the tool call, its verdict, and the policy that decided it.</div>
+    </div>
+  </div>
+</div>
+
+
 <div id="page-policy" class="page">
   <div class="section" style="margin-top:0">
     <h2>Policy Control</h2><div class="rule"></div>
@@ -1690,7 +1911,7 @@ let _drawerRecentEvents = [];
 let _drawerAbort = null;
 
 function navigateToSession(sessionId, workspace) {
-  openSessDrawer(sessionId, workspace || _serverWorkspace || '', null);
+  openSessionView(sessionId, workspace || _serverWorkspace || '');
 }
 
 function openSessDrawer(sessionId, workspace, selectedEvent) {
@@ -2254,6 +2475,301 @@ function buildPager(containerId, state, loadFn) {
   }));
 }
 
+// ═══ Sessions redesign: Agent view + Session flow graph ═══════════════════
+let _allSessionsCache = [];
+let _sessionViewState = null;
+let _flowSelected = null;
+let _flowResizeObs = null;
+let _flowTrail = [];
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+function showSubPage(id){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById(id)?.classList.add('active');
+  window.scrollTo(0,0);
+}
+function backToSessions(){
+  const btn = document.querySelector('.tab-btn[data-tab="sessions"]');
+  if (btn) btn.click(); else showSubPage('page-sessions');
+}
+async function ensureAllSessions(force){
+  if (_allSessionsCache.length && !force) return _allSessionsCache;
+  try {
+    const data = await apiFetch('/api/sessions?page=1&limit=200&sort=updatedAt&dir=desc');
+    _allSessionsCache = data.items || [];
+  } catch(e){ console.error('[prismor] all sessions:', e); }
+  return _allSessionsCache;
+}
+
+// ── Agent view ─────────────────────────────────────────────────────────
+async function openAgentView(agentName){
+  if (!agentName) return;
+  showSubPage('page-agent');
+  document.getElementById('agentCrumb').textContent = agentName;
+  document.getElementById('agentHeroName').textContent = agentName;
+  document.getElementById('agentAvatar').textContent = (agentName[0]||'?').toUpperCase();
+  document.getElementById('agentSessBody').innerHTML = '<tr><td colspan="5" class="empty">Loading…</td></tr>';
+  if (!_agentsCache) { try { await loadAgents(); } catch(e){} }
+  await ensureAllSessions(true);
+  renderAgentSwitch(agentName);
+  renderAgentHero(agentName);
+  renderAgentSessions(agentName);
+}
+function renderAgentSwitch(current){
+  const sel = document.getElementById('agentViewSelect');
+  const names = new Set();
+  (_agentsCache?.agents||[]).forEach(a=>names.add(a.name));
+  _allSessionsCache.forEach(s=>{ if (s.agent) names.add(s.agent); });
+  names.add(current);
+  sel.innerHTML = [...names].sort().map(n=>'<option value="'+safeAttr(n)+'"'+(n===current?' selected':'')+'>'+safe(n)+'</option>').join('');
+}
+function renderAgentHero(agentName){
+  const a = (_agentsCache?.agents||[]).find(x=>x.name===agentName);
+  const avatar = document.getElementById('agentAvatar');
+  const status = document.getElementById('agentHeroStatus');
+  const sub = document.getElementById('agentHeroSub');
+  const stats = document.getElementById('agentStats');
+  const sessions = _allSessionsCache.filter(s=>s.agent===agentName);
+  const findings = sessions.reduce((n,s)=>n+(s.findingsCount||0),0);
+  if (a){
+    avatar.className = 'agent-avatar' + (a.enabled?'':' blocked');
+    status.innerHTML = a.enabled
+      ? '<span class="status-pill status-active"><span class="status-dot"></span>Active</span>'
+      : '<span class="status-pill status-blocked"><span class="status-dot"></span>Blocked</span>';
+    sub.textContent = (a.framework && a.framework!==a.name ? a.framework+' · ' : '') +
+      'mode: ' + (a.mode||'inherit') + ' · last seen ' + fmtLastSeen(a.last_seen);
+    stats.innerHTML =
+      agentStat('Sessions', fmtNum(sessions.length)) +
+      agentStat('Tool calls', fmtNum(a.total_calls||0)) +
+      agentStat('Blocked', fmtNum(a.blocked_calls||0), (a.blocked_calls||0)>0) +
+      agentStat('Findings', fmtNum(findings), findings>0);
+  } else {
+    avatar.className='agent-avatar';
+    status.innerHTML='';
+    sub.textContent = sessions.length + ' session' + (sessions.length===1?'':'s') + ' recorded';
+    stats.innerHTML = agentStat('Sessions', fmtNum(sessions.length)) + agentStat('Findings', fmtNum(findings), findings>0);
+  }
+}
+function agentStat(label, value, accent){
+  return '<div class="agent-stat"><div class="agent-stat-label">'+safe(label)+'</div>'+
+    '<div class="agent-stat-value'+(accent?' accent':'')+'">'+value+'</div></div>';
+}
+function renderAgentSessions(agentName){
+  const rows = _allSessionsCache.filter(s=>s.agent===agentName);
+  const tbody = document.getElementById('agentSessBody');
+  document.getElementById('agentSessCount').textContent = fmtNum(rows.length)+' session'+(rows.length===1?'':'s');
+  if(!rows.length){ tbody.innerHTML='<tr><td colspan="5" class="empty">No sessions recorded for this agent yet.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(s=>{
+    const rc=riskClass(s.riskScore);
+    return '<tr class="clickable-row" onclick="openSessionView(\''+safeAttr(s.sessionId)+'\',\''+safeAttr(s.workspace)+'\')">'+
+      '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,24))+'</td>'+
+      '<td style="color:var(--gray-500)" title="'+safeAttr(s.workspace||'')+'">'+safe(s.workspaceName||workspaceName(s.workspace))+'</td>'+
+      '<td><div class="risk-wrap"><div class="risk-bar"><div class="risk-fill '+rc+'" style="width:'+s.riskScore+'%"></div></div><span class="risk-num">'+s.riskScore+'</span></div></td>'+
+      '<td class="right"'+(s.findingsCount>0?' style="color:var(--pink-600);font-weight:600"':'')+'>'+s.findingsCount+'</td>'+
+      '<td>'+tsCell(s.updatedAt,s.updatedAtAbs)+'</td></tr>';
+  }).join('');
+}
+
+// ── Session flow view ──────────────────────────────────────────────────
+function flowVerdict(ev){
+  const p = ev.policy || {};
+  if (ev.verdict === 'blocked'){
+    if (p.mode && p.mode !== 'enforce') return 'warn';
+    if (p.action && p.action !== 'block') return 'warn';
+    return 'block';
+  }
+  return 'allow';
+}
+async function openSessionView(sessionId, workspace){
+  showSubPage('page-session');
+  _flowSelected = null;
+  const ws = workspace || _serverWorkspace || '';
+  _sessionViewState = { sessionId, workspace: ws, agent:'', data:null };
+  document.getElementById('sessFlowId').textContent = sessionId;
+  document.getElementById('sessFlowMeta').innerHTML = '';
+  document.getElementById('sessFlowActions').innerHTML = '';
+  document.getElementById('sessFlowCanvas').innerHTML = '<div class="flow-empty">Loading session flow…</div>';
+  document.getElementById('sessNodePanel').innerHTML = '<div class="node-panel-empty">Loading…</div>';
+
+  await ensureAllSessions(false);
+  const sess = _allSessionsCache.find(s=>s.sessionId===sessionId);
+  const agent = sess ? sess.agent : '';
+  _sessionViewState.agent = agent;
+  const crumb = document.getElementById('sessAgentCrumb');
+  crumb.textContent = agent || 'agent';
+  crumb.onclick = agent ? (()=>openAgentView(agent)) : null;
+
+  try {
+    const params = ws ? '?workspace='+encodeURIComponent(ws) : '';
+    const data = await apiFetch('/api/sessions/'+encodeURIComponent(sessionId)+'/control'+params);
+    if (_sessionViewState.sessionId !== sessionId) return;
+    _sessionViewState.data = data;
+    renderSessionView(data);
+  } catch(e){
+    document.getElementById('sessFlowCanvas').innerHTML = '<div class="flow-empty" style="color:#b91c1c">Failed to load session: '+safe(e.message)+'</div>';
+  }
+}
+function renderSessionView(data){
+  const scoped = data.scoped || null;
+  const paused = scoped && scoped.paused;
+  const blocks = data.recent_blocked || [];
+  const trail = (data.recent_events || []).slice().reverse(); // oldest→newest
+
+  const agent = _sessionViewState.agent;
+  let pills = '';
+  if (agent) pills += '<span class="agent-pill link" onclick="openAgentView(\''+safeAttr(agent)+'\')">'+safe(agent)+'</span>';
+  if (paused) pills += '<span class="status-pill status-paused"><span class="status-dot"></span>Immunity Paused</span>';
+  else if (scoped) pills += '<span class="status-pill status-scoped"><span class="status-dot"></span>Scoped</span>';
+  else pills += '<span class="status-pill status-active"><span class="status-dot"></span>Active</span>';
+  if (blocks.length) pills += '<span class="status-pill status-blocked"><span class="status-dot"></span>'+blocks.length+' block'+(blocks.length===1?'':'s')+'</span>';
+  document.getElementById('sessFlowMeta').innerHTML = pills;
+
+  const act = document.getElementById('sessFlowActions');
+  if (paused){
+    act.innerHTML = '<button class="sess-act-btn resume" onclick="sessViewAction(\'resume\')">Resume Prismor</button>'+
+      '<button class="sess-act-btn clear" onclick="sessViewAction(\'clear\')">Clear scope</button>';
+  } else {
+    act.innerHTML = '<button class="sess-act-btn pause" onclick="sessViewAction(\'pause\')">Pause Prismor</button>'+
+      '<button class="sess-act-btn clear" onclick="sessViewAction(\'clear\')">Clear scope</button>';
+  }
+
+  renderSessionFlow(trail);
+  const interesting = trail.map((e,i)=>({i,v:flowVerdict(e)})).filter(o=>o.v!=='allow');
+  if (interesting.length) selectFlowNode(interesting[interesting.length-1].i);
+  else renderNodePanelDefault(data);
+}
+async function sessViewAction(action){
+  const sid = _sessionViewState.sessionId, ws = _sessionViewState.workspace;
+  if (action==='pause' && !confirm('Pause Prismor for this session?\n\nProtection is fully disabled for the session until you resume.')) return;
+  if (action==='clear' && !confirm('Clear the scoped rules for this session?\n\nThe session falls back to the full default policy.')) return;
+  try {
+    await apiFetch('/api/sessions/'+encodeURIComponent(sid)+'/control', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action, workspace: ws}),
+    });
+    toast({pause:'Session paused — protection off', resume:'Session resumed', clear:'Scope cleared'}[action]||'✓ Done');
+    openSessionView(sid, ws);
+  } catch(e){ toast('✗ '+e.message, true); }
+}
+function renderSessionFlow(trail){
+  const canvas = document.getElementById('sessFlowCanvas');
+  _flowTrail = trail;
+  if (!trail.length){ canvas.innerHTML = '<div class="flow-empty">No tool calls recorded for this session yet.</div>'; return; }
+  const wrap = document.createElement('div'); wrap.className='flow-wrap';
+  const svg = document.createElementNS(SVGNS,'svg'); svg.setAttribute('class','flow-edges');
+  const nodes = document.createElement('div'); nodes.className='flow-nodes';
+  wrap.appendChild(svg); wrap.appendChild(nodes);
+  canvas.innerHTML=''; canvas.appendChild(wrap);
+  nodes.appendChild(endpointEl('start','Start'));
+  trail.forEach((ev,i)=>{ nodes.appendChild(flowNodeEl(ev,i)); });
+  nodes.appendChild(endpointEl('end','Now'));
+  const draw = ()=>drawFlowEdges(svg, nodes, trail);
+  requestAnimationFrame(draw);
+  if (_flowResizeObs) _flowResizeObs.disconnect();
+  _flowResizeObs = new ResizeObserver(()=>requestAnimationFrame(draw));
+  _flowResizeObs.observe(wrap);
+}
+function endpointEl(kind,label){
+  const el=document.createElement('div'); el.className='flow-endpoint '+kind;
+  const icon = kind==='start' ? 'i-play' : 'i-radio';
+  el.innerHTML='<div class="dot"><svg class="icon"><use href="#'+icon+'"/></svg></div><div class="lbl">'+safe(label)+'</div>';
+  return el;
+}
+function flowNodeEl(ev,i){
+  const v = flowVerdict(ev);
+  const el=document.createElement('div');
+  el.className='flow-node '+v+((v==='block'||v==='warn')?' up':'');
+  el.dataset.idx=i;
+  el.onclick=()=>selectFlowNode(i);
+  const chip = ev.toolTag || ev.type || 'tool';
+  const action = (ev.action||'event').replace(/^[a-z_]+:\s*/i,'');
+  el.innerHTML =
+    '<div class="flow-node-top"><span class="flow-node-chip" title="'+safeAttr(chip)+'">'+safe(chip)+'</span></div>'+
+    '<div class="flow-node-action" title="'+safeAttr(ev.action||'')+'">'+safe(action||'event')+'</div>'+
+    '<div class="flow-node-foot"><span class="flow-node-verdict '+v+'">'+({allow:'allowed',warn:'warn',block:'blocked'})[v]+'</span>'+
+      '<span class="flow-node-ts">'+safe(ev.ts||'')+'</span></div>';
+  return el;
+}
+function drawFlowEdges(svg, nodesEl, trail){
+  const host = svg.parentElement;
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  svg.setAttribute('width', host.scrollWidth);
+  svg.setAttribute('height', host.clientHeight);
+  const kids=[...nodesEl.children];
+  const hostRect = host.getBoundingClientRect();
+  const scrollX = host.scrollLeft;
+  const center=(el)=>{ const r=el.getBoundingClientRect(); return {
+    l: r.left-hostRect.left+scrollX, r: r.right-hostRect.left+scrollX, cy: r.top-hostRect.top + r.height/2 }; };
+  for(let i=0;i<kids.length-1;i++){
+    const a=center(kids[i]), b=center(kids[i+1]);
+    const x1=a.r, y1=a.cy, x2=b.l, y2=b.cy, mx=(x1+x2)/2;
+    let cls=''; const ev = trail[i];
+    if (ev){ const v=flowVerdict(ev); if(v!=='allow') cls=v; }
+    svg.insertAdjacentHTML('beforeend',
+      '<path class="flow-edge '+cls+'" d="M '+x1+' '+y1+' C '+mx+' '+y1+', '+mx+' '+y2+', '+x2+' '+y2+'"/>');
+  }
+}
+function selectFlowNode(idx){
+  _flowSelected = idx;
+  document.querySelectorAll('#sessFlowCanvas .flow-node').forEach(n=>{
+    n.classList.toggle('sel', parseInt(n.dataset.idx,10)===idx);
+  });
+  const ev = (_flowTrail||[])[idx];
+  if (!ev){ renderNodePanelDefault(_sessionViewState && _sessionViewState.data); return; }
+  renderNodePanel(ev);
+}
+function renderNodePanelDefault(data){
+  const panel=document.getElementById('sessNodePanel');
+  const blocks=(data&&data.recent_blocked)||[];
+  let html='<h4>Session summary</h4>';
+  if (blocks.length){
+    html+='<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">'+blocks.length+' block'+(blocks.length===1?'':'s')+' in this session.</div>';
+    html+=blocks.slice(0,4).map(b=>'<div class="drawer-block-item">'+
+      '<span class="blocked-sev"><span class="sev-badge '+sevClass(b.severity)+'">'+safe(b.severity)+'</span></span>'+
+      '<div class="drawer-block-body"><div class="drawer-block-title">'+safe(b.title)+'</div>'+
+      '<div class="drawer-block-meta">'+safe(CAT_LABELS[b.category]||b.category)+' · '+safe(b.ts||'')+'</div></div></div>').join('');
+  } else {
+    html+='<div class="node-panel-empty">Clean run — no blocks. Click a node to inspect a tool call.</div>';
+  }
+  panel.innerHTML=html;
+}
+function renderNodePanel(ev){
+  const panel=document.getElementById('sessNodePanel');
+  const policy=ev.policy||{};
+  const v=flowVerdict(ev);
+  const decLabel={allow:'Allowed',warn:'Warned (observe)',block:'Blocked'}[v];
+  const decCls={allow:'tag-allow',warn:'tag-net',block:'tag-deny'}[v];
+  const categoryLabel=CAT_LABELS[policy.category]||policy.category||'';
+  panel.innerHTML='<h4>Tool call</h4>'+
+    '<div class="drawer-event-card">'+
+      '<div class="drawer-rule-row"><span class="drawer-rule-label">Decision</span>'+
+        '<span class="scoped-tag '+decCls+'">'+decLabel+'</span>'+
+        (v!=='allow'?'<span class="sev-badge '+sevClass(ev.severity||'low')+'">'+safe(ev.severity||'low')+'</span>':'')+'</div>'+
+      '<div class="drawer-rule-row"><span class="drawer-rule-label">Tool tag</span>'+
+        '<span class="scoped-tag tag-net">'+safe(ev.toolTag||ev.type||'unknown')+'</span></div>'+
+      '<div class="drawer-rule-row"><span class="drawer-rule-label">Type</span>'+
+        '<span class="scoped-tag tag-allow">'+safe(ev.type||'event')+'</span></div>'+
+      '<div class="drawer-rule-row" style="align-items:flex-start"><span class="drawer-rule-label">When</span>'+
+        '<div style="font-size:11px;color:var(--gray-600)">'+safe(ev.tsAbs||ev.ts||'')+'</div></div>'+
+      '<div class="drawer-rule-row" style="align-items:flex-start;margin-bottom:0"><span class="drawer-rule-label">Action</span>'+
+        '<div style="font-size:11px;color:var(--gray-600);line-height:1.5;word-break:break-word">'+safe(ev.action||'')+'</div></div>'+
+      ((policy.ruleId||policy.title||policy.evidence||categoryLabel)?
+        '<div class="drawer-policy-card '+(v==='allow'?'allowed':'')+'">'+
+          '<div class="drawer-rule-row"><span class="drawer-rule-label">Policy</span>'+
+            '<div><div style="font-size:11px;font-weight:600;color:var(--gray-800)">'+safe(policy.ruleId||policy.id||'runtime-policy')+'</div>'+
+            (categoryLabel?'<div style="font-size:10px;color:var(--gray-500);margin-top:2px">'+safe(categoryLabel)+'</div>':'')+'</div></div>'+
+          (policy.title?'<div class="drawer-rule-row"><span class="drawer-rule-label">Rule</span><div style="font-size:11px;color:var(--gray-700);line-height:1.4">'+safe(policy.title)+'</div></div>':'')+
+          (policy.evidence?'<div class="drawer-rule-row"><span class="drawer-rule-label">Reason</span><div style="font-size:11px;color:var(--gray-700);line-height:1.4">'+safe(policy.evidence)+'</div></div>':'')+
+          '<div class="drawer-rule-row" style="margin-bottom:0"><span class="drawer-rule-label">Mode</span>'+
+            '<span class="scoped-tag '+(policy.mode==='enforce'?'tag-deny':'tag-net')+'">'+safe(policy.mode||(v==='block'?'enforce':'observe'))+'</span>'+
+            (policy.action?'<span class="scoped-tag '+(policy.action==='block'?'tag-deny':'tag-allow')+'">'+safe(policy.action)+'</span>':'')+
+          '</div>'+
+        '</div>':'')+
+    '</div>';
+}
+
+
 // ── Charts ────────────────────────────────────────────────────────────────
 let donutChart, lineChart, agentBarChart, toolBarChart, mcpBarChart, scEcoBarChart;
 function initCharts() {
@@ -2334,7 +2850,7 @@ function renderSessions(rows) {
     const srcLabel=s.source==='supply_chain'?'supply-chain':'agent';
     return '<tr class="clickable-row" onclick="navigateToSession(\''+safeAttr(s.sessionId)+'\', \''+safeAttr(s.workspace)+'\')">'+
       '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,24))+'</td>'+
-      '<td><span class="agent-pill">'+safe(s.agent)+'</span><span class="src-pill '+srcCls+'">'+safe(srcLabel)+'</span></td>'+
+      '<td><span class="agent-pill link" onclick="event.stopPropagation();openAgentView(\''+safeAttr(s.agent)+'\')">'+safe(s.agent)+'</span><span class="src-pill '+srcCls+'">'+safe(srcLabel)+'</span></td>'+
       '<td style="color:var(--gray-500)" title="'+safeAttr(s.workspace || '')+'">'+safe(s.workspaceName || workspaceName(s.workspace))+'</td>'+
       '<td><div class="risk-wrap"><div class="risk-bar"><div class="risk-fill '+rc+'" style="width:'+s.riskScore+'%"></div></div><span class="risk-num">'+s.riskScore+'</span></div></td>'+
       '<td class="right"'+(s.findingsCount>0?' style="color:var(--pink-600);font-weight:600"':'')+'>'+s.findingsCount+'</td>'+
@@ -2358,7 +2874,7 @@ function renderOverviewSessions(rows) {
   tbody.innerHTML = rows.map(s => (
     '<tr class="clickable-row" onclick="navigateToSession(\'' + safeAttr(s.sessionId) + '\', \'' + safeAttr(s.workspace) + '\')">' +
       '<td class="mono" title="' + safeAttr(s.sessionId) + '">' + safe(shortId(s.sessionId, 24)) + '</td>' +
-      '<td><span class="agent-pill">' + safe(s.agent) + '</span></td>' +
+      '<td><span class="agent-pill link" onclick="event.stopPropagation();openAgentView(\'' + safeAttr(s.agent) + '\')">' + safe(s.agent) + '</span></td>' +
       '<td>' + sessionStatusMarkup(s) + '</td>' +
       '<td>' + tsCell(s.updatedAt, s.updatedAtAbs) + '</td>' +
     '</tr>'
@@ -2523,14 +3039,7 @@ function onEventClick(sessionId, workspace, toolTagEnc, actionTypeEnc, actionEnc
   } catch(e) {
     policy = {};
   }
-  openSessDrawer(sessionId, workspace, {
-    toolTag: decodeURIComponent(toolTagEnc || ''),
-    actionType: decodeURIComponent(actionTypeEnc || ''),
-    action: decodeURIComponent(actionEnc || ''),
-    verdict: decodeURIComponent(verdictEnc || 'allowed'),
-    severity: decodeURIComponent(severityEnc || 'low'),
-    policy,
-  });
+  openSessionView(sessionId, workspace);
 }
 document.querySelectorAll('.fbtn[data-verdict]').forEach(btn=>{
   btn.addEventListener('click',()=>{
@@ -2861,7 +3370,7 @@ function renderSessionControl(items, workspace) {
         '<div class="sess-id-wrap">' +
           '<span class="sess-id" title="' + safeAttr(sessId) + '">' + safe(shortId(sessId, 32)) + '</span>' +
           '<span id="pill-' + i + '">' + statusPill(s, null) + '</span>' +
-          '<span class="agent-pill">' + safe(s.agent||'?') + '</span>' +
+          '<span class="agent-pill link" onclick="openAgentView(\'' + safeAttr(s.agent||'') + '\')">' + safe(s.agent||'?') + '</span>' +
         '</div>' +
         '<div class="sess-ws" title="' + safeAttr(ws) + '">' + safe(wsLabel || ws) + ' · last active ' + (s.updatedAt||'—') + '</div>' +
         '<div id="' + detailId + '" class="sess-detail"></div>' +
