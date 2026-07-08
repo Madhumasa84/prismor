@@ -26,6 +26,7 @@ from prismor.runtime.policy_engine import PolicyEngine
 from prismor.runtime.principal import Subject, resolve_subject
 from prismor.runtime.store import (
     append_session_event,
+    persist_runtime_findings,
     read_session_events,
     save_session_snapshot,
 )
@@ -277,6 +278,12 @@ def evaluate_tool_call(
         sys.stderr.write(f"[prismor] rule-exemption error: {exc}\n")
 
     _eval_ms = int((time.perf_counter() - _guard_t0) * 1000)
+
+    if persist and findings:
+        try:
+            persist_runtime_findings(workspace, session_id, findings, _session_seq)
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] finding persistence error: {exc}\n")
 
     _dispatch_telemetry(
         engine=engine,

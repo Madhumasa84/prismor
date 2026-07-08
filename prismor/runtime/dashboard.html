@@ -293,6 +293,28 @@
   .drawer-block-body { flex: 1; min-width: 0; }
   .drawer-block-title { font-size: 11px; font-weight: 500; color: var(--gray-800); }
   .drawer-block-meta  { font-size: 10px; color: var(--gray-400); margin-top: 2px; }
+  .drawer-event-card {
+    border: 1px solid var(--gray-100); background: var(--gray-50);
+    border-radius: 7px; padding: 10px; margin-bottom: 10px;
+  }
+  .drawer-policy-card {
+    border: 1px solid #f9a8d4; background: #fdf2f8;
+    border-radius: 6px; padding: 8px; margin-top: 8px;
+  }
+  .drawer-policy-card.allowed {
+    border-color: #bbf7d0; background: #f0fdf4;
+  }
+  .trail-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 7px 0; border-bottom: 1px solid var(--gray-50);
+  }
+  .trail-row:last-child { border-bottom: none; }
+  .trail-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .trail-dot.blocked { background: #ec4899; }
+  .trail-dot.allowed { background: #4ade80; }
+  .trail-main { flex: 1; min-width: 0; }
+  .trail-action { font-size: 11px; color: var(--gray-700); word-break: break-word; line-height: 1.35; }
+  .trail-meta { font-size: 10px; color: var(--gray-400); margin-bottom: 2px; display: flex; gap: 5px; flex-wrap: wrap; }
   .drawer-rule-row {
     display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
     font-size: 11px;
@@ -1523,6 +1545,7 @@ const CAT_LABELS = {
   prompt_injection: 'Prompt Injection', jailbreak_attempt: 'Jailbreak',
   tool_call_abuse: 'Tool Call Abuse', secret_exfil: 'Secret Exfil',
   malicious_mcp: 'Malicious MCP', dangerous_command: 'Dangerous Cmd',
+  scoped_agent: 'Scoped Agent',
 };
 const DEFAULT_GLOBAL_YAML = `# Global policy — applies to every project on this machine.
 # Only set what you want to differ from built-in defaults.
@@ -1704,6 +1727,7 @@ async function fetchAndRenderDrawer() {
 function renderDrawerContent(sessId, ws, data) {
   const scoped = data.scoped || null;
   const blocks = data.recent_blocked || [];
+  const trail = data.recent_events || [];
   const paused = scoped && scoped.paused;
 
   // Cache scoped for edit operations
@@ -1728,17 +1752,64 @@ function renderDrawerContent(sessId, ws, data) {
 
   if (_drawerSelectedEvent) {
     const ev = _drawerSelectedEvent;
+    const policy = ev.policy || {};
+    const blocked = ev.verdict === 'blocked' || policy.action === 'block';
+    const categoryLabel = CAT_LABELS[policy.category] || policy.category || '';
     const evSec = document.createElement('div');
     evSec.className = 'drawer-section';
     evSec.innerHTML =
       '<div class="drawer-section-title">Selected Event</div>' +
-      '<div class="drawer-rule-row"><span class="drawer-rule-label">Tool tag</span>' +
-        '<span class="scoped-tag tag-net">' + safe(ev.toolTag || 'unknown') + '</span></div>' +
-      '<div class="drawer-rule-row"><span class="drawer-rule-label">Normalized type</span>' +
-        '<span class="scoped-tag tag-allow">' + safe(ev.actionType || 'event') + '</span></div>' +
-      '<div class="drawer-rule-row" style="align-items:flex-start"><span class="drawer-rule-label">Action</span>' +
-        '<div style="font-size:11px;color:var(--gray-600);line-height:1.5;word-break:break-word">' + safe(ev.action || '') + '</div></div>';
+      '<div class="drawer-event-card">' +
+        '<div class="drawer-rule-row"><span class="drawer-rule-label">Decision</span>' +
+          '<span class="scoped-tag ' + (blocked ? 'tag-deny' : 'tag-allow') + '">' + (blocked ? 'Blocked' : 'Allowed') + '</span>' +
+          '<span class="sev-badge ' + sevClass(ev.severity || 'low') + '">' + safe(ev.severity || 'low') + '</span></div>' +
+        '<div class="drawer-rule-row"><span class="drawer-rule-label">Tool tag</span>' +
+          '<span class="scoped-tag tag-net">' + safe(ev.toolTag || 'unknown') + '</span></div>' +
+        '<div class="drawer-rule-row"><span class="drawer-rule-label">Normalized type</span>' +
+          '<span class="scoped-tag tag-allow">' + safe(ev.actionType || 'event') + '</span></div>' +
+        '<div class="drawer-rule-row" style="align-items:flex-start;margin-bottom:0"><span class="drawer-rule-label">Action</span>' +
+          '<div style="font-size:11px;color:var(--gray-600);line-height:1.5;word-break:break-word">' + safe(ev.action || '') + '</div></div>' +
+        (policy.ruleId || policy.title || policy.evidence || categoryLabel ?
+          '<div class="drawer-policy-card ' + (blocked ? '' : 'allowed') + '">' +
+            '<div class="drawer-rule-row"><span class="drawer-rule-label">Policy</span>' +
+              '<div><div style="font-size:11px;font-weight:600;color:var(--gray-800)">' + safe(policy.ruleId || policy.id || 'runtime-policy') + '</div>' +
+              (categoryLabel ? '<div style="font-size:10px;color:var(--gray-500);margin-top:2px">' + safe(categoryLabel) + '</div>' : '') + '</div></div>' +
+            (policy.title ? '<div class="drawer-rule-row"><span class="drawer-rule-label">Rule</span><div style="font-size:11px;color:var(--gray-700);line-height:1.4">' + safe(policy.title) + '</div></div>' : '') +
+            (policy.evidence ? '<div class="drawer-rule-row"><span class="drawer-rule-label">Reason</span><div style="font-size:11px;color:var(--gray-700);line-height:1.4">' + safe(policy.evidence) + '</div></div>' : '') +
+            '<div class="drawer-rule-row" style="margin-bottom:0"><span class="drawer-rule-label">Mode</span>' +
+              '<span class="scoped-tag ' + (policy.mode === 'enforce' || blocked ? 'tag-deny' : 'tag-net') + '">' + safe(policy.mode || (blocked ? 'enforce' : 'observe')) + '</span>' +
+              (policy.action ? '<span class="scoped-tag ' + (policy.action === 'block' ? 'tag-deny' : 'tag-allow') + '">' + safe(policy.action) + '</span>' : '') +
+            '</div>' +
+          '</div>' : '') +
+      '</div>';
     bodyEl.appendChild(evSec);
+  }
+
+  if (trail.length) {
+    const trailSec = document.createElement('div');
+    trailSec.className = 'drawer-section';
+    trailSec.innerHTML = '<div class="drawer-section-title">Session trail</div>' +
+      trail.map(item => {
+        const policy = item.policy || {};
+        const blocked = item.verdict === 'blocked';
+        return '<div class="trail-row">' +
+          '<span class="trail-dot ' + (blocked ? 'blocked' : 'allowed') + '"></span>' +
+          '<div class="trail-main">' +
+            '<div class="trail-meta">' +
+              '<span>' + safe(item.ts || '') + '</span>' +
+              (item.toolTag ? '<span class="scoped-tag tag-net">' + safe(item.toolTag) + '</span>' : '') +
+              '<span class="scoped-tag ' + (blocked ? 'tag-deny' : 'tag-allow') + '">' + (blocked ? 'blocked' : 'allowed') + '</span>' +
+              (blocked ? '<span class="sev-badge ' + sevClass(item.severity || 'high') + '">' + safe(item.severity || 'high') + '</span>' : '') +
+            '</div>' +
+            '<div class="trail-action">' + safe(item.action || 'event') + '</div>' +
+            (blocked && (policy.ruleId || policy.evidence) ?
+              '<div style="font-size:10px;color:var(--gray-500);margin-top:3px">' +
+                safe(policy.ruleId || 'runtime-policy') + (policy.evidence ? ' · ' + safe(policy.evidence) : '') +
+              '</div>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('');
+    bodyEl.appendChild(trailSec);
   }
 
   // ── Scoped rules section ────────────────────────────────────────────────
@@ -2005,6 +2076,9 @@ function safe(s) {
 }
 function safeAttr(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+function safeJsArg(s) {
+  return safeAttr(String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n'));
 }
 function tsCell(rel, abs, color) {
   const c = color || 'var(--gray-400)';
@@ -2305,7 +2379,10 @@ function renderEvents(rows){
     const encTag = encodeURIComponent(ev.toolTag || '');
     const encType = encodeURIComponent(ev.actionType || '');
     const encAction = encodeURIComponent(ev.action || '');
-    return '<div class="event-row" onclick="onEventClick(\''+safeAttr(sid)+'\',\''+safeAttr(ws)+'\',\''+safeAttr(encTag)+'\',\''+safeAttr(encType)+'\',\''+safeAttr(encAction)+'\')" title="Open session controls">'+
+    const encVerdict = encodeURIComponent(ev.verdict || 'allowed');
+    const encSeverity = encodeURIComponent(ev.severity || 'low');
+    const encPolicy = encodeURIComponent(JSON.stringify(ev.policy || {}));
+    return '<div class="event-row" onclick="onEventClick(\''+safeJsArg(sid)+'\',\''+safeJsArg(ws)+'\',\''+safeJsArg(encTag)+'\',\''+safeJsArg(encType)+'\',\''+safeJsArg(encAction)+'\',\''+safeJsArg(encVerdict)+'\',\''+safeJsArg(encSeverity)+'\',\''+safeJsArg(encPolicy)+'\')" title="Open session controls">'+
       '<span class="event-dot '+(ev.verdict||'allowed')+'"></span>'+
       '<div style="flex:1;min-width:0">'+
         '<div class="event-meta">'+
@@ -2321,7 +2398,7 @@ function renderEvents(rows){
   }).join('');
 }
 
-function onEventClick(sessionId, workspace, toolTagEnc, actionTypeEnc, actionEnc) {
+function onEventClick(sessionId, workspace, toolTagEnc, actionTypeEnc, actionEnc, verdictEnc, severityEnc, policyEnc) {
   if (!sessionId) {
     const t = document.createElement('div');
     t.textContent = 'No session ID recorded for this event.';
@@ -2330,10 +2407,19 @@ function onEventClick(sessionId, workspace, toolTagEnc, actionTypeEnc, actionEnc
     setTimeout(() => t.remove(), 2500);
     return;
   }
+  let policy = {};
+  try {
+    policy = JSON.parse(decodeURIComponent(policyEnc || '%7B%7D')) || {};
+  } catch(e) {
+    policy = {};
+  }
   openSessDrawer(sessionId, workspace, {
     toolTag: decodeURIComponent(toolTagEnc || ''),
     actionType: decodeURIComponent(actionTypeEnc || ''),
     action: decodeURIComponent(actionEnc || ''),
+    verdict: decodeURIComponent(verdictEnc || 'allowed'),
+    severity: decodeURIComponent(severityEnc || 'low'),
+    policy,
   });
 }
 document.querySelectorAll('.fbtn[data-verdict]').forEach(btn=>{

@@ -16,9 +16,12 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from prismor.runtime.cli import analyze_events
+from prismor.runtime.scoped_agent import save_scoped_rules
 from prismor.runtime.store import (
     get_events_page,
     get_findings_page,
+    get_session_scoped_detail,
+    persist_runtime_findings,
     save_session_snapshot,
     write_supply_chain_event,
 )
@@ -92,6 +95,89 @@ class TestDashboardQueries(unittest.TestCase):
         actions = [item["action"] for item in blocked_only["items"]]
         self.assertIn("shell: rm -rf /", actions)
         self.assertNotIn("shell: ls -la", actions)
+
+    def test_events_page_infers_scoped_agent_blocks(self):
+        session_id = "scoped-session"
+        save_scoped_rules(
+            self.workspace,
+            session_id,
+            {
+                "allowed_tools": ["Read"],
+                "deny_tools": ["Bash"],
+                "allowed_paths": ["**"],
+                "deny_network": True,
+            },
+        )
+        save_session_snapshot(
+            workspace=self.workspace,
+            session_id=session_id,
+            agent="codex",
+            source="hook",
+            repo_url=None,
+            events=[
+                {
+                    "type": "shell",
+                    "agent_event": "PreToolUse",
+                    "command": "prismor status",
+                    "ts": "2026-01-01T00:00:02Z",
+                    "metadata": {"tool_name": "Bash"},
+                }
+            ],
+            analysis={"summary": {"riskScore": 0, "totalFindings": 0}, "findings": []},
+        )
+
+        blocked = get_events_page(verdict="blocked")
+        event = next(item for item in blocked["items"] if item["sessionId"] == session_id)
+        self.assertEqual(event["verdict"], "blocked")
+        self.assertEqual(event["toolTag"], "Bash")
+        self.assertEqual(event["policy"]["ruleId"], "scoped-agent")
+        self.assertIn("explicitly denied", event["policy"]["evidence"])
+
+        detail = get_session_scoped_detail(self.workspace, session_id)
+        self.assertEqual(detail["recent_events"][0]["verdict"], "blocked")
+        self.assertEqual(detail["recent_events"][0]["policy"]["ruleId"], "scoped-agent")
+
+    def test_runtime_findings_are_persisted_for_dashboard(self):
+        session_id = "runtime-finding-session"
+        save_session_snapshot(
+            workspace=self.workspace,
+            session_id=session_id,
+            agent="codex",
+            source="hook",
+            repo_url=None,
+            events=[
+                {
+                    "type": "shell",
+                    "agent_event": "PreToolUse",
+                    "command": "prismor status",
+                    "ts": "2026-01-01T00:00:03Z",
+                    "metadata": {"tool_name": "Bash"},
+                }
+            ],
+            analysis={"summary": {"riskScore": 0, "totalFindings": 0}, "findings": []},
+        )
+        persist_runtime_findings(
+            self.workspace,
+            session_id,
+            [{
+                "id": f"{session_id}:scoped-agent",
+                "severity": "HIGH",
+                "category": "scoped_agent",
+                "title": "[scoped agent] Tool 'Bash' is explicitly denied for this session",
+                "evidence": "Tool 'Bash' is explicitly denied for this session",
+                "ruleId": "scoped-agent",
+                "action": "block",
+                "mode": "enforce",
+            }],
+            0,
+        )
+
+        event = next(item for item in get_events_page(verdict="blocked")["items"] if item["sessionId"] == session_id)
+        self.assertEqual(event["policy"]["source"], "runtime")
+        self.assertEqual(event["policy"]["mode"], "enforce")
+
+        detail = get_session_scoped_detail(self.workspace, session_id)
+        self.assertEqual(detail["recent_blocked"][0]["category"], "scoped_agent")
 
 
 class TestSupplyChainEventIndex(unittest.TestCase):

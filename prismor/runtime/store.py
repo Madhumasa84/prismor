@@ -648,6 +648,93 @@ def save_session_snapshot(
     return db_path
 
 
+def persist_runtime_findings(
+    workspace: Path,
+    session_id: str,
+    findings: List[Dict[str, Any]],
+    event_index: int,
+) -> None:
+    """Persist post-analysis enforcement findings for the current event.
+
+    ``save_session_snapshot`` stores findings produced by whole-session
+    analysis. Real-time enforcement layers such as scoped-agent, IAM, and
+    kill-switch rules are added later in the evaluation pipeline, so they need a
+    lightweight upsert here. This keeps blocked hook decisions visible in the
+    dashboard event feed and session drawer.
+    """
+    if not findings:
+        return
+    db_path = initialize_database(workspace)
+    connection = sqlite3.connect(db_path)
+    try:
+        cursor = connection.cursor()
+        rows = []
+        for i, finding in enumerate(findings):
+            idx = finding.get("eventIndex")
+            if idx is None:
+                idx = event_index
+            fid = str(finding.get("id") or finding.get("finding_id") or f"{session_id}:runtime-{idx}-{i}")
+            if fid == f"{session_id}:scoped-agent":
+                fid = f"{session_id}:scoped-agent-{idx}"
+            rows.append((
+                fid,
+                session_id,
+                idx,
+                finding.get("severity"),
+                finding.get("category"),
+                finding.get("title"),
+                _truncate(finding.get("evidence", "")),
+                json.dumps({
+                    "ruleId": finding.get("ruleId") or finding.get("rule_id"),
+                    "action": finding.get("action"),
+                    "mode": finding.get("mode"),
+                    "remediation": finding.get("remediation"),
+                    "source": "runtime",
+                }),
+            ))
+        cursor.executemany(
+            """
+            INSERT OR REPLACE INTO findings (
+                finding_id, session_id, event_index, severity, category,
+                title, evidence, enrichment_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        row = cursor.execute(
+            "SELECT COUNT(*) as cnt, MAX(CASE lower(severity) "
+            "WHEN 'critical' THEN 90 WHEN 'high' THEN 70 "
+            "WHEN 'medium' THEN 45 WHEN 'low' THEN 15 ELSE 0 END) as risk "
+            "FROM findings WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        count = int(row[0] or 0)
+        risk = int(row[1] or 0)
+        summary_raw = cursor.execute(
+            "SELECT summary_json FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        summary: Dict[str, Any] = {}
+        if summary_raw and summary_raw[0]:
+            try:
+                summary = json.loads(summary_raw[0])
+            except Exception:
+                summary = {}
+        summary["totalFindings"] = count
+        summary["riskScore"] = max(int(summary.get("riskScore") or 0), risk)
+        cursor.execute(
+            """
+            UPDATE sessions
+            SET findings_count = ?, risk_score = ?, summary_json = ?
+            WHERE session_id = ?
+            """,
+            (count, summary["riskScore"], json.dumps(summary), session_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def list_sessions(workspace: Path, limit: int = 20) -> List[Dict[str, Any]]:
     db_path = initialize_database(workspace)
     connection = sqlite3.connect(db_path)
@@ -1541,10 +1628,6 @@ def get_events_page(
             if agent:
                 where_clauses.append("s.agent = ?")
                 params.append(agent)
-            if verdict == "blocked":
-                where_clauses.append("f.finding_id IS NOT NULL")
-            elif verdict == "allowed":
-                where_clauses.append("f.finding_id IS NULL")
             where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
             # verdict/severity must reflect THIS event, not the session as a
             # whole — the previous `s.findings_count > 0` check plus an
@@ -1571,9 +1654,11 @@ def get_events_page(
                     FROM recent_events re
                 )
                 SELECT e.ts, e.session_id, s.agent, s.workspace_path,
+                       e.rn as event_index,
                        e.type as action_type,
                        e.command_text, e.path_text, e.url_text, e.raw_json,
-                       f.finding_id, f.severity,
+                       f.finding_id, f.severity, f.category, f.title,
+                       f.evidence, f.enrichment_json,
                        CASE WHEN f.finding_id IS NOT NULL THEN 'blocked' ELSE 'allowed' END as verdict
                 FROM numbered_events e
                 JOIN sessions s ON s.session_id = e.session_id
@@ -1589,6 +1674,7 @@ def get_events_page(
                 detail = row["command_text"] or row["path_text"] or row["url_text"] or ""
                 tool_tag = ""
                 raw_json = row["raw_json"] or ""
+                raw = {}
                 if raw_json:
                     try:
                         raw = json.loads(raw_json)
@@ -1598,6 +1684,39 @@ def get_events_page(
                     tag = meta.get("tool_name")
                     if isinstance(tag, str) and tag.strip():
                         tool_tag = tag.strip()
+                finding_id = row["finding_id"]
+                severity = row["severity"]
+                category = row["category"]
+                title = row["title"]
+                evidence = row["evidence"]
+                enrichment = {}
+                if row["enrichment_json"]:
+                    try:
+                        enrichment = json.loads(row["enrichment_json"])
+                    except Exception:
+                        enrichment = {}
+                verdict_value = row["verdict"] or "allowed"
+                if not finding_id and isinstance(raw, dict):
+                    try:
+                        from prismor.runtime.scoped_agent import load_scoped_rules, check_scoped_rules
+                        scoped = load_scoped_rules(Path(row["workspace_path"] or str(ws)), row["session_id"] or "")
+                        if scoped:
+                            inferred = check_scoped_rules(scoped, raw, session_id=row["session_id"] or "")
+                            if inferred:
+                                finding_id = inferred.get("id") or "scoped-agent"
+                                severity = inferred.get("severity") or "HIGH"
+                                category = inferred.get("category") or "scoped_agent"
+                                title = inferred.get("title") or "Scoped agent policy blocked this event"
+                                evidence = inferred.get("evidence") or ""
+                                enrichment = {
+                                    "ruleId": inferred.get("ruleId"),
+                                    "action": inferred.get("action"),
+                                    "mode": inferred.get("mode"),
+                                    "source": "inferred-scoped",
+                                }
+                                verdict_value = "blocked"
+                    except Exception:
+                        pass
                 if detail:
                     action_parts.append(detail[:80])
                 ts_raw = row["ts"] or ""
@@ -1609,10 +1728,21 @@ def get_events_page(
                     "action": ": ".join(action_parts) if action_parts else "event",
                     "toolTag": tool_tag,
                     "actionType": row["action_type"] or "",
-                    "verdict": row["verdict"] or "allowed",
-                    "severity": (row["severity"] or "low").lower(),
+                    "verdict": verdict_value,
+                    "severity": (severity or "low").lower(),
                     "sessionId": row["session_id"] or "",
                     "workspace": row["workspace_path"] or str(ws),
+                    "eventIndex": row["event_index"],
+                    "policy": {
+                        "id": finding_id or "",
+                        "ruleId": enrichment.get("ruleId") or finding_id or "",
+                        "category": category or "",
+                        "title": title or "",
+                        "evidence": evidence or "",
+                        "action": enrichment.get("action") or ("block" if verdict_value == "blocked" else ""),
+                        "mode": enrichment.get("mode") or "",
+                        "source": enrichment.get("source") or ("finding" if finding_id else ""),
+                    },
                 })
         except Exception:
             pass
@@ -1628,6 +1758,10 @@ def get_events_page(
             seen.add(key)
             deduped.append(ev)
     deduped.sort(key=lambda x: x["_tsRaw"] or "", reverse=True)
+    if verdict == "blocked":
+        deduped = [ev for ev in deduped if ev.get("verdict") == "blocked"]
+    elif verdict == "allowed":
+        deduped = [ev for ev in deduped if ev.get("verdict") != "blocked"]
 
     all_agents = sorted({ev["agent"] for ev in deduped})
     total = len(deduped)
@@ -2249,14 +2383,16 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
 
 def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any]:
     """Return scoped rules + recent blocked findings for a session."""
-    from prismor.runtime.scoped_agent import load_scoped_rules
+    from prismor.runtime.scoped_agent import load_scoped_rules, check_scoped_rules
     scoped = load_scoped_rules(workspace, session_id)
 
     recent_blocked: List[Dict[str, Any]] = []
+    recent_events: List[Dict[str, Any]] = []
     db = prismor_home() / "prismor.db"
     if db.exists():
         try:
             conn = sqlite3.connect(str(db), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute(
                 """
@@ -2279,6 +2415,99 @@ def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any
                 {"title": r[0], "category": r[1], "severity": r[2], "evidence": r[3], "ts": r[4]}
                 for r in cur.fetchall()
             ]
+            for row in conn.execute(
+                """
+                WITH numbered_events AS (
+                    SELECT e.*,
+                           ROW_NUMBER() OVER (PARTITION BY e.session_id ORDER BY e.id) - 1 AS rn
+                    FROM events e
+                    WHERE e.session_id = ?
+                )
+                SELECT e.ts, e.type, e.agent_event, e.command_text, e.path_text,
+                       e.url_text, e.raw_json, e.rn,
+                       f.finding_id, f.severity, f.category, f.title, f.evidence,
+                       f.enrichment_json
+                FROM numbered_events e
+                LEFT JOIN findings f ON f.session_id = e.session_id AND f.event_index = e.rn
+                ORDER BY e.ts DESC
+                LIMIT 12
+                """,
+                (session_id,),
+            ):
+                raw = {}
+                try:
+                    raw = json.loads(row["raw_json"] or "{}")
+                except Exception:
+                    raw = {}
+                meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+                tool_tag = meta.get("tool_name") if isinstance(meta, dict) else ""
+                finding_id = row["finding_id"]
+                severity = row["severity"]
+                category = row["category"]
+                title = row["title"]
+                evidence = row["evidence"]
+                enrichment = {}
+                if row["enrichment_json"]:
+                    try:
+                        enrichment = json.loads(row["enrichment_json"])
+                    except Exception:
+                        enrichment = {}
+                verdict = "blocked" if finding_id else "allowed"
+                if not finding_id and scoped and isinstance(raw, dict):
+                    inferred = check_scoped_rules(scoped, raw, session_id=session_id)
+                    if inferred:
+                        finding_id = inferred.get("id") or "scoped-agent"
+                        severity = inferred.get("severity") or "HIGH"
+                        category = inferred.get("category") or "scoped_agent"
+                        title = inferred.get("title") or "Scoped agent policy blocked this event"
+                        evidence = inferred.get("evidence") or ""
+                        enrichment = {
+                            "ruleId": inferred.get("ruleId"),
+                            "action": inferred.get("action"),
+                            "mode": inferred.get("mode"),
+                            "source": "inferred-scoped",
+                        }
+                        verdict = "blocked"
+                detail = row["command_text"] or row["path_text"] or row["url_text"] or ""
+                recent_events.append({
+                    "ts": _relative_time_store(row["ts"]) if row["ts"] else "",
+                    "tsAbs": _absolute_time_store(row["ts"]),
+                    "type": row["type"] or "",
+                    "agentEvent": row["agent_event"] or "",
+                    "toolTag": tool_tag or "",
+                    "action": (f"{row['type']}: {detail}" if detail else (row["type"] or "event")),
+                    "verdict": verdict,
+                    "severity": (severity or "low").lower(),
+                    "policy": {
+                        "id": finding_id or "",
+                        "ruleId": enrichment.get("ruleId") or finding_id or "",
+                        "category": category or "",
+                        "title": title or "",
+                        "evidence": evidence or "",
+                        "action": enrichment.get("action") or ("block" if verdict == "blocked" else ""),
+                        "mode": enrichment.get("mode") or "",
+                        "source": enrichment.get("source") or ("finding" if finding_id else ""),
+                    },
+                })
+            block_keys = {
+                (item.get("title") or "", item.get("evidence") or "", item.get("ts") or "")
+                for item in recent_blocked
+            }
+            for item in recent_events:
+                if item.get("verdict") != "blocked":
+                    continue
+                policy = item.get("policy") or {}
+                block = {
+                    "title": policy.get("title") or "Blocked by runtime policy",
+                    "category": policy.get("category") or "runtime_policy",
+                    "severity": item.get("severity") or "high",
+                    "evidence": policy.get("evidence") or item.get("action") or "",
+                    "ts": item.get("ts") or "",
+                }
+                key = (block["title"], block["evidence"], block["ts"])
+                if key not in block_keys:
+                    recent_blocked.append(block)
+                    block_keys.add(key)
             conn.close()
         except Exception:
             pass
@@ -2288,6 +2517,7 @@ def get_session_scoped_detail(workspace: Path, session_id: str) -> Dict[str, Any
         "scoped": scoped,
         "paused": bool(scoped.get("paused")) if scoped else False,
         "recent_blocked": recent_blocked,
+        "recent_events": recent_events,
     }
 
 
