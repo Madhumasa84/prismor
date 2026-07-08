@@ -323,6 +323,8 @@
   /* Findings drilldown */
   .finding-row { cursor: pointer; }
   .finding-row:hover td { background: var(--gray-50); }
+  .clickable-row { cursor: pointer; }
+  .clickable-row:hover td { background: var(--gray-50); }
   .finding-ev-row { display: none; }
   .finding-ev-row.open { display: table-row; }
   .finding-ev-cell {
@@ -380,6 +382,25 @@
     font-size: 9px; color: var(--gray-500); background: var(--gray-100); margin-left: 4px;
   }
   .src-pill.supply { background: #fef3c7; color: #92400e; }
+  .sess-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--gray-600);
+  }
+  .sess-status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; background: var(--green-500);
+  }
+  .sess-status.flagged .sess-status-dot { background: #f59e0b; }
+  .sess-status.blocked .sess-status-dot { background: #ec4899; }
+  .inline-link-btn {
+    border: none; background: none; color: var(--accent);
+    cursor: pointer; font: inherit; padding: 0;
+  }
+  .tool-tag-badge {
+    display:inline-block; margin-right:8px; padding:1px 6px; border-radius:999px;
+    font-size:10px; font-weight:600; letter-spacing:.02em;
+    background:#eef2ff; color:#4338ca; vertical-align:middle;
+  }
 
   /* ── Policy Control tab ── */
   .policy-scope-nav {
@@ -883,7 +904,7 @@
 <div class="tab-nav">
   <button class="tab-btn active" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="agents">Agents</button>
-  <button class="tab-btn" data-tab="sessions">Session Control</button>
+  <button class="tab-btn" data-tab="sessions">Session Drilldown</button>
   <button class="tab-btn" data-tab="policy">Policy Control</button>
   <button class="tab-btn" data-tab="fleet">Fleet<span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
 </div>
@@ -929,6 +950,28 @@
     <div class="card sev-card high">    <div class="sev-label">High</div>    <div id="sevHigh"     class="sev-count">-</div></div>
     <div class="card sev-card medium">  <div class="sev-label">Medium</div>  <div id="sevMedium"   class="sev-count">-</div></div>
     <div class="card sev-card low">     <div class="sev-label">Low</div>     <div id="sevLow"      class="sev-count">-</div></div>
+  </div>
+
+  <div class="card">
+    <div class="bar" style="margin-bottom:14px">
+      <div>
+        <div class="card-title">Recent Sessions</div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:4px">
+          Clean runs appear here too, even when there are no findings.
+        </div>
+      </div>
+      <div class="bar-right">
+        <button class="inline-link-btn" onclick="document.querySelector('.tab-btn[data-tab=&quot;sessions&quot;]')?.click()">Open full drilldown</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr><th>Session</th><th>Agent</th><th>Status</th><th>Last Active</th></tr>
+        </thead>
+        <tbody id="ovSessBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="grid grid-1-2">
@@ -1460,7 +1503,7 @@
 <div class="sess-drawer" id="sessDrawer">
   <div class="sess-drawer-header">
     <div style="flex:1;min-width:0">
-      <div class="sess-drawer-title">Session Control</div>
+      <div class="sess-drawer-title">Session Drilldown</div>
       <div class="sess-drawer-sessid" id="sessDrawerSessId"></div>
       <div style="margin-top:6px;display:flex;gap:6px;align-items:center" id="sessDrawerPills"></div>
     </div>
@@ -1579,14 +1622,16 @@ let _drawerSessId  = null;
 let _drawerWs      = null;
 let _drawerScoped  = null;   // live copy being edited
 let _drawerEditing = false;
+let _drawerSelectedEvent = null;
 
 function navigateToSession(sessionId, workspace) {
-  openSessDrawer(sessionId, workspace || _serverWorkspace || '');
+  openSessDrawer(sessionId, workspace || _serverWorkspace || '', null);
 }
 
-function openSessDrawer(sessionId, workspace) {
+function openSessDrawer(sessionId, workspace, selectedEvent) {
   _drawerSessId = sessionId;
   _drawerWs     = workspace || _serverWorkspace || '';
+  _drawerSelectedEvent = selectedEvent || null;
   document.getElementById('sessDrawerSessId').textContent = sessionId;
   document.getElementById('sessDrawerPills').innerHTML = '';
   document.getElementById('sessDrawerBody').innerHTML = '<div class="empty">Loading…</div>';
@@ -1600,6 +1645,7 @@ function closeSessDrawer() {
   document.getElementById('sessDrawerOverlay').classList.remove('open');
   document.getElementById('sessDrawer').classList.remove('open');
   _drawerSessId = null;
+  _drawerSelectedEvent = null;
 }
 
 async function fetchAndRenderDrawer() {
@@ -1641,6 +1687,21 @@ function renderDrawerContent(sessId, ws, data) {
   // Body
   const bodyEl = document.getElementById('sessDrawerBody');
   bodyEl.innerHTML = '';
+
+  if (_drawerSelectedEvent) {
+    const ev = _drawerSelectedEvent;
+    const evSec = document.createElement('div');
+    evSec.className = 'drawer-section';
+    evSec.innerHTML =
+      '<div class="drawer-section-title">Selected Event</div>' +
+      '<div class="drawer-rule-row"><span class="drawer-rule-label">Tool tag</span>' +
+        '<span class="scoped-tag tag-net">' + safe(ev.toolTag || 'unknown') + '</span></div>' +
+      '<div class="drawer-rule-row"><span class="drawer-rule-label">Normalized type</span>' +
+        '<span class="scoped-tag tag-allow">' + safe(ev.actionType || 'event') + '</span></div>' +
+      '<div class="drawer-rule-row" style="align-items:flex-start"><span class="drawer-rule-label">Action</span>' +
+        '<div style="font-size:11px;color:var(--gray-600);line-height:1.5;word-break:break-word">' + safe(ev.action || '') + '</div></div>';
+    bodyEl.appendChild(evSec);
+  }
 
   // ── Scoped rules section ────────────────────────────────────────────────
   const sec = document.createElement('div');
@@ -2043,20 +2104,43 @@ async function loadSessions() {
 }
 function renderSessions(rows) {
   const tbody=document.getElementById('sessBody');
+  renderOverviewSessions(rows.slice(0, 5));
   if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No sessions yet</td></tr>';return;}
   tbody.innerHTML=rows.map(s=>{
     const rc=riskClass(s.riskScore);
     const srcCls=s.source==='supply_chain'?'supply':'';
     const srcLabel=s.source==='supply_chain'?'supply-chain':'agent';
-    return '<tr>'+
+    return '<tr class="clickable-row" onclick="navigateToSession(\''+safeAttr(s.sessionId)+'\', \''+safeAttr(s.workspace)+'\')">'+
       '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,24))+'</td>'+
       '<td><span class="agent-pill">'+safe(s.agent)+'</span><span class="src-pill '+srcCls+'">'+safe(srcLabel)+'</span></td>'+
-      '<td style="color:var(--gray-500)">'+safe(s.workspace)+'</td>'+
+      '<td style="color:var(--gray-500)" title="'+safeAttr(s.workspace || '')+'">'+safe(s.workspaceName || workspaceName(s.workspace))+'</td>'+
       '<td><div class="risk-wrap"><div class="risk-bar"><div class="risk-fill '+rc+'" style="width:'+s.riskScore+'%"></div></div><span class="risk-num">'+s.riskScore+'</span></div></td>'+
       '<td class="right"'+(s.findingsCount>0?' style="color:var(--pink-600);font-weight:600"':'')+'>'+s.findingsCount+'</td>'+
       '<td>'+tsCell(s.updatedAt,s.updatedAtAbs)+'</td>'+
     '</tr>';
   }).join('');
+}
+function sessionStatusMarkup(s) {
+  if ((s.findingsCount || 0) > 0) {
+    return '<span class="sess-status blocked"><span class="sess-status-dot"></span>' + safe(String(s.findingsCount)) + ' finding' + (s.findingsCount === 1 ? '' : 's') + '</span>';
+  }
+  return '<span class="sess-status"><span class="sess-status-dot"></span>Clean</span>';
+}
+function renderOverviewSessions(rows) {
+  const tbody = document.getElementById('ovSessBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No sessions yet. Run a Bash command in Codex and refresh.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(s => (
+    '<tr class="clickable-row" onclick="navigateToSession(\'' + safeAttr(s.sessionId) + '\', \'' + safeAttr(s.workspace) + '\')">' +
+      '<td class="mono" title="' + safeAttr(s.sessionId) + '">' + safe(shortId(s.sessionId, 24)) + '</td>' +
+      '<td><span class="agent-pill">' + safe(s.agent) + '</span></td>' +
+      '<td>' + sessionStatusMarkup(s) + '</td>' +
+      '<td>' + tsCell(s.updatedAt, s.updatedAtAbs) + '</td>' +
+    '</tr>'
+  )).join('');
 }
 function updateSessHeaders(){
   document.querySelectorAll('#sessThead th[data-col]').forEach(th=>{
@@ -2164,7 +2248,11 @@ function renderEvents(rows){
   container.innerHTML=rows.map((ev,i)=>{
     const sid = ev.sessionId || '';
     const ws  = ev.workspace || '';
-    return '<div class="event-row" onclick="onEventClick(\''+safeAttr(sid)+'\',\''+safeAttr(ws)+'\')" title="Open session controls">'+
+    const toolTag = ev.toolTag ? '<span class="tool-tag-badge">'+safe(ev.toolTag)+'</span>' : '';
+    const encTag = encodeURIComponent(ev.toolTag || '');
+    const encType = encodeURIComponent(ev.actionType || '');
+    const encAction = encodeURIComponent(ev.action || '');
+    return '<div class="event-row" onclick="onEventClick(\''+safeAttr(sid)+'\',\''+safeAttr(ws)+'\',\''+safeAttr(encTag)+'\',\''+safeAttr(encType)+'\',\''+safeAttr(encAction)+'\')" title="Open session controls">'+
       '<span class="event-dot '+(ev.verdict||'allowed')+'"></span>'+
       '<div style="flex:1;min-width:0">'+
         '<div class="event-meta">'+
@@ -2172,7 +2260,7 @@ function renderEvents(rows){
           ' &middot; <strong style="color:var(--gray-600)">'+safe(ev.agent)+'</strong>'+
           (sid ? ' &middot; <span class="event-sess-id" title="'+safeAttr(sid)+'">'+safe(shortId(sid,18))+'</span>' : '')+
         '</div>'+
-        '<div class="event-action">'+safe(ev.action)+'</div>'+
+        '<div class="event-action">'+toolTag+safe(ev.action)+'</div>'+
       '</div>'+
       '<span class="sev-badge '+sevClass(ev.severity)+'" style="flex-shrink:0">'+safe(ev.severity)+'</span>'+
       '<span class="event-sess-link">Session →</span>'+
@@ -2180,7 +2268,7 @@ function renderEvents(rows){
   }).join('');
 }
 
-function onEventClick(sessionId, workspace) {
+function onEventClick(sessionId, workspace, toolTagEnc, actionTypeEnc, actionEnc) {
   if (!sessionId) {
     const t = document.createElement('div');
     t.textContent = 'No session ID recorded for this event.';
@@ -2189,7 +2277,11 @@ function onEventClick(sessionId, workspace) {
     setTimeout(() => t.remove(), 2500);
     return;
   }
-  openSessDrawer(sessionId, workspace);
+  openSessDrawer(sessionId, workspace, {
+    toolTag: decodeURIComponent(toolTagEnc || ''),
+    actionType: decodeURIComponent(actionTypeEnc || ''),
+    action: decodeURIComponent(actionEnc || ''),
+  });
 }
 document.querySelectorAll('.fbtn[data-verdict]').forEach(btn=>{
   btn.addEventListener('click',()=>{
@@ -2433,14 +2525,30 @@ document.getElementById('agentsRefresh').addEventListener('click', loadAgents);
 // SESSION CONTROL TAB
 // ══════════════════════════════════════════════════════════════════════════
 let _serverWorkspace = null;
+let _selectedWorkspace = null;
 let _sessCtrlData = { items:[], total:0, pages:1, page:1, limit:20 };
 let _expandedSess = null;
+
+function workspaceName(path) {
+  if (!path) return '';
+  const parts = String(path).split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+
+function activeWorkspace() {
+  const workspaces = (_wsCache && Array.isArray(_wsCache.workspaces)) ? _wsCache.workspaces : [];
+  return _selectedWorkspace || _serverWorkspace || workspaces[0] || '';
+}
 
 async function loadWorkspaces() {
   try {
     const data = await apiFetch('/api/workspaces');
     _wsCache = data;
     _serverWorkspace = data.primary;
+    if (!_selectedWorkspace) {
+      const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+      _selectedWorkspace = data.primary || workspaces[0] || null;
+    }
     renderEnrollBanners(data.enrollment);
     return data;
   } catch(e) { console.error('[prismor] workspaces:', e); return {}; }
@@ -2468,7 +2576,7 @@ function renderEnrollBanners(enrollment) {
 
 async function loadSessionControl() {
   if (!_wsCache) await loadWorkspaces();
-  const ws = _serverWorkspace;
+  const ws = activeWorkspace();
   const { page, limit } = _sessCtrlData;
   try {
     const data = await apiFetch(`/api/sessions?page=${page}&limit=${limit}&sort=updatedAt&dir=desc`);
@@ -2503,7 +2611,8 @@ function renderSessionControl(items, workspace) {
   body.innerHTML = items.map((s, i) => {
     const sessId = s.sessionId;
     const detailId = 'scdet-' + i;
-    const ws = workspace || s.workspace || '';
+    const ws = s.workspace || workspace || '';
+    const wsLabel = s.workspaceName || workspaceName(ws);
     return '<div class="sess-ctrl-row">' +
       '<div>' +
         '<div class="sess-id-wrap">' +
@@ -2511,7 +2620,7 @@ function renderSessionControl(items, workspace) {
           '<span id="pill-' + i + '">' + statusPill(s, null) + '</span>' +
           '<span class="agent-pill">' + safe(s.agent||'?') + '</span>' +
         '</div>' +
-        '<div class="sess-ws">' + safe(s.workspace||ws) + ' · last active ' + (s.updatedAt||'—') + '</div>' +
+        '<div class="sess-ws" title="' + safeAttr(ws) + '">' + safe(wsLabel || ws) + ' · last active ' + (s.updatedAt||'—') + '</div>' +
         '<div id="' + detailId + '" class="sess-detail"></div>' +
       '</div>' +
       '<div class="sess-ctrl-btns">' +
@@ -2624,7 +2733,8 @@ let _projectPolicyOriginal = '';
 
 async function loadPolicy() {
   try {
-    const ws = _serverWorkspace || '';
+    if (!_wsCache) await loadWorkspaces();
+    const ws = activeWorkspace();
     const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
     const data = await apiFetch('/api/policy' + params);
     _policyData = data;
@@ -2729,15 +2839,32 @@ function renderPolicyTab(data) {
 
   // Workspace banner
   const wsBanner = document.getElementById('workspaceBanner');
+  const workspaces = (_wsCache && Array.isArray(_wsCache.workspaces)) ? _wsCache.workspaces : [];
+  const currentWs = data.workspace || activeWorkspace();
   if (data.workspace) {
+    const options = workspaces.map(ws =>
+      '<option value="' + safeAttr(ws) + '"' + (ws === currentWs ? ' selected' : '') + '>' +
+      safe(workspaceName(ws)) + '</option>'
+    ).join('');
     wsBanner.innerHTML = '<div class="banner banner-info" style="margin-bottom:16px">' +
       '<span class="banner-icon"><svg class="icon"><use href="#i-folder"/></svg></span>' +
-      '<div class="banner-text">Project workspace: <code>' + safeAttr(data.workspace) + '</code></div></div>';
+      '<div class="banner-text"><strong>Dashboard data source:</strong> <code>' + safeAttr((_wsCache||{}).home || '~/.prismor') + '</code>' +
+      '<br>Project controls workspace: ' +
+      (options ? '<select id="workspacePicker" style="max-width:360px;margin:0 6px;padding:3px 6px;border:1px solid var(--gray-200);border-radius:6px;font:inherit">' + options + '</select>' : '') +
+      '<code>' + safeAttr(data.workspace) + '</code></div></div>';
+    const picker = document.getElementById('workspacePicker');
+    if (picker) {
+      picker.addEventListener('change', () => {
+        _selectedWorkspace = picker.value;
+        loadPolicy();
+        loadRules();
+      });
+    }
   } else {
     wsBanner.innerHTML = '<div class="banner banner-warn" style="margin-bottom:16px">' +
       '<span class="banner-icon"><svg class="icon"><use href="#i-alert"/></svg></span>' +
       '<div class="banner-text"><strong>No project workspace detected</strong>' +
-      ' — project policy editing unavailable. Launch the dashboard from inside a project directory.</div></div>';
+      ' — sessions and events still load globally from <code>' + safeAttr((_wsCache||{}).home || '~/.prismor') + '</code>. Install hooks in a project to enable project policy editing.</div></div>';
   }
 }
 
@@ -2756,7 +2883,8 @@ let _rulesCatalog = [];   // [{id,severity,category,title,action,enabled}]
 let _rulesState   = {};   // id -> desired enabled state
 
 async function loadRules() {
-  const ws = _serverWorkspace;
+  if (!_wsCache) await loadWorkspaces();
+  const ws = activeWorkspace();
   const params = ws ? ('?workspace=' + encodeURIComponent(ws)) : '';
   try {
     const data = await apiFetch('/api/policy/rules' + params);
@@ -2815,7 +2943,7 @@ document.getElementById('rulesDiscard').addEventListener('click', () => {
 });
 document.querySelector('.policy-scope-btn[data-pscope="rules"]')?.addEventListener('click', loadRules);
 document.getElementById('rulesSave').addEventListener('click', async () => {
-  const ws = _serverWorkspace;
+  const ws = activeWorkspace();
   if (!ws) { setPolicySaveStatus('rulesSaveStatus', 'No project workspace detected', 'status-err'); return; }
   const disabled = _rulesCatalog.filter(r => !_rulesState[r.id]).map(r => r.id);
   setPolicySaveStatus('rulesSaveStatus', 'Saving…', 'status-saving');
@@ -2867,7 +2995,7 @@ document.getElementById('globalPolicyReset').addEventListener('click', () => {
 // Project policy save / discard / reset
 document.getElementById('projectPolicySave').addEventListener('click', async () => {
   const yaml = document.getElementById('projectPolicyEditor').value;
-  const ws = (_policyData||{}).workspace || _serverWorkspace || '';
+  const ws = (_policyData||{}).workspace || activeWorkspace();
   setPolicySaveStatus('projectPolicySaveStatus', 'Saving…', 'status-saving');
   try {
     const result = await apiFetch('/api/policy/project', {

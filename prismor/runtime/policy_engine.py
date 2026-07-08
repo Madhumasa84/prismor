@@ -97,15 +97,16 @@ class _TaintStore:
 
     Tracks whether a prompt injection was detected in the current session
     so that subsequent network calls can be escalated to CRITICAL regardless
-    of their destination.  Stored as a JSON file under
-    ``{workspace}/.prismor/taint/{session_id}.json``.
+    of their destination. Stored in Prismor's central workspace state dir.
     """
 
     def __init__(self, workspace: Path, session_id: str) -> None:
         safe = "".join(
             c if c.isalnum() or c in "._-" else "_" for c in session_id
         )
-        self._path = workspace / ".prismor" / "taint" / f"{safe}.json"
+        from prismor.runtime.store import get_data_dir
+
+        self._path = get_data_dir(workspace) / "taint" / f"{safe}.json"
         self.injection_detected: bool = False
         self.injection_event_index: Optional[int] = None
         self.seen_domains: set = set()

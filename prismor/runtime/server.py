@@ -51,6 +51,7 @@ from prismor.runtime.store import (
     set_project_rule_states,
     get_session_scoped_detail,
     update_session_control,
+    prismor_home,
 )
 
 _DASHBOARD_HTML = Path(__file__).with_name("dashboard.html")
@@ -145,6 +146,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "workspaces": [str(w) for w in workspaces],
                 "primary": primary,
+                "home": str(prismor_home()),
                 "enrollment": enrollment,
             })
             return
@@ -418,8 +420,9 @@ def run_server(
 ) -> None:
     """Start the prismor HTTP API server (blocks until Ctrl-C).
 
-    ``workspace`` is the directory where the server was launched, used as
-    the default for project-level policy and session operations.
+    ``workspace`` is optional. When omitted, dashboard reads still aggregate
+    through the global registry in ~/.prismor, and project-level writes must
+    pass an explicit workspace from the selected row/control.
     """
     global _SERVER_WORKSPACE
     _SERVER_WORKSPACE = workspace
@@ -437,8 +440,8 @@ def run_server(
                 raise
 
     url = f"http://{host}:{port}"
-    ws_label = f"  workspace → {workspace}" if workspace else ""
-    print(f"[prismor] dashboard → {url}  (Ctrl-C to stop){ws_label}", flush=True)
+    ws_label = f"  controls workspace → {workspace}" if workspace else "  controls workspace → selected in UI"
+    print(f"[prismor] dashboard → {url}  (Ctrl-C to stop)  state → {prismor_home()}{ws_label}", flush=True)
     if open_browser:
         import threading
         import webbrowser

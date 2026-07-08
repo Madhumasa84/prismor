@@ -52,6 +52,19 @@ class TestPrismorHomeHonored(unittest.TestCase):
         import prismor.runtime.store as store_mod
         self.assertEqual(store_mod._secrets_dir(), self.home / "secrets")
 
+    def test_runtime_workspace_state_lives_under_prismor_home(self):
+        import prismor.runtime.store as store_mod
+
+        workspace = self.home.parent / f"demo-workspace-{id(self)}"
+        workspace.mkdir()
+
+        data_dir = store_mod.get_data_dir(workspace)
+
+        self.assertEqual(data_dir.parent, self.home / "workspaces")
+        self.assertEqual(store_mod.get_db_path(workspace), data_dir / "prismor.db")
+        self.assertEqual(store_mod.get_sessions_dir(workspace), data_dir / "sessions")
+        self.assertFalse(str(data_dir).startswith(str(workspace / ".prismor")))
+
     def test_iam_global_path_honors_prismor_home(self):
         import prismor.runtime.iam as iam_mod
         self.assertEqual(iam_mod._global_iam_path(), self.home / "iam.yaml")

@@ -245,6 +245,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 break
     if not ws_value:
         ws_value = os.environ.get("PRISMOR_WORKSPACE")
+    explicit_workspace = bool(ws_value)
     workspace = Path(ws_value).resolve() if ws_value else infer_default_workspace(Path.cwd())
 
     # ── eval-server: HTTP evaluation endpoint for non-Python adapters ────
@@ -276,7 +277,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         # dashboard opens a browser by default; serve stays headless. --no-open
         # forces headless for dashboard too.
         open_browser = args.command == "dashboard" and not getattr(args, "no_open", False)
-        run_server(host=args.host, port=args.port, open_browser=open_browser, workspace=workspace)
+        dashboard_workspace = workspace if explicit_workspace else None
+        run_server(host=args.host, port=args.port, open_browser=open_browser, workspace=dashboard_workspace)
         return
 
     # ── info: deprecated alias of status ────────────────────────────────

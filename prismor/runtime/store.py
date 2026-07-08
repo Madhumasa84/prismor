@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -104,7 +106,12 @@ def register_workspace(workspace: Path) -> None:
 
 
 def list_registered_workspaces() -> List[Path]:
-    """Return all registered workspace paths that still exist and have a prismor.db."""
+    """Return registered workspace paths that still exist and have Prismor state.
+
+    Runtime state is canonicalized under ``~/.prismor/workspaces/<id>/``. Older
+    installs wrote the DB under ``<workspace>/.prismor/``; those workspaces are
+    still returned so first access can migrate them into the global state dir.
+    """
     reg = _registry_path()
     if not reg.exists():
         return []
@@ -115,7 +122,12 @@ def list_registered_workspaces() -> List[Path]:
     result = []
     for p in paths:
         ws = Path(p)
-        if (ws / ".prismor" / "prismor.db").exists():
+        if not ws.exists():
+            continue
+        central_db = _workspace_state_dir(ws) / "prismor.db"
+        legacy_db = ws / ".prismor" / "prismor.db"
+        legacy_warden_db = ws / _LEGACY_DATA_DIR / _LEGACY_DB_NAME
+        if central_db.exists() or legacy_db.exists() or legacy_warden_db.exists():
             result.append(ws)
     return result
 
@@ -131,25 +143,69 @@ def infer_default_workspace(cwd: Path) -> Path:
     return resolved
 
 
-# Legacy on-disk names (pre-Prismor-rename). Existing workspaces stored their
-# state under `.prismor-warden/warden.db`. Many call sites hardcode the current
-# `.prismor/...` paths, so rather than fall back everywhere we migrate the old
-# names to the new ones once, on first access. The rename is atomic on a single
-# filesystem and moves the whole directory (policy.yaml, iam.yaml, sessions/, and
-# the db + its -wal/-shm siblings) intact, so no state is orphaned.
 _LEGACY_DATA_DIR = ".prismor-warden"
 _LEGACY_DB_NAME = "warden.db"
 
 
-def get_data_dir(workspace: Path) -> Path:
-    new = workspace / ".prismor"
-    legacy = workspace / _LEGACY_DATA_DIR
-    if legacy.exists() and not new.exists():
+def _workspace_state_id(workspace: Path) -> str:
+    resolved = str(workspace.resolve())
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", workspace.name).strip("-._") or "workspace"
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+    return f"{name}-{digest}"
+
+
+def _workspace_state_dir(workspace: Path) -> Path:
+    return prismor_home() / "workspaces" / _workspace_state_id(workspace)
+
+
+def _copy_path_once(src: Path, dst: Path) -> None:
+    if not src.exists() or dst.exists():
+        return
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+    except OSError:
+        pass
+
+
+def _migrate_workspace_runtime_state(workspace: Path, data_dir: Path) -> None:
+    """Copy legacy runtime state into Prismor home without moving project config."""
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
         try:
-            legacy.rename(new)
+            data_dir.parent.chmod(0o700)
+            data_dir.chmod(0o700)
         except OSError:
-            return legacy  # cross-device or perms: keep using the legacy dir
-    return new
+            pass
+        meta = {
+            "workspace": str(workspace.resolve()),
+            "state_id": data_dir.name,
+        }
+        meta_path = data_dir / "workspace.json"
+        if not meta_path.exists():
+            meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+    project_dir = workspace / ".prismor"
+    legacy_dir = workspace / _LEGACY_DATA_DIR
+
+    for suffix in ("", "-wal", "-shm"):
+        _copy_path_once(project_dir / f"prismor.db{suffix}", data_dir / f"prismor.db{suffix}")
+        _copy_path_once(legacy_dir / f"{_LEGACY_DB_NAME}{suffix}", data_dir / f"prismor.db{suffix}")
+
+    for child in ("sessions", "scoped", "taint"):
+        _copy_path_once(project_dir / child, data_dir / child)
+        _copy_path_once(legacy_dir / child, data_dir / child)
+
+
+def get_data_dir(workspace: Path) -> Path:
+    data_dir = _workspace_state_dir(workspace)
+    _migrate_workspace_runtime_state(workspace, data_dir)
+    return data_dir
 
 
 def get_db_path(workspace: Path) -> Path:
@@ -1135,6 +1191,7 @@ def get_sessions_page(
                 f"SELECT session_id, agent, {name_col} as agent_name, source, risk_score, findings_count, "
                 "started_at, updated_at, workspace_path FROM sessions LIMIT 5000"
             ):
+                workspace_path = row["workspace_path"] or str(ws)
                 rows.append({
                     "sessionId": row["session_id"] or "",
                     "agent": row["agent"] or "unknown",
@@ -1147,7 +1204,8 @@ def get_sessions_page(
                     "updatedAt": _relative_time_store(row["updated_at"]) if row["updated_at"] else "",
                     "updatedAtAbs": _absolute_time_store(row["updated_at"] or ""),
                     "_sortRaw": row[sort_col] or "",
-                    "workspace": Path(row["workspace_path"] or "").name if row["workspace_path"] else "",
+                    "workspace": workspace_path,
+                    "workspaceName": Path(workspace_path).name if workspace_path else "",
                 })
         except Exception:
             pass
@@ -1324,7 +1382,7 @@ def get_events_page(
                 )
                 SELECT e.ts, e.session_id, s.agent, s.workspace_path,
                        e.type as action_type,
-                       e.command_text, e.path_text, e.url_text,
+                       e.command_text, e.path_text, e.url_text, e.raw_json,
                        f.finding_id, f.severity,
                        CASE WHEN f.finding_id IS NOT NULL THEN 'blocked' ELSE 'allowed' END as verdict
                 FROM numbered_events e
@@ -1340,6 +1398,17 @@ def get_events_page(
                 if row["action_type"]:
                     action_parts.append(row["action_type"])
                 detail = row["command_text"] or row["path_text"] or row["url_text"] or ""
+                tool_tag = ""
+                raw_json = row["raw_json"] or ""
+                if raw_json:
+                    try:
+                        raw = json.loads(raw_json)
+                    except Exception:
+                        raw = {}
+                    meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+                    tag = meta.get("tool_name")
+                    if isinstance(tag, str) and tag.strip():
+                        tool_tag = tag.strip()
                 if detail:
                     action_parts.append(detail[:80])
                 ts_raw = row["ts"] or ""
@@ -1349,6 +1418,8 @@ def get_events_page(
                     "_tsRaw": ts_raw,
                     "agent": row["agent"] or "unknown",
                     "action": ": ".join(action_parts) if action_parts else "event",
+                    "toolTag": tool_tag,
+                    "actionType": row["action_type"] or "",
                     "verdict": row["verdict"] or "allowed",
                     "severity": (row["severity"] or "low").lower(),
                     "sessionId": row["session_id"] or "",
