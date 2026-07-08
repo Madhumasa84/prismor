@@ -1,3 +1,9 @@
+## [1.17.9] — 2026-07-08
+
+### Fixed
+
+- **Revoked devices now fully fall back to local-only protection instead of continuing to look enterprise-enrolled on the laptop.** Previously, removing a device from `prismor.dev` only caused control-plane calls to back off after a `401/403`, but the local runtime still treated the presence of `~/.prismor/identity.json` as active enrollment: the dashboard banner still said “This device is enrolled…”, workspace scope could still resolve as org-managed, and the cached enterprise policy layer could still appear locally. Revocation now disables active enrollment, forces workspace scope back to `local`, hides the enterprise policy layer from the local dashboard, and ignores cached remote policy until the machine is re-enrolled. Local Prismor protection still stays on. 
+
 ## [1.17.1] — 2026-07-07
 
 ### Added
