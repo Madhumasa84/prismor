@@ -939,6 +939,13 @@
   .agent-stat-label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--gray-400); font-weight:600; }
   .agent-stat-value { font-size:24px; font-weight:700; color:var(--gray-900); margin-top:4px; }
   .agent-stat-value.accent { color:var(--pink-600); }
+  .agent-name.link { cursor:pointer; }
+  .agent-name.link:hover { color:var(--sky-600); text-decoration:underline; }
+  .agent-ctrl-card { margin-bottom:18px; }
+  .agent-ctrl { display:flex; align-items:center; gap:14px; padding:11px 0; border-bottom:1px solid var(--gray-100); flex-wrap:wrap; }
+  .agent-ctrl:last-child { border-bottom:none; }
+  .agent-ctrl > label:first-child { width:150px; font-size:12px; font-weight:600; color:var(--gray-700); flex-shrink:0; }
+  .agent-ctrl-hint { font-size:11px; color:var(--gray-400); }
 
   /* ── Session flow page ── */
   .session-hero {
@@ -970,15 +977,15 @@
   .flow-legend i.warn  { background:#f59e0b; }
   .flow-legend i.block { background:#ef4444; }
 
-  .flow-wrap { position:relative; overflow-x:auto; overflow-y:hidden; padding:34px 24px; min-height:170px; }
+  .flow-wrap { position:relative; overflow-y:auto; overflow-x:hidden; padding:28px 28px; min-height:170px; max-height:66vh; }
   .flow-edges { position:absolute; top:0; left:0; pointer-events:none; overflow:visible; }
   .flow-edge { fill:none; stroke:var(--gray-300); stroke-width:2; }
   .flow-edge.warn  { stroke:#f59e0b; stroke-width:2.5; }
   .flow-edge.block { stroke:#ef4444; stroke-width:2.5; }
-  .flow-nodes { position:relative; display:flex; align-items:center; gap:34px; width:max-content; }
+  .flow-nodes { position:relative; display:flex; flex-direction:column; align-items:center; gap:30px; width:100%; }
 
   .flow-node {
-    position:relative; z-index:1; width:158px; flex-shrink:0; cursor:pointer;
+    position:relative; z-index:1; width:340px; max-width:100%; flex-shrink:0; cursor:pointer;
     background:#fff; border:1.5px solid var(--gray-200); border-radius:12px;
     padding:10px 12px; transition:transform .12s, box-shadow .12s, border-color .12s;
     box-shadow:0 1px 2px rgba(0,0,0,.04);
@@ -989,12 +996,12 @@
   .flow-node.block.sel { border-color:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.18); }
   .flow-node.warn { border-color:#fcd34d; background:#fffbeb; }
   .flow-node.warn.sel { border-color:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.18); }
-  .flow-node.up { transform:translateY(-26px); }
-  .flow-node.up:hover { transform:translateY(-28px); }
+  .flow-node.branch { transform:translateX(64px); }
+  .flow-node.branch:hover { transform:translateX(64px) translateY(-2px); }
 
   .flow-node-top { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
   .flow-node-chip { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--gray-500); background:var(--gray-100); border-radius:5px; padding:2px 6px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .flow-node-action { font-family:var(--font-mono); font-size:10.5px; color:var(--gray-800); line-height:1.35; max-height:28px; overflow:hidden; word-break:break-all; }
+  .flow-node-action { font-family:var(--font-mono); font-size:11px; color:var(--gray-800); line-height:1.4; max-height:44px; overflow:hidden; word-break:break-all; }
   .flow-node-foot { display:flex; align-items:center; justify-content:space-between; margin-top:7px; }
   .flow-node-verdict { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; padding:2px 7px; border-radius:999px; }
   .flow-node-verdict.allow { background:#dcfce7; color:#15803d; }
@@ -1332,11 +1339,11 @@
     <div style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Agent</th><th>Status</th><th>Mode</th><th>IAM Profile</th>
+          <th>Agent</th><th>Status</th><th>Mode</th>
           <th class="right">Calls</th><th class="right">Blocked</th><th>Last Seen</th>
           <th class="right" title="Off = kill switch: every tool call denied">Enabled</th>
         </tr></thead>
-        <tbody id="agentsBody"><tr><td colspan="8" class="empty">Loading agents…</td></tr></tbody>
+        <tbody id="agentsBody"><tr><td colspan="7" class="empty">Loading agents…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1449,6 +1456,11 @@
   </div>
 
   <div class="agent-stats" id="agentStats"></div>
+
+  <div class="card agent-ctrl-card" id="agentControlsCard">
+    <div class="card-title" style="margin-bottom:6px">Controls</div>
+    <div id="agentControls"></div>
+  </div>
 
   <div class="card">
     <div class="bar" style="margin-bottom:14px">
@@ -2514,6 +2526,7 @@ async function openAgentView(agentName){
   await ensureAllSessions(true);
   renderAgentSwitch(agentName);
   renderAgentHero(agentName);
+  renderAgentControls(agentName);
   renderAgentSessions(agentName);
 }
 function renderAgentSwitch(current){
@@ -2554,6 +2567,33 @@ function renderAgentHero(agentName){
 function agentStat(label, value, accent){
   return '<div class="agent-stat"><div class="agent-stat-label">'+safe(label)+'</div>'+
     '<div class="agent-stat-value'+(accent?' accent':'')+'">'+value+'</div></div>';
+}
+function renderAgentControls(agentName){
+  const el = document.getElementById('agentControls');
+  if (!el) return;
+  const a = (_agentsCache?.agents||[]).find(x=>x.name===agentName);
+  if (!a){ el.innerHTML = '<div class="node-panel-empty">This agent has recorded sessions but has not registered live controls yet. Controls appear once it runs in a Prismor-enabled workspace.</div>'; return; }
+  const modeOpts = [['','inherit (global)'],['observe','observe'],['enforce','enforce']]
+    .map(([v,l])=>'<option value="'+v+'"'+((a.mode||'')===v?' selected':'')+'>'+l+'</option>').join('');
+  const profiles = _agentsCache?.iam_profiles || [];
+  const iamBlock = profiles.length ? (
+    '<div class="agent-ctrl"><label>IAM profile</label>'+
+      '<select class="fsel" onchange="agentSet(\''+safeAttr(a.name)+'\',{iam_profile:this.value||null})">'+
+        '<option value=""'+(!a.iam_profile?' selected':'')+'>none</option>'+
+        profiles.map(pf=>'<option value="'+safeAttr(pf)+'"'+(a.iam_profile===pf?' selected':'')+'>'+safe(pf)+'</option>').join('')+
+      '</select>'+
+      '<span class="agent-ctrl-hint">least-privilege profile from iam.yaml — enforced when the agent runs in enforce mode</span></div>'
+  ) : '';
+  el.innerHTML =
+    '<div class="agent-ctrl"><label>Enforcement mode</label>'+
+      '<select class="fsel" onchange="agentSet(\''+safeAttr(a.name)+'\',{mode:this.value||null})">'+modeOpts+'</select>'+
+      '<span class="agent-ctrl-hint">observe = log only · enforce = block in real time · inherit = follow global policy</span></div>'+
+    iamBlock+
+    '<div class="agent-ctrl"><label>Agent enabled</label>'+
+      '<label class="rule-toggle" title="'+(a.enabled?'Block this agent — every tool call denied':'Unblock this agent')+'">'+
+        '<input type="checkbox"'+(a.enabled?' checked':'')+' onchange="agentToggle(\''+safeAttr(a.name)+'\',this)">'+
+        '<span class="rule-track"></span></label>'+
+      '<span class="agent-ctrl-hint">off = kill switch: every tool call from this agent is denied until re-enabled</span></div>';
 }
 function renderAgentSessions(agentName){
   const rows = _allSessionsCache.filter(s=>s.agent===agentName);
@@ -2679,7 +2719,7 @@ function endpointEl(kind,label){
 function flowNodeEl(ev,i){
   const v = flowVerdict(ev);
   const el=document.createElement('div');
-  el.className='flow-node '+v+((v==='block'||v==='warn')?' up':'');
+  el.className='flow-node '+v+((v==='block'||v==='warn')?' branch':'');
   el.dataset.idx=i;
   el.onclick=()=>selectFlowNode(i);
   const chip = ev.toolTag || ev.type || 'tool';
@@ -2694,20 +2734,20 @@ function flowNodeEl(ev,i){
 function drawFlowEdges(svg, nodesEl, trail){
   const host = svg.parentElement;
   while(svg.firstChild) svg.removeChild(svg.firstChild);
-  svg.setAttribute('width', host.scrollWidth);
-  svg.setAttribute('height', host.clientHeight);
+  svg.setAttribute('width', host.clientWidth);
+  svg.setAttribute('height', host.scrollHeight);
   const kids=[...nodesEl.children];
   const hostRect = host.getBoundingClientRect();
-  const scrollX = host.scrollLeft;
-  const center=(el)=>{ const r=el.getBoundingClientRect(); return {
-    l: r.left-hostRect.left+scrollX, r: r.right-hostRect.left+scrollX, cy: r.top-hostRect.top + r.height/2 }; };
+  const scrollY = host.scrollTop;
+  const anchor=(el)=>{ const r=el.getBoundingClientRect(); return {
+    cx: r.left-hostRect.left + r.width/2, t: r.top-hostRect.top+scrollY, b: r.bottom-hostRect.top+scrollY }; };
   for(let i=0;i<kids.length-1;i++){
-    const a=center(kids[i]), b=center(kids[i+1]);
-    const x1=a.r, y1=a.cy, x2=b.l, y2=b.cy, mx=(x1+x2)/2;
+    const a=anchor(kids[i]), b=anchor(kids[i+1]);
+    const x1=a.cx, y1=a.b, x2=b.cx, y2=b.t, my=(y1+y2)/2;
     let cls=''; const ev = trail[i];
     if (ev){ const v=flowVerdict(ev); if(v!=='allow') cls=v; }
     svg.insertAdjacentHTML('beforeend',
-      '<path class="flow-edge '+cls+'" d="M '+x1+' '+y1+' C '+mx+' '+y1+', '+mx+' '+y2+', '+x2+' '+y2+'"/>');
+      '<path class="flow-edge '+cls+'" d="M '+x1+' '+y1+' C '+x1+' '+my+', '+x2+' '+my+', '+x2+' '+y2+'"/>');
   }
 }
 function selectFlowNode(idx){
@@ -3202,7 +3242,7 @@ async function loadAgents() {
     console.error('[prismor] agents:', e);
     if (!_agentsCache) {
       document.getElementById('agentsBody').innerHTML =
-        '<tr><td colspan="8" class="empty">Failed to load agents: ' + safe(e.message) + '</td></tr>';
+        '<tr><td colspan="7" class="empty">Failed to load agents: ' + safe(e.message) + '</td></tr>';
     }
   }
 }
@@ -3214,7 +3254,7 @@ function renderAgents(data) {
     agents.length + ' agent' + (agents.length === 1 ? '' : 's') + ' registered';
   const tbody = document.getElementById('agentsBody');
   if (!agents.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">No agents discovered yet — agents ' +
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No agents discovered yet — agents ' +
       'auto-register the first time they run in a Prismor-enabled workspace. ' +
       'Install hooks with <code>prismor install</code>, then start Claude Code, Codex, or Cursor.</td></tr>';
     return;
@@ -3231,11 +3271,10 @@ function renderAgents(data) {
         '<option value="' + safeAttr(p) + '"' + (a.iam_profile === p ? ' selected' : '') + '>' + safe(p) + '</option>'))
       .join('');
     return '<tr class="' + (a.enabled ? '' : 'agent-off') + '">' +
-      '<td><span class="agent-name">' + safe(a.name) + '</span>' +
+      '<td><span class="agent-name link" onclick="openAgentView(\'' + safeAttr(a.name) + '\')">' + safe(a.name) + '</span>' +
         (a.framework && a.framework !== a.name ? ' <span class="agent-pill">' + safe(a.framework) + '</span>' : '') + '</td>' +
       '<td>' + status + '</td>' +
       '<td><select class="fsel" onchange="agentSet(\'' + safeAttr(a.name) + '\',{mode:this.value||null})">' + modeOpts + '</select></td>' +
-      '<td><select class="fsel" onchange="agentSet(\'' + safeAttr(a.name) + '\',{iam_profile:this.value||null})">' + iamOpts + '</select></td>' +
       '<td class="right">' + fmtNum(a.total_calls || 0) + '</td>' +
       '<td class="right"' + (a.blocked_calls > 0 ? ' style="color:var(--pink-600);font-weight:600"' : '') + '>' + fmtNum(a.blocked_calls || 0) + '</td>' +
       '<td style="color:var(--gray-400)">' + safe(fmtLastSeen(a.last_seen)) + '</td>' +
@@ -3258,6 +3297,7 @@ async function agentSet(name, fields) {
       const a = (_agentsCache.agents || []).find(x => x.name === name);
       if (a) { a.enabled = result.enabled; a.mode = result.mode; a.iam_profile = result.iam_profile; }
       renderAgents(_agentsCache);
+      if (document.getElementById('page-agent')?.classList.contains('active')) { renderAgentHero(name); renderAgentControls(name); }
     }
     if (fields.enabled === false)      toast(name + ' blocked — all tool calls denied');
     else if (fields.enabled === true)  toast('✓ ' + name + ' unblocked');

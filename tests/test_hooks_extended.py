@@ -331,6 +331,38 @@ class TestNormalizePayloadClaude(unittest.TestCase):
         self.assertEqual(event["type"], "shell")
         self.assertEqual(event["command"], "ls -la")
 
+    def test_bash_strips_prismor_scrub_wrapper(self):
+        # Prismor's own decloak hook wraps every Bash command so its output is
+        # scrubbed. The recorded/evaluated command must be the original, not the
+        # wrapper — otherwise the injected PRISMOR_SECRETS_DIR path trips the
+        # prismor-vault-access guard on a benign command. See the demo report.
+        wrapped = (
+            "{ gh api search/issues ; } 2>&1 | "
+            "PRISMOR_SECRETS_DIR=/home/u/.prismor/secrets "
+            "/x/prismor/runtime/cloaking/hooks/scrub-stream.sh; exit ${PIPESTATUS[0]}"
+        )
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "session_id": "sess-scrub",
+            "tool_name": "Bash",
+            "tool_input": {"command": wrapped},
+        }
+        event = normalize_payload(agent="claude", payload=payload, workspace=Path("/tmp"))["event"]
+        self.assertEqual(event["command"], "gh api search/issues")
+        self.assertNotIn(".prismor/secrets", event["command"])
+
+    def test_bash_preserves_genuine_vault_access(self):
+        # A real command touching the vault must NOT be stripped — the guard
+        # still needs to flag it.
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "session_id": "sess-vault",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat ~/.prismor/secrets/aws"},
+        }
+        event = normalize_payload(agent="claude", payload=payload, workspace=Path("/tmp"))["event"]
+        self.assertEqual(event["command"], "cat ~/.prismor/secrets/aws")
+
     def test_read_tool(self):
         payload = {
             "hook_event_name": "PreToolUse",
