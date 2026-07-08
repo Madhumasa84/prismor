@@ -29,12 +29,12 @@ from supplychain.scoring.engine import PackageVerdict, Signal
 
 class TestDashboardQueries(unittest.TestCase):
     def setUp(self):
-        # Patch list_registered_workspaces rather than calling the real
-        # register_workspace(), which writes to the real global
-        # ~/.prismor/workspaces.json (see PrismorSec/prismor#131) — these
-        # tests must not depend on, or pollute, real machine state.
         self._tmp = tempfile.TemporaryDirectory()
         self.workspace = Path(self._tmp.name)
+        self._orig_prismor_home = os.environ.get("PRISMOR_HOME")
+        os.environ["PRISMOR_HOME"] = str(self.workspace / ".prismor-home")
+        # Patch list_registered_workspaces rather than calling the real
+        # register_workspace(), which writes to global machine state.
         patcher = patch("prismor.runtime.store.list_registered_workspaces", return_value=[self.workspace])
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -57,6 +57,10 @@ class TestDashboardQueries(unittest.TestCase):
         )
 
     def tearDown(self):
+        if self._orig_prismor_home is None:
+            os.environ.pop("PRISMOR_HOME", None)
+        else:
+            os.environ["PRISMOR_HOME"] = self._orig_prismor_home
         self._tmp.cleanup()
 
     def test_findings_page_returns_the_stored_finding(self):
@@ -100,6 +104,8 @@ class TestSupplyChainEventIndex(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.workspace = Path(self._tmp.name)
+        self._orig_prismor_home = os.environ.get("PRISMOR_HOME")
+        os.environ["PRISMOR_HOME"] = str(self.workspace / ".prismor-home")
         patcher = patch("prismor.runtime.store.list_registered_workspaces", return_value=[self.workspace])
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -123,6 +129,10 @@ class TestSupplyChainEventIndex(unittest.TestCase):
         )
 
     def tearDown(self):
+        if self._orig_prismor_home is None:
+            os.environ.pop("PRISMOR_HOME", None)
+        else:
+            os.environ["PRISMOR_HOME"] = self._orig_prismor_home
         self._tmp.cleanup()
 
     def test_blocked_package_event_shows_as_blocked(self):

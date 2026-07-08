@@ -60,7 +60,7 @@ class TestPrismorHomeHonored(unittest.TestCase):
 
         data_dir = store_mod.get_data_dir(workspace)
 
-        self.assertEqual(data_dir.parent, self.home / "workspaces")
+        self.assertEqual(data_dir, self.home)
         self.assertEqual(store_mod.get_db_path(workspace), data_dir / "prismor.db")
         self.assertEqual(store_mod.get_sessions_dir(workspace), data_dir / "sessions")
         self.assertFalse(str(data_dir).startswith(str(workspace / ".prismor")))

@@ -108,9 +108,10 @@ def register_workspace(workspace: Path) -> None:
 def list_registered_workspaces() -> List[Path]:
     """Return registered workspace paths that still exist and have Prismor state.
 
-    Runtime state is canonicalized under ``~/.prismor/workspaces/<id>/``. Older
-    installs wrote the DB under ``<workspace>/.prismor/``; those workspaces are
-    still returned so first access can migrate them into the global state dir.
+    Runtime state is canonicalized under ``~/.prismor``. Older installs wrote
+    per-workspace DBs under ``~/.prismor/workspaces/<id>/`` or inside the
+    project; those workspaces are still returned so dashboard reads can merge
+    them into the global runtime DB.
     """
     reg = _registry_path()
     if not reg.exists():
@@ -171,39 +172,156 @@ def _copy_path_once(src: Path, dst: Path) -> None:
         pass
 
 
+def _copy_tree_contents_once(src: Path, dst: Path) -> None:
+    if not src.is_dir():
+        return
+    for item in src.rglob("*"):
+        rel = item.relative_to(src)
+        target = dst / rel
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            _copy_path_once(item, target)
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _insert_missing_rows_sql(table: str, cols: List[str]) -> str:
+    quoted_cols = ", ".join(_quote_ident(c) for c in cols)
+    source_cols = ", ".join(f"s.{_quote_ident(c)}" for c in cols)
+    row_match = " AND ".join(f"d.{_quote_ident(c)} IS s.{_quote_ident(c)}" for c in cols)
+    return (
+        f"INSERT INTO {_quote_ident(table)} ({quoted_cols}) "
+        f"SELECT {source_cols} FROM src.{_quote_ident(table)} AS s "
+        f"WHERE NOT EXISTS ("
+        f"SELECT 1 FROM main.{_quote_ident(table)} AS d WHERE {row_match}"
+        f")"
+    )
+
+
+def _merge_sqlite_db_once(src_db: Path, dst_db: Path) -> None:
+    if not src_db.exists() or src_db.resolve() == dst_db.resolve():
+        return
+    try:
+        dst_db.parent.mkdir(parents=True, exist_ok=True)
+        if not dst_db.exists():
+            shutil.copy2(src_db, dst_db)
+            return
+        dst = sqlite3.connect(dst_db)
+        try:
+            _migrate_schema(dst)
+            dst.execute("ATTACH DATABASE ? AS src", (str(src_db),))
+            for table in ("sessions", "events", "findings", "supply_chain_events"):
+                dst_cols = [row[1] for row in dst.execute(f"PRAGMA table_info({table})")]
+                src_cols = [row[1] for row in dst.execute(f"PRAGMA src.table_info({table})")]
+                cols = [c for c in dst_cols if c in src_cols and c != "id"]
+                if not cols:
+                    continue
+                quoted = ", ".join(_quote_ident(c) for c in cols)
+                source = ", ".join(f"s.{_quote_ident(c)}" for c in cols)
+                if table in {"sessions", "findings"}:
+                    dst.execute(
+                        f"INSERT OR REPLACE INTO {_quote_ident(table)} ({quoted}) "
+                        f"SELECT {source} FROM src.{_quote_ident(table)} AS s"
+                    )
+                else:
+                    dst.execute(_insert_missing_rows_sql(table, cols))
+            dst.commit()
+            try:
+                dst.execute("DETACH DATABASE src")
+            except sqlite3.Error:
+                pass
+        finally:
+            dst.close()
+    except Exception:
+        pass
+
+
 def _migrate_workspace_runtime_state(workspace: Path, data_dir: Path) -> None:
-    """Copy legacy runtime state into Prismor home without moving project config."""
+    """Merge legacy runtime state into Prismor home without moving project config."""
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
         try:
-            data_dir.parent.chmod(0o700)
             data_dir.chmod(0o700)
         except OSError:
             pass
-        meta = {
-            "workspace": str(workspace.resolve()),
-            "state_id": data_dir.name,
-        }
-        meta_path = data_dir / "workspace.json"
-        if not meta_path.exists():
-            meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     except OSError:
         return
 
     project_dir = workspace / ".prismor"
     legacy_dir = workspace / _LEGACY_DATA_DIR
+    previous_central_dir = _workspace_state_dir(workspace)
+    source_paths = [
+        project_dir / "prismor.db",
+        legacy_dir / _LEGACY_DB_NAME,
+        previous_central_dir / "prismor.db",
+        project_dir / "sessions",
+        legacy_dir / "sessions",
+        previous_central_dir / "sessions",
+        project_dir / "scoped",
+        legacy_dir / "scoped",
+        previous_central_dir / "scoped",
+        project_dir / "taint",
+        legacy_dir / "taint",
+        previous_central_dir / "taint",
+    ]
 
-    for suffix in ("", "-wal", "-shm"):
-        _copy_path_once(project_dir / f"prismor.db{suffix}", data_dir / f"prismor.db{suffix}")
-        _copy_path_once(legacy_dir / f"{_LEGACY_DB_NAME}{suffix}", data_dir / f"prismor.db{suffix}")
+    marker_dir = data_dir / "migrations" / "runtime-state"
+    marker = marker_dir / f"{_workspace_state_id(workspace)}.json"
+    source_mtimes: Dict[str, float] = {}
+    for source_path in source_paths:
+        try:
+            if source_path.exists():
+                source_mtimes[str(source_path)] = source_path.stat().st_mtime
+        except OSError:
+            pass
+
+    if marker.exists():
+        try:
+            marker_data = json.loads(marker.read_text(encoding="utf-8"))
+            verified_mtimes = marker_data.get("source_mtimes") or {}
+            if marker_data.get("verified") and all(
+                verified_mtimes.get(path, 0) >= mtime
+                for path, mtime in source_mtimes.items()
+            ):
+                return
+        except (OSError, ValueError, TypeError):
+            pass
+
+    for src_db in (
+        project_dir / "prismor.db",
+        legacy_dir / _LEGACY_DB_NAME,
+        previous_central_dir / "prismor.db",
+    ):
+        _merge_sqlite_db_once(src_db, data_dir / "prismor.db")
 
     for child in ("sessions", "scoped", "taint"):
-        _copy_path_once(project_dir / child, data_dir / child)
-        _copy_path_once(legacy_dir / child, data_dir / child)
+        _copy_tree_contents_once(project_dir / child, data_dir / child)
+        _copy_tree_contents_once(legacy_dir / child, data_dir / child)
+        _copy_tree_contents_once(previous_central_dir / child, data_dir / child)
+
+    try:
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {
+                    "workspace": str(workspace.resolve()),
+                    "verified": True,
+                    "source_mtimes": source_mtimes,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def get_data_dir(workspace: Path) -> Path:
-    data_dir = _workspace_state_dir(workspace)
+    data_dir = prismor_home()
     _migrate_workspace_runtime_state(workspace, data_dir)
     return data_dir
 
@@ -307,6 +425,41 @@ def _migrate_schema(connection) -> None:
                 pass
 
 
+def _dedupe_runtime_events_once(connection: sqlite3.Connection, db_path: Path) -> None:
+    """Remove duplicate event rows left by older workspace-state migrations."""
+    marker = db_path.parent / "migrations" / "runtime-state" / "dedupe-events-v1.json"
+    if marker.exists():
+        return
+    try:
+        connection.execute(
+            """
+            DELETE FROM events
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM events
+                GROUP BY session_id, ts, type, agent_event, command_text,
+                         path_text, url_text, content_text, raw_json
+            )
+            """
+        )
+        connection.execute(
+            """
+            DELETE FROM supply_chain_events
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM supply_chain_events
+                GROUP BY ts, workspace_path, ecosystem, package_name,
+                         package_version, install_cmd, verdict, score,
+                         signals_json, ioc_id, recommended_version, session_id
+            )
+            """
+        )
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"version": 1}, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def initialize_database(workspace: Path) -> Path:
     ensure_data_dirs(workspace)
     db_path = get_db_path(workspace)
@@ -369,10 +522,15 @@ def initialize_database(workspace: Path) -> Path:
         # Migrate before creating indexes — old DBs may be missing columns the
         # indexes reference (e.g. supply_chain_events.session_id).
         _migrate_schema(connection)
+        _dedupe_runtime_events_once(connection, db_path)
         connection.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
+            CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_session_id_id ON events(session_id, id);
             CREATE INDEX IF NOT EXISTS idx_findings_session_id ON findings(session_id);
+            CREATE INDEX IF NOT EXISTS idx_findings_session_event ON findings(session_id, event_index);
+            CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_sc_ts ON supply_chain_events(ts);
             CREATE INDEX IF NOT EXISTS idx_sc_verdict ON supply_chain_events(verdict);
             CREATE INDEX IF NOT EXISTS idx_sc_session ON supply_chain_events(session_id);
@@ -745,6 +903,19 @@ def _connect_ro(db_path: Path):
         return None
 
 
+def _state_query_workspaces() -> List[Path]:
+    """Return a single logical source for dashboard queries.
+
+    Queries read ``~/.prismor/prismor.db`` exactly once. Migration from older
+    per-workspace stores happens at write/startup time, not in request handlers,
+    so dashboard reads stay fast and independent of launch directory.
+    """
+    home = prismor_home()
+    if (home / "prismor.db").exists():
+        return [home]
+    return []
+
+
 def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
     """Query all registered workspace DBs and return dashboard-shaped data.
 
@@ -754,7 +925,7 @@ def get_aggregate_stats(hours: int = 24) -> Dict[str, Any]:
     from collections import Counter
     from datetime import datetime, timezone, timedelta
 
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
 
     # Accumulators
     active_sessions = 0
@@ -1176,7 +1347,7 @@ def get_sessions_page(
     """Return a paginated list of sessions across all registered workspaces."""
     sort_col = _VALID_SESSION_SORTS.get(sort, "updated_at")
     reverse = direction.lower() != "asc"
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
     rows: List[Dict[str, Any]] = []
 
     for ws in workspaces:
@@ -1236,7 +1407,7 @@ def get_findings_page(
     """Return a paginated, filtered list of findings across all registered workspaces."""
     severity_filter = severity.lower() if severity else ""
     raw_cats = _REVERSE_CATEGORY_MAP.get(category, []) if category else []
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
     rows: List[Dict[str, Any]] = []
 
     for ws in workspaces:
@@ -1347,7 +1518,7 @@ def get_events_page(
     agent: str = "",
 ) -> Dict[str, Any]:
     """Return a paginated, filtered list of events across all registered workspaces."""
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
     rows: List[Dict[str, Any]] = []
 
     for ws in workspaces:
@@ -1358,6 +1529,9 @@ def get_events_page(
         try:
             where_clauses: List[str] = []
             params: List[Any] = []
+            limit = max(1, min(limit, 200))
+            page = max(1, page)
+            fetch_limit = 5000 if (verdict or agent) else max(200, page * limit * 3)
             if agent:
                 where_clauses.append("s.agent = ?")
                 params.append(agent)
@@ -1374,11 +1548,21 @@ def get_events_page(
             # on the matching event_index instead — see PrismorSec/prismor#130.
             for row in conn.execute(
                 f"""
-                WITH numbered_events AS (
-                    SELECT *, ROW_NUMBER() OVER (
-                        PARTITION BY session_id ORDER BY id
-                    ) - 1 AS rn
+                WITH recent_events AS (
+                    SELECT *
                     FROM events
+                    ORDER BY ts DESC
+                    LIMIT ?
+                ),
+                numbered_events AS (
+                    SELECT re.*,
+                           (
+                               SELECT COUNT(*)
+                               FROM events e2
+                               WHERE e2.session_id = re.session_id
+                                 AND e2.id < re.id
+                           ) AS rn
+                    FROM recent_events re
                 )
                 SELECT e.ts, e.session_id, s.agent, s.workspace_path,
                        e.type as action_type,
@@ -1389,10 +1573,9 @@ def get_events_page(
                 JOIN sessions s ON s.session_id = e.session_id
                 LEFT JOIN findings f ON f.session_id = e.session_id AND f.event_index = e.rn
                 {where}
-                GROUP BY e.id
                 ORDER BY e.ts DESC LIMIT 5000
                 """,
-                params,
+                [fetch_limit] + params,
             ):
                 action_parts = []
                 if row["action_type"]:
@@ -1442,7 +1625,6 @@ def get_events_page(
 
     all_agents = sorted({ev["agent"] for ev in deduped})
     total = len(deduped)
-    limit = max(1, min(limit, 200))
     pages = max(1, (total + limit - 1) // limit)
     page = max(1, min(page, pages))
     offset = (page - 1) * limit
@@ -1610,7 +1792,7 @@ def get_supply_chain_stats(hours: int = 24) -> Dict[str, Any]:
     """Aggregate supply chain enforcement data across all registered workspaces."""
     from collections import Counter
 
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
 
     checked_24h = 0
     allowed_24h = 0
@@ -1810,7 +1992,7 @@ def get_agents_overview() -> List[Dict[str, Any]]:
     the agent_name column doesn't exist yet (pre-migration DBs).
     """
     from collections import Counter
-    workspaces = list_registered_workspaces()
+    workspaces = _state_query_workspaces()
 
     # agent_name → {framework, last_seen, total_calls, blocked_calls}
     acc: Dict[str, Dict[str, Any]] = {}

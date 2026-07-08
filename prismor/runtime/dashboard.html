@@ -2525,7 +2525,6 @@ document.getElementById('agentsRefresh').addEventListener('click', loadAgents);
 // SESSION CONTROL TAB
 // ══════════════════════════════════════════════════════════════════════════
 let _serverWorkspace = null;
-let _selectedWorkspace = null;
 let _sessCtrlData = { items:[], total:0, pages:1, page:1, limit:20 };
 let _expandedSess = null;
 
@@ -2536,8 +2535,7 @@ function workspaceName(path) {
 }
 
 function activeWorkspace() {
-  const workspaces = (_wsCache && Array.isArray(_wsCache.workspaces)) ? _wsCache.workspaces : [];
-  return _selectedWorkspace || _serverWorkspace || workspaces[0] || '';
+  return _serverWorkspace || '';
 }
 
 async function loadWorkspaces() {
@@ -2545,10 +2543,6 @@ async function loadWorkspaces() {
     const data = await apiFetch('/api/workspaces');
     _wsCache = data;
     _serverWorkspace = data.primary;
-    if (!_selectedWorkspace) {
-      const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
-      _selectedWorkspace = data.primary || workspaces[0] || null;
-    }
     renderEnrollBanners(data.enrollment);
     return data;
   } catch(e) { console.error('[prismor] workspaces:', e); return {}; }
@@ -2837,35 +2831,10 @@ function renderPolicyTab(data) {
     ? 'Active layers: ' + effectiveStatus.join(' + ')
     : 'No custom policies — all built-in defaults';
 
-  // Workspace banner
+  // Runtime state is intentionally single-source under ~/.prismor. Do not show
+  // a project selector; workspace paths are internal metadata on sessions.
   const wsBanner = document.getElementById('workspaceBanner');
-  const workspaces = (_wsCache && Array.isArray(_wsCache.workspaces)) ? _wsCache.workspaces : [];
-  const currentWs = data.workspace || activeWorkspace();
-  if (data.workspace) {
-    const options = workspaces.map(ws =>
-      '<option value="' + safeAttr(ws) + '"' + (ws === currentWs ? ' selected' : '') + '>' +
-      safe(workspaceName(ws)) + '</option>'
-    ).join('');
-    wsBanner.innerHTML = '<div class="banner banner-info" style="margin-bottom:16px">' +
-      '<span class="banner-icon"><svg class="icon"><use href="#i-folder"/></svg></span>' +
-      '<div class="banner-text"><strong>Dashboard data source:</strong> <code>' + safeAttr((_wsCache||{}).home || '~/.prismor') + '</code>' +
-      '<br>Project controls workspace: ' +
-      (options ? '<select id="workspacePicker" style="max-width:360px;margin:0 6px;padding:3px 6px;border:1px solid var(--gray-200);border-radius:6px;font:inherit">' + options + '</select>' : '') +
-      '<code>' + safeAttr(data.workspace) + '</code></div></div>';
-    const picker = document.getElementById('workspacePicker');
-    if (picker) {
-      picker.addEventListener('change', () => {
-        _selectedWorkspace = picker.value;
-        loadPolicy();
-        loadRules();
-      });
-    }
-  } else {
-    wsBanner.innerHTML = '<div class="banner banner-warn" style="margin-bottom:16px">' +
-      '<span class="banner-icon"><svg class="icon"><use href="#i-alert"/></svg></span>' +
-      '<div class="banner-text"><strong>No project workspace detected</strong>' +
-      ' — sessions and events still load globally from <code>' + safeAttr((_wsCache||{}).home || '~/.prismor') + '</code>. Install hooks in a project to enable project policy editing.</div></div>';
-  }
+  if (wsBanner) wsBanner.innerHTML = '';
 }
 
 function setPolicySaveStatus(elId, msg, cls) {

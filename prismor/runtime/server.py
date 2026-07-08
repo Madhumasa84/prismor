@@ -51,6 +51,8 @@ from prismor.runtime.store import (
     set_project_rule_states,
     get_session_scoped_detail,
     update_session_control,
+    initialize_database,
+    _migrate_workspace_runtime_state,
     prismor_home,
 )
 
@@ -420,12 +422,15 @@ def run_server(
 ) -> None:
     """Start the prismor HTTP API server (blocks until Ctrl-C).
 
-    ``workspace`` is optional. When omitted, dashboard reads still aggregate
-    through the global registry in ~/.prismor, and project-level writes must
-    pass an explicit workspace from the selected row/control.
+    ``workspace`` is optional. Runtime reads always use the single global
+    Prismor home DB; when a launch workspace is available, older local state is
+    imported once before serving requests.
     """
     global _SERVER_WORKSPACE
     _SERVER_WORKSPACE = workspace
+    if workspace:
+        _migrate_workspace_runtime_state(workspace, prismor_home())
+        initialize_database(workspace)
 
     import errno as _errno
     while True:
@@ -440,8 +445,7 @@ def run_server(
                 raise
 
     url = f"http://{host}:{port}"
-    ws_label = f"  controls workspace → {workspace}" if workspace else "  controls workspace → selected in UI"
-    print(f"[prismor] dashboard → {url}  (Ctrl-C to stop)  state → {prismor_home()}{ws_label}", flush=True)
+    print(f"[prismor] dashboard → {url}  (Ctrl-C to stop)  state → {prismor_home()}", flush=True)
     if open_browser:
         import threading
         import webbrowser
