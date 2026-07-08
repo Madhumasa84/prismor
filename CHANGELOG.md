@@ -1,3 +1,9 @@
+## [1.17.1] — 2026-07-07
+
+### Added
+
+- **`prismor cloak add --env-file .env` now bulk-imports dotenv secrets natively.** Each `KEY=VALUE` entry is registered as its own placeholder (`@@SECRET:KEY@@`) inside the existing cloaking store, so teams can enroll a whole `.env` file without wrapping the CLI in an external script. The importer accepts standard dotenv forms like `export KEY=...` and quoted values, rejects malformed or empty entries with a clear line-numbered error, and is documented across the CLI reference and cloak docs.
+
 ## [1.17.0] — 2026-07-07
 
 ### Fixed (security)

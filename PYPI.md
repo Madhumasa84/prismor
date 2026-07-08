@@ -120,6 +120,8 @@ Register a secret under a placeholder name:
 ```bash
 prismor cloak add stripe_key
 # prompts for the value — never stored in shell history
+prismor cloak add --env-file .env
+# imports each KEY=VALUE entry as @@SECRET:KEY@@
 ```
 
 Reference it in agent instructions:
