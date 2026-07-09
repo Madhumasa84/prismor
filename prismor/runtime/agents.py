@@ -434,12 +434,13 @@ def set_tool_policy(
 
 
 def make_agent_tool_deny_finding(
-    name: str, tool: str, session_id: str = "", scope_label: str = "agent"
+    name: str, tool: str, session_id: str = "", scope_label: str = "agent",
+    rule_id: str = "agent-tool-deny",
 ) -> Dict[str, Any]:
-    """Blocking finding for a tool tag on an agent/global deny list."""
+    """Blocking finding for a tool tag on an agent/global/org deny list."""
     return {
-        "id": f"{session_id}:agent-tool-deny:{name}:{tool}",
-        "ruleId": "agent-tool-deny",
+        "id": f"{session_id}:{rule_id}:{name}:{tool}",
+        "ruleId": rule_id,
         "severity": "high",
         "category": "agent-control",  # blocks regardless of observe/enforce mode
         "mode": "enforce",

@@ -211,8 +211,17 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_rule_ex_sig is not None
         and str(latest_rule_ex_sig) != str(_current_rule_exemptions_sig())
     )
+    # Per-tool denies (settings.tool_denies) also live in the resolved policy
+    # without a version bump — compare their signature so an admin's tool block
+    # reaches the device within one debounce interval.
+    latest_tool_denies_sig = body.get("toolDeniesSig")
+    tool_denies_changed = (
+        latest_tool_denies_sig is not None
+        and str(latest_tool_denies_sig) != str(_current_tool_denies_sig())
+    )
     if (version_changed or profile_changed or capture_changed
-            or repos_changed or controls_changed or rule_ex_changed):
+            or repos_changed or controls_changed or rule_ex_changed
+            or tool_denies_changed):
         return fetch(force=True)
     return False
 
@@ -276,6 +285,29 @@ def _current_agent_controls_sig() -> str:
         lines = sorted(
             f"{name}:{'1' if c.get('enabled', True) else '0'}:{c.get('mode') or ''}:{c.get('iam_profile') or ''}"
             for name, c in controls.items() if isinstance(c, dict)
+        )
+        if not lines:
+            return ""
+        import hashlib
+        return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _current_tool_denies_sig() -> str:
+    """Signature of the cached policy's tool denies, matching the server's
+    toolDeniesSig format (sorted ``id:tool:action:scope:scopeId`` lines →
+    sha256 → 16 hex; empty when none) so the device re-pulls when an admin
+    denies, lifts, or revokes a tool."""
+    try:
+        pol = verify_and_load()
+        denies = ((pol or {}).get("settings") or {}).get("tool_denies") or []
+        if not isinstance(denies, list) or not denies:
+            return ""
+        lines = sorted(
+            f"{d.get('id')}:{d.get('tool') or ''}:{d.get('action') or 'deny'}:"
+            f"{d.get('scope') or ''}:{d.get('scopeId') or ''}"
+            for d in denies if isinstance(d, dict) and d.get("id")
         )
         if not lines:
             return ""

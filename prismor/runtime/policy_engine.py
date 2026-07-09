@@ -577,6 +577,13 @@ class PolicyEngine:
         # workspaces only.
         _re = settings.get("rule_exemptions")
         self.rule_exemptions: List[Dict[str, Any]] = _re if isinstance(_re, list) else []
+        # Per-tool deny/allow from the verified signed policy — a list of
+        # {tool, action:'deny', scope, scopeId} the org admin set from a tool
+        # call. Matched at evaluation time by tool tag + scope (see runtime).
+        # Device-scoped entries are pre-filtered server-side to this device;
+        # org/agent/session entries apply fleet-wide. Managed workspaces only.
+        _td = settings.get("tool_denies")
+        self.tool_denies: List[Dict[str, Any]] = _td if isinstance(_td, list) else []
         # Global observe/enforce default for rules that don't set their own mode.
         # Defaults to "observe" — a fresh policy blocks nothing until an admin
         # flips rules (or this) to enforce.

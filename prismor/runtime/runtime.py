@@ -265,6 +265,38 @@ def evaluate_tool_call(
         except Exception as exc:
             sys.stderr.write(f"[prismor] tool-deny error: {exc}\n")
 
+    # Org signed-policy tool denies (settings.tool_denies, set by an admin from
+    # the Prismor web console). Same tool-tag matcher; scope decides whether
+    # this event is covered. Device-scoped entries are pre-filtered to this
+    # device server-side, so org/device always apply here; agent/session match
+    # on the event's agent name / session id. Blocks regardless of mode.
+    _org_denies = getattr(engine, "tool_denies", None)
+    if _org_denies:
+        try:
+            from prismor.runtime.scoped_agent import _resolve_tool_name
+            from prismor.runtime.agents import make_agent_tool_deny_finding
+            _otn = _resolve_tool_name(event)
+            if _otn:
+                for _d in _org_denies:
+                    if not isinstance(_d, dict) or _d.get("action", "deny") != "deny":
+                        continue
+                    if _d.get("tool") != _otn:
+                        continue
+                    _scope = _d.get("scope") or "org"
+                    _sid = _d.get("scopeId")
+                    _hit = (
+                        _scope in ("org", "device")
+                        or (_scope == "agent" and _sid == _agent_name)
+                        or (_scope == "session" and _sid == session_id)
+                    )
+                    if _hit:
+                        findings.append(make_agent_tool_deny_finding(
+                            _agent_name, _otn, session_id,
+                            scope_label=f"org {_scope}", rule_id="org-tool-deny"))
+                        break
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] org tool-deny error: {exc}\n")
+
     # IAM named-identity enforcement (now subject-aware + per-agent profile).
     try:
         from prismor.runtime.iam import check_iam
