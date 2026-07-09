@@ -68,6 +68,27 @@ Base URL: `$PRISMOR_API_BASE` (default `https://prismor.dev`), persisted
 per-device as `api_base` so self-hosted/staging deployments repoint without a
 rebuild.
 
+### Deviceless (SDK / deployed) agents: `$PRISMOR_AGENT_KEY`
+
+A deployed agent — a container, a serverless worker — has no machine to
+enroll. Instead an org admin mints an **agent key** in the dashboard
+(Connections → “SDK & deployed agents”, or Devices → Service identities) and
+wires it into the deployment:
+
+```
+PRISMOR_AGENT_KEY=prism_agent_…     # required — the minted key
+PRISMOR_AGENT_LABEL="checkout-bot"  # optional — display label
+PRISMOR_API_BASE=…                  # optional — self-hosted control plane
+```
+
+The runtime treats the env key as a full identity: same bearer credential,
+same telemetry upload, signed-policy pull and revocation semantics as a
+device key. It is never written to disk, and it takes precedence over a
+baked-in `identity.json` so one image can serve many workloads. Server-side
+it is a *service identity* — listed, drilled into and revoked exactly like a
+device. Headless `prismor enroll <token>` inside the workload remains
+equivalent if you prefer token exchange over a long-lived key.
+
 ## 2. Signed remote policy: verify-before-apply, fail-closed
 
 On the hot path, `remote_policy.check_and_refresh()` (debounced, clamped to

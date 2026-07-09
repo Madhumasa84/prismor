@@ -44,13 +44,43 @@ def api_base() -> str:
     return os.environ.get("PRISMOR_API_BASE", DEFAULT_API_BASE).rstrip("/")
 
 
+def _env_identity() -> Optional[Dict[str, Any]]:
+    """Deviceless identity from ``$PRISMOR_AGENT_KEY``, or None.
+
+    A deployed SDK agent (container, serverless worker) has no machine to
+    enroll. Instead an org admin mints an **agent key** in the console and
+    wires it into the deployment; the runtime presents it as the same Bearer
+    credential a device key would be. The control plane attributes org/user/
+    device server-side from the key, so no ids are needed locally. Env
+    identity is read-only: it is never saved to identity.json and takes
+    precedence over an enrolled file so container images with a baked-in
+    enrollment can be overridden per-deployment.
+    """
+    key = (os.environ.get("PRISMOR_AGENT_KEY") or "").strip()
+    if not key:
+        return None
+    return {
+        "schema": _SCHEMA,
+        "device_key": key,
+        "source": "env",
+        "api_base": api_base(),
+        "label": os.environ.get("PRISMOR_AGENT_LABEL") or None,
+    }
+
+
 def load_identity() -> Optional[Dict[str, Any]]:
     """Load the enrolled device identity, or None if this machine is not enrolled.
 
-    Returns a dict with at least ``device_id``, ``org_id``, ``user_id`` and
-    ``device_key`` when enrolled. Never raises — a malformed or missing file
-    reads as "not enrolled" so the runtime degrades to local-only mode.
+    Returns a dict with at least ``device_key`` when enrolled (file identities
+    also carry ``device_id``, ``org_id`` and ``user_id``; the control plane
+    treats those as advisory and binds server-side from the key). A
+    ``$PRISMOR_AGENT_KEY`` env identity — the deviceless SDK path — takes
+    precedence over the file. Never raises — a malformed or missing file reads
+    as "not enrolled" so the runtime degrades to local-only mode.
     """
+    env = _env_identity()
+    if env is not None:
+        return env
     path = identity_path()
     if not path.exists():
         return None
