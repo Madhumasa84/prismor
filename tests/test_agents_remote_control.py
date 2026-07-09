@@ -120,3 +120,64 @@ def test_unmanaged_workspace_ignores_remote_controls(tmp_path, monkeypatch):
         mode="observe", session_id="s2", persist=False,
     )
     assert not any(f.get("ruleId") == "agent-disabled" for f in d.findings)
+
+
+# ── tool-tag deny lists (dashboard "Apply a rule" — session/agent/global) ──
+
+def test_set_tool_policy_agent_scope(tmp_path):
+    agents.set_tool_policy(tmp_path, "agent", "Bash", "deny", agent="codex")
+    assert "Bash" in agents.resolve_agent_control("codex", tmp_path).deny_tools
+    # other agents unaffected
+    assert "Bash" not in agents.resolve_agent_control("claude", tmp_path).deny_tools
+    # allow lifts it
+    agents.set_tool_policy(tmp_path, "agent", "Bash", "allow", agent="codex")
+    assert "Bash" not in agents.resolve_agent_control("codex", tmp_path).deny_tools
+
+
+def test_set_tool_policy_global_applies_to_all(tmp_path):
+    agents.set_tool_policy(tmp_path, "global", "mcp__node_repl__js", "deny")
+    for name in ("claude", "codex", "never-registered"):
+        assert "mcp__node_repl__js" in agents.resolve_agent_control(name, tmp_path).deny_tools
+    agents.set_tool_policy(tmp_path, "global", "mcp__node_repl__js", "allow")
+    assert "mcp__node_repl__js" not in agents.resolve_agent_control("claude", tmp_path).deny_tools
+
+
+def test_agent_tool_deny_blocks_via_evaluate_tool_call(tmp_path, monkeypatch):
+    """Denying a tool for one agent blocks that tool even in observe mode."""
+    from prismor.runtime import runtime
+    from prismor.runtime.policy_engine import PolicyEngine
+    real_init = PolicyEngine.__init__
+    def fake_init(self, *a, **kw):
+        real_init(self, *a, **kw)
+    monkeypatch.setattr(PolicyEngine, "__init__", fake_init)
+
+    agents.set_tool_policy(tmp_path, "agent", "Bash", "deny", agent="codex")
+    d = runtime.evaluate_tool_call(
+        event={"type": "shell", "agent_event": "PreToolUse", "command": "echo hi",
+               "metadata": {"tool_name": "Bash"}},
+        workspace=tmp_path, agent="codex", agent_name="codex",
+        mode="observe", session_id="s1", persist=False,
+    )
+    assert d.allow is False
+    assert any(f.get("ruleId") == "agent-tool-deny" for f in d.findings)
+    # a different tool from the same agent is still allowed
+    d2 = runtime.evaluate_tool_call(
+        event={"type": "file_read", "agent_event": "PreToolUse", "path": "x.py",
+               "metadata": {"tool_name": "Read"}},
+        workspace=tmp_path, agent="codex", agent_name="codex",
+        mode="observe", session_id="s1", persist=False,
+    )
+    assert d2.allow is True
+
+
+def test_global_tool_deny_blocks_unregistered_agent(tmp_path):
+    from prismor.runtime import runtime
+    agents.set_tool_policy(tmp_path, "global", "mcp__node_repl__js", "deny")
+    d = runtime.evaluate_tool_call(
+        event={"type": "tool_result", "agent_event": "PreToolUse", "response": "{}",
+               "metadata": {"tool_name": "mcp__node_repl__js"}},
+        workspace=tmp_path, agent="cursor", agent_name="cursor",
+        mode="observe", session_id="s1", persist=False,
+    )
+    assert d.allow is False
+    assert any(f.get("ruleId") == "agent-tool-deny" for f in d.findings)

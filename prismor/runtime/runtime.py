@@ -250,6 +250,21 @@ def evaluate_tool_call(
         except Exception as exc:
             sys.stderr.write(f"[prismor] kill-switch error: {exc}\n")
 
+    # Per-agent / global tool-tag deny list (operator-set from the dashboard's
+    # Tool Call panel). Resolves the tool tag the same way scoped rules do, so
+    # arbitrary MCP tags (e.g. mcp__node_repl__js) work verbatim. Tagged
+    # agent-control so it blocks in observe mode too — an explicit deny is an
+    # operator decision, not a passive detection.
+    if _control is not None and getattr(_control, "deny_tools", ()):  # noqa: SIM102
+        try:
+            from prismor.runtime.scoped_agent import _resolve_tool_name
+            from prismor.runtime.agents import make_agent_tool_deny_finding
+            _tname = _resolve_tool_name(event)
+            if _tname and _tname in _control.deny_tools:
+                findings.append(make_agent_tool_deny_finding(_agent_name, _tname, session_id))
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] tool-deny error: {exc}\n")
+
     # IAM named-identity enforcement (now subject-aware + per-agent profile).
     try:
         from prismor.runtime.iam import check_iam

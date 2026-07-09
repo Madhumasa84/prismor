@@ -97,6 +97,10 @@ def load_agents_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
             project_agents = project_cfg.get("agents", {})
             if project_agents:
                 config.setdefault("agents", {}).update(project_agents)
+            # Carry project-level across-agents controls through the merge —
+            # load_agents_config otherwise only pulls the ``agents`` map.
+            if project_cfg.get("global_deny_tools"):
+                config["global_deny_tools"] = project_cfg["global_deny_tools"]
 
     _CONFIG_CACHE[cache_key] = config
     return config
@@ -113,6 +117,7 @@ class AgentControl:
     enabled: bool = True      # False = kill switch (hard block all calls)
     mode: Optional[str] = None   # None = inherit global mode; "observe"/"enforce"
     iam_profile: Optional[str] = None  # IAM profile name to enforce for this agent
+    deny_tools: tuple = ()  # tool tags blocked for this agent (per-agent + global union)
     last_seen: Optional[str] = None
     # Which layer disabled the agent: "local" (agents.yaml), "org" (the signed
     # remote policy's settings.agent_controls), "both", or None when enabled.
@@ -151,8 +156,9 @@ def resolve_agent_control(
     entry = config.get("agents", {}).get(name) or {}
     remote = (remote_controls or {}).get(name)
     remote = remote if isinstance(remote, dict) else {}
+    _global_deny = tuple(config.get("global_deny_tools") or ())
     if not entry and not remote:
-        return AgentControl(name=name)
+        return AgentControl(name=name, deny_tools=_global_deny)
 
     local_enabled = bool(entry.get("enabled", True))
     remote_enabled = bool(remote.get("enabled", True))
@@ -169,6 +175,7 @@ def resolve_agent_control(
         enabled=local_enabled and remote_enabled,
         mode=remote_mode or entry.get("mode") or None,
         iam_profile=remote.get("iam_profile") or entry.get("iam_profile") or None,
+        deny_tools=tuple(dict.fromkeys([*_global_deny, *(entry.get("deny_tools") or ()), *(remote.get("deny_tools") or ())])),
         last_seen=entry.get("last_seen"),
         disabled_by=disabled_by,
     )
@@ -226,7 +233,7 @@ def upsert_agent(name: str, workspace: Path, **fields: Any) -> AgentControl:
     agents = existing.setdefault("agents", {})
     entry: Dict[str, Any] = agents.get(name, {})
 
-    ALLOWED_FIELDS = {"enabled", "mode", "iam_profile", "framework", "last_seen"}
+    ALLOWED_FIELDS = {"enabled", "mode", "iam_profile", "framework", "last_seen", "deny_tools"}
     for k, v in fields.items():
         if k in ALLOWED_FIELDS:
             if v is None and k in entry:
@@ -371,6 +378,75 @@ def make_disabled_finding(
         "evidence": evidence,
         "eventIndex": 0,
         "remediation": remediation,
+    }
+
+
+def set_tool_policy(
+    workspace: Path, scope: str, tool: str, action: str, agent: Optional[str] = None
+) -> List[str]:
+    """Deny/allow a tool tag at ``agent`` or ``global`` scope in agents.yaml.
+
+    ``scope``: "agent" (writes ``agents.<agent>.deny_tools``) or "global"
+    (writes top-level ``global_deny_tools`` applied to every agent).
+    ``action``: "deny" adds the tag to the deny list; "allow" removes it.
+    Returns the resulting deny list. This is a pure denylist — allowing a tool
+    only lifts a previously-set deny, it never restricts other tools.
+    """
+    tool = (tool or "").strip()
+    if not tool:
+        raise ValueError("tool required")
+    project_path = workspace / ".prismor" / _PROJECT_AGENTS_FILE
+    existing: Dict[str, Any] = {}
+    if project_path.exists():
+        loaded = _load_yaml(project_path)
+        if loaded:
+            existing = loaded
+    if scope == "global":
+        cur = list(existing.get("global_deny_tools") or [])
+        if action == "deny" and tool not in cur:
+            cur.append(tool)
+        elif action == "allow":
+            cur = [t for t in cur if t != tool]
+        if cur:
+            existing["global_deny_tools"] = cur
+        else:
+            existing.pop("global_deny_tools", None)
+        result = cur
+    else:
+        if not agent:
+            raise ValueError("agent required for agent scope")
+        agents = existing.setdefault("agents", {})
+        entry: Dict[str, Any] = agents.get(agent, {}) or {}
+        cur = list(entry.get("deny_tools") or [])
+        if action == "deny" and tool not in cur:
+            cur.append(tool)
+        elif action == "allow":
+            cur = [t for t in cur if t != tool]
+        if cur:
+            entry["deny_tools"] = cur
+        else:
+            entry.pop("deny_tools", None)
+        agents[agent] = entry
+        existing["agents"] = agents
+        result = cur
+    _write_project_config(workspace, existing)
+    return result
+
+
+def make_agent_tool_deny_finding(
+    name: str, tool: str, session_id: str = "", scope_label: str = "agent"
+) -> Dict[str, Any]:
+    """Blocking finding for a tool tag on an agent/global deny list."""
+    return {
+        "id": f"{session_id}:agent-tool-deny:{name}:{tool}",
+        "ruleId": "agent-tool-deny",
+        "severity": "high",
+        "category": "agent-control",  # blocks regardless of observe/enforce mode
+        "mode": "enforce",
+        "title": f"[agent:{name}] Tool '{tool}' is denied ({scope_label} scope)",
+        "evidence": f"tool '{tool}' is on the {scope_label} deny list",
+        "eventIndex": 0,
+        "remediation": "Lift it from the dashboard Tool Call panel or edit .prismor/agents.yaml",
     }
 
 

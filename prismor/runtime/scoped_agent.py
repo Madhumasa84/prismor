@@ -288,24 +288,29 @@ def check_scoped_rules(
                 event_type,
             )
 
-        if event_type == "file_write":
-            # A write may arrive as Write, Edit, or MultiEdit. Permit it only if
-            # the concrete tool is allowed, or — when the event carries no
-            # tool name — any write-family tool is allowed and not denied.
-            write_family = ("Write", "Edit", "MultiEdit")
-            permitted = [t for t in write_family if t in allowed and t not in denied]
-            if tool_name not in allowed and not permitted:
+        # "*" in allowed_tools = allow-all-except-denied. The dashboard writes
+        # this when an operator denies a single tool for a session that had no
+        # prior allowlist, so the deny does not silently turn into an allowlist
+        # that blocks every other tool.
+        if "*" not in allowed:
+            if event_type == "file_write":
+                # A write may arrive as Write, Edit, or MultiEdit. Permit it only if
+                # the concrete tool is allowed, or — when the event carries no
+                # tool name — any write-family tool is allowed and not denied.
+                write_family = ("Write", "Edit", "MultiEdit")
+                permitted = [t for t in write_family if t in allowed and t not in denied]
+                if tool_name not in allowed and not permitted:
+                    return _scoped_finding(
+                        session_id,
+                        f"Tool '{tool_name}' is not in scope for this session",
+                        event_type,
+                    )
+            elif tool_name not in allowed:
                 return _scoped_finding(
                     session_id,
                     f"Tool '{tool_name}' is not in scope for this session",
                     event_type,
                 )
-        elif tool_name not in allowed:
-            return _scoped_finding(
-                session_id,
-                f"Tool '{tool_name}' is not in scope for this session",
-                event_type,
-            )
 
     # Path check for file events
     if event_type in ("file_read", "file_write"):

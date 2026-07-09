@@ -268,6 +268,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                         "enabled": ctrl.enabled if ctrl else True,
                         "mode": ctrl.mode if ctrl else None,
                         "iam_profile": ctrl.iam_profile if ctrl else None,
+                        "deny_tools": list(ctrl.deny_tools) if ctrl else [],
                         "last_seen": stats.get("last_seen") or (ctrl.last_seen if ctrl else None),
                         "total_calls": stats.get("total_calls", 0),
                         "blocked_calls": stats.get("blocked_calls", 0),
@@ -315,6 +316,29 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     "sessions": sessions.get("total", 0),
                     "events": events.get("total", 0),
                 })
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        # POST /api/tool-policy — deny/allow a tool tag at agent or global scope
+        if path == "/api/tool-policy":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except Exception as exc:
+                self._send_json({"error": f"invalid JSON: {exc}"}, status=400)
+                return
+            try:
+                from prismor.runtime.agents import set_tool_policy
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else (_SERVER_WORKSPACE or Path.cwd())
+                scope = body.get("scope") or "agent"
+                action = body.get("action") or "deny"
+                tool = body.get("tool") or ""
+                agent = body.get("agent") or None
+                deny = set_tool_policy(workspace, scope, tool, action, agent=agent)
+                self._send_json({"ok": True, "scope": scope, "action": action,
+                                 "tool": tool, "agent": agent, "deny_tools": deny})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
