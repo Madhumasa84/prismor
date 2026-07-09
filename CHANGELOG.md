@@ -1,3 +1,9 @@
+## [1.18.1] — 2026-07-09
+
+### Added
+
+- **The local OSS dashboard now has a persistent dark theme toggle.** `prismor dashboard` stores a `light`/`dark` preference in `localStorage`, applies it before first paint to avoid flash, adds a top-bar theme toggle, and re-themes the Chart.js visualizations so the graphs remain legible in dark mode instead of leaving the dashboard half-light.
+
 ## [1.17.10] — 2026-07-08
 
 ### Fixed

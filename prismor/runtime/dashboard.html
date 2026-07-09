@@ -9,6 +9,16 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    try {
+      var theme = localStorage.getItem('prismor-dashboard-theme') || 'light';
+      document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+    } catch (_) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 <style>
   :root {
     --purple: #B4A5F6; --pink: #E8BAEE; --amber: #F9E5A6;
@@ -19,19 +29,62 @@
     --gray-700: #374151; --gray-800: #1f2937; --gray-900: #111827;
     --pink-600: #db2777; --green-500: #22c55e;
     --sky-600: #0284c7; --rose-600: #e11d48;
+    --app-bg: var(--gray-50);
+    --surface: #ffffff;
+    --surface-muted: var(--gray-50);
+    --surface-strong: #ffffff;
+    --overlay: rgba(0,0,0,0.18);
+    --accent: #5b6cff;
+    --chart-text: #9ca3af;
+    --chart-grid: #f3f4f6;
+    --chart-passed: #CBD5E1;
+    --chart-intercepted: #E8BAEE;
+    --chart-bar-warm: #F9E5A6;
+    --chart-bar-cool: #A8D5F7;
+    --chart-bar-hot: #FCA5A5;
+    --chart-palette-1: #B4A5F6;
+    --chart-palette-2: #E8BAEE;
+    --chart-palette-3: #F9E5A6;
+    --chart-palette-4: #A8D5F7;
+    --chart-palette-5: #A7F3D0;
+    --chart-palette-6: #FCA5A5;
     /* Same faces as prismor.dev: Inter for UI, JetBrains Mono for code/ids */
     --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+  html[data-theme="dark"] {
+    --gray-50: #020617; --gray-100: #0f172a; --gray-200: #1e293b;
+    --gray-300: #334155; --gray-400: #64748b; --gray-500: #94a3b8;
+    --gray-600: #cbd5e1; --gray-700: #e2e8f0; --gray-800: #f8fafc; --gray-900: #ffffff;
+    --app-bg: #020617;
+    --surface: #0f172a;
+    --surface-muted: #111827;
+    --surface-strong: #162033;
+    --overlay: rgba(2,6,23,0.72);
+    --accent: #8ba4ff;
+    --chart-text: #94a3b8;
+    --chart-grid: #1e293b;
+    --chart-passed: #475569;
+    --chart-intercepted: #f9a8d4;
+    --chart-bar-warm: #fbbf24;
+    --chart-bar-cool: #38bdf8;
+    --chart-bar-hot: #fb7185;
+    --chart-palette-1: #818cf8;
+    --chart-palette-2: #f472b6;
+    --chart-palette-3: #fbbf24;
+    --chart-palette-4: #38bdf8;
+    --chart-palette-5: #34d399;
+    --chart-palette-6: #f87171;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: var(--font-ui);
-    background: var(--gray-50); color: var(--gray-800);
+    background: var(--app-bg); color: var(--gray-800);
     padding: 0; min-height: 100vh;
   }
   /* ── Top bar ── */
   .topbar {
-    background: #fff; border-bottom: 1px solid var(--gray-200);
+    background: var(--surface); border-bottom: 1px solid var(--gray-200);
     padding: 0 24px;
     display: flex; align-items: center; justify-content: space-between;
     height: 52px; position: sticky; top: 0; z-index: 100;
@@ -52,7 +105,7 @@
 
   /* ── Tab nav ── */
   .tab-nav {
-    background: #fff; border-bottom: 1px solid var(--gray-200);
+    background: var(--surface); border-bottom: 1px solid var(--gray-200);
     padding: 0 24px;
     display: flex; gap: 0;
   }
@@ -84,7 +137,7 @@
 
   /* ── Cards ── */
   .card {
-    background: #fff; border: 1px solid var(--gray-200);
+    background: var(--surface); border: 1px solid var(--gray-200);
     border-radius: 8px; padding: 20px;
   }
   .card-title {
@@ -239,7 +292,7 @@
   .sess-drawer-overlay.open { opacity: 1; pointer-events: all; }
   .sess-drawer {
     position: fixed; top: 0; right: -520px; width: 480px; max-width: 92vw;
-    height: 100vh; background: #fff; border-left: 1px solid var(--gray-200);
+    height: 100vh; background: var(--surface); border-left: 1px solid var(--gray-200);
     z-index: 201; transition: right 0.22s cubic-bezier(.4,0,.2,1);
     display: flex; flex-direction: column; overflow: hidden;
   }
@@ -247,7 +300,7 @@
   .sess-drawer-header {
     padding: 14px 18px; border-bottom: 1px solid var(--gray-200);
     display: flex; align-items: flex-start; gap: 10px;
-    background: #fff; flex-shrink: 0;
+    background: var(--surface); flex-shrink: 0;
   }
   .sess-drawer-title { font-size: 11px; font-weight: 600; color: var(--gray-900); }
   .sess-drawer-sessid {
@@ -264,7 +317,7 @@
   .sess-drawer-footer {
     padding: 14px 18px; border-top: 1px solid var(--gray-200);
     display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
-    background: #fff;
+    background: var(--surface);
   }
   .drawer-toggle {
     font-family: inherit; font-size: 13px; font-weight: 600;
@@ -436,7 +489,7 @@
     color: var(--gray-500); transition: all 0.15s;
   }
   .policy-scope-btn:hover { color: var(--gray-900); }
-  .policy-scope-btn.active { background: #fff; color: var(--gray-900); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .policy-scope-btn.active { background: var(--surface); color: var(--gray-900); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
   .policy-scope-pane { display: none; }
   .policy-scope-pane.active { display: block; }
 
@@ -445,13 +498,13 @@
   .rules-search {
     flex:1; font-family:inherit; font-size:13px; padding:8px 12px;
     border:1px solid var(--gray-200); border-radius:6px; color:var(--gray-900);
-    background:#fff; outline:none;
+    background:var(--surface); outline:none;
   }
   .rules-search:focus { border-color: var(--accent, #5b6cff); }
   .rules-count { font-size:12px; color:var(--gray-500); white-space:nowrap; }
   .rules-list {
     border:1px solid var(--gray-200); border-radius:8px; overflow:hidden;
-    max-height:520px; overflow-y:auto; background:#fff;
+    max-height:520px; overflow-y:auto; background:var(--surface);
   }
   .rule-row {
     display:flex; align-items:center; gap:12px; padding:10px 14px;
@@ -494,7 +547,7 @@
   }
   .rule-track::before {
     content:""; position:absolute; height:16px; width:16px; left:3px; top:3px;
-    background:#fff; border-radius:50%; transition:.15s;
+    background:var(--surface-strong); border-radius:50%; transition:.15s;
   }
   .rule-toggle input:checked + .rule-track { background:#16a34a; }
   .rule-toggle input:checked + .rule-track::before { transform:translateX(16px); }
@@ -587,7 +640,7 @@
   .mode-toggle-btns  { display: flex; border-radius: 5px; overflow: hidden; border: 1px solid var(--gray-200); }
   .mode-btn {
     font-family: inherit; font-size: 11px; font-weight: 500;
-    padding: 5px 14px; border: none; cursor: pointer; background: #fff; color: var(--gray-500);
+    padding: 5px 14px; border: none; cursor: pointer; background: var(--surface); color: var(--gray-500);
     transition: background 0.12s, color 0.12s;
   }
   .mode-btn + .mode-btn { border-left: 1px solid var(--gray-200); }
@@ -1031,7 +1084,7 @@
   .flow-empty { padding:40px 20px; text-align:center; color:var(--gray-400); font-size:12px; }
 
   /* node detail side panel */
-  .node-panel { border:1px solid var(--gray-200); border-radius:14px; background:#fff; padding:16px; position:sticky; top:16px; }
+  .node-panel { border:1px solid var(--gray-200); border-radius:14px; background:var(--surface); padding:16px; position:sticky; top:16px; }
   .node-panel-empty { color:var(--gray-400); font-size:12px; text-align:center; padding:24px 8px; }
   .node-panel h4 { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--gray-400); font-weight:700; margin:0 0 10px; }
   .node-actions { margin-top:14px; padding-top:14px; border-top:1px solid var(--gray-100); }
@@ -1045,6 +1098,68 @@
   .na-btn.allow:hover { background:#f0fdf4; border-color:#bbf7d0; color:#15803d; }
   .na-status { font-size:11px; margin:6px 0 4px; min-height:14px; }
   .na-hint { font-size:10px; color:var(--gray-400); line-height:1.5; }
+  .theme-toggle {
+    font-family: inherit; font-size: 11px; font-weight: 600;
+    padding: 7px 10px; border-radius: 999px;
+    border: 1px solid var(--gray-200); background: var(--surface);
+    color: var(--gray-600); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .theme-toggle:hover { background: var(--gray-100); color: var(--gray-800); }
+  .theme-toggle-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--gray-400); box-shadow: 0 0 0 3px var(--gray-100);
+  }
+  html[data-theme="dark"] .theme-toggle-dot { background: #fbbf24; box-shadow: 0 0 0 3px #1e293b; }
+  html[data-theme="dark"] body,
+  html[data-theme="dark"] #loadingScreen { background: var(--app-bg); }
+  html[data-theme="dark"] .event-row:hover,
+  html[data-theme="dark"] .finding-row:hover td,
+  html[data-theme="dark"] .clickable-row:hover td,
+  html[data-theme="dark"] tbody tr:hover td,
+  html[data-theme="dark"] .pg-btn:not(:disabled):hover,
+  html[data-theme="dark"] .pg-num:not(.cur):hover,
+  html[data-theme="dark"] .btn-ghost:hover,
+  html[data-theme="dark"] .sess-drawer-close:hover {
+    background: var(--gray-100);
+  }
+  html[data-theme="dark"] .policy-scope-btn.active,
+  html[data-theme="dark"] .node-panel,
+  html[data-theme="dark"] #loadingCard,
+  html[data-theme="dark"] .drawer-toggle.clear,
+  html[data-theme="dark"] .pg-btn {
+    background: var(--surface);
+  }
+  html[data-theme="dark"] .drawer-block-item,
+  html[data-theme="dark"] .drawer-event-card,
+  html[data-theme="dark"] .mode-toggle-row,
+  html[data-theme="dark"] .policy-scope-nav,
+  html[data-theme="dark"] .rule-row.off,
+  html[data-theme="dark"] .drawer-toggle.clear:hover {
+    background: var(--surface-muted);
+  }
+  html[data-theme="dark"] .sess-drawer-overlay,
+  html[data-theme="dark"] .up-modal-overlay { background: var(--overlay); }
+  html[data-theme="dark"] input,
+  html[data-theme="dark"] select,
+  html[data-theme="dark"] textarea,
+  html[data-theme="dark"] .finput,
+  html[data-theme="dark"] .fsel,
+  html[data-theme="dark"] .pg-limit,
+  html[data-theme="dark"] .btn-ghost,
+  html[data-theme="dark"] .fbtn {
+    background: var(--surface-muted);
+    color: var(--gray-700);
+    border-color: var(--gray-200);
+  }
+  html[data-theme="dark"] input::placeholder,
+  html[data-theme="dark"] textarea::placeholder { color: var(--gray-400); }
+  html[data-theme="dark"] .up-modal {
+    background: var(--surface);
+    color: var(--gray-700);
+    border: 1px solid var(--gray-200);
+  }
 
   /* ═══════════════════════════════════════════════════════════════════
      MATERIAL LAYER — Material Design skin over the Prismor dashboard.
@@ -1170,6 +1285,10 @@
   <div class="topbar-right">
     <span id="lastUpdated" class="last-updated"></span>
     <span id="statusBadge" class="badge badge-demo"><span class="badge-dot"></span> loading</span>
+    <button id="themeToggle" class="theme-toggle" type="button" onclick="toggleTheme()" aria-pressed="false" title="Switch theme">
+      <span class="theme-toggle-dot"></span>
+      <span id="themeToggleLabel">Light</span>
+    </button>
     <button id="refreshBtn" class="upgrade-btn" onclick="refreshDashboard()"><svg class="icon"><use href="#i-refresh"/></svg> Refresh</button>
     <button class="upgrade-btn" onclick="openUpgradeModal()"><svg class="icon"><use href="#i-sparkles"/></svg> Upgrade</button>
   </div>
@@ -1886,7 +2005,8 @@
 </div>
 
 <script>
-const COLORS = ['#B4A5F6','#E8BAEE','#F9E5A6','#A8D5F7','#A7F3D0','#FCA5A5'];
+const THEME_STORAGE_KEY = 'prismor-dashboard-theme';
+let COLORS = [];
 const CAT_LABELS = {
   prompt_injection: 'Prompt Injection', jailbreak_attempt: 'Jailbreak',
   tool_call_abuse: 'Tool Call Abuse', secret_exfil: 'Secret Exfil',
@@ -1910,6 +2030,114 @@ settings:
 let _sessCtrlCache = null;   // {items, total, pages, page}
 let _policyCache   = null;   // raw /api/policy response
 let _wsCache       = null;   // raw /api/workspaces response
+
+function currentTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function chartTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name, fallback) => (css.getPropertyValue(name) || fallback).trim() || fallback;
+  return {
+    text: read('--chart-text', '#9ca3af'),
+    grid: read('--chart-grid', '#f3f4f6'),
+    passed: read('--chart-passed', '#CBD5E1'),
+    intercepted: read('--chart-intercepted', '#E8BAEE'),
+    barWarm: read('--chart-bar-warm', '#F9E5A6'),
+    barCool: read('--chart-bar-cool', '#A8D5F7'),
+    barHot: read('--chart-bar-hot', '#FCA5A5'),
+    palette: [
+      read('--chart-palette-1', '#B4A5F6'),
+      read('--chart-palette-2', '#E8BAEE'),
+      read('--chart-palette-3', '#F9E5A6'),
+      read('--chart-palette-4', '#A8D5F7'),
+      read('--chart-palette-5', '#A7F3D0'),
+      read('--chart-palette-6', '#FCA5A5'),
+    ],
+  };
+}
+
+function renderDonutLegend() {
+  const legend = document.getElementById('donutLegend');
+  if (!legend) return;
+  const catKeys = Object.keys(CAT_LABELS);
+  legend.innerHTML = catKeys.map((k, i) =>
+    '<div class="legend-item"><span class="legend-dot" style="background:' + COLORS[i] + '"></span>' + CAT_LABELS[k] + '</div>'
+  ).join('');
+}
+
+function syncChartTheme() {
+  const theme = chartTheme();
+  COLORS = theme.palette;
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.color = theme.text;
+  }
+  if (donutChart) {
+    donutChart.data.datasets[0].backgroundColor = COLORS;
+    donutChart.update('none');
+  }
+  if (lineChart) {
+    lineChart.data.datasets[0].borderColor = theme.passed;
+    lineChart.data.datasets[1].borderColor = theme.intercepted;
+    lineChart.options.scales.y.grid.color = theme.grid;
+    lineChart.options.scales.x.ticks.color = theme.text;
+    lineChart.options.scales.y.ticks.color = theme.text;
+    lineChart.options.plugins.legend.labels.color = theme.text;
+    lineChart.update('none');
+  }
+  if (agentBarChart) {
+    agentBarChart.data.datasets[0].backgroundColor = theme.barWarm;
+    agentBarChart.options.scales.x.grid.color = theme.grid;
+    agentBarChart.options.scales.x.ticks.color = theme.text;
+    agentBarChart.options.scales.y.ticks.color = theme.text;
+    agentBarChart.update('none');
+  }
+  if (toolBarChart) {
+    toolBarChart.data.datasets[0].backgroundColor = theme.barCool;
+    toolBarChart.options.scales.y.grid.color = theme.grid;
+    toolBarChart.options.scales.x.ticks.color = theme.text;
+    toolBarChart.options.scales.y.ticks.color = theme.text;
+    toolBarChart.update('none');
+  }
+  if (mcpBarChart) {
+    mcpBarChart.data.datasets[0].backgroundColor = theme.barCool;
+    mcpBarChart.data.datasets[1].backgroundColor = theme.intercepted;
+    mcpBarChart.options.scales.y.grid.color = theme.grid;
+    mcpBarChart.options.scales.x.ticks.color = theme.text;
+    mcpBarChart.options.scales.y.ticks.color = theme.text;
+    mcpBarChart.options.plugins.legend.labels.color = theme.text;
+    mcpBarChart.update('none');
+  }
+  if (scEcoBarChart) {
+    scEcoBarChart.data.datasets[0].backgroundColor = theme.barCool;
+    scEcoBarChart.data.datasets[1].backgroundColor = theme.barHot;
+    scEcoBarChart.options.scales.y.grid.color = theme.grid;
+    scEcoBarChart.options.scales.x.ticks.color = theme.text;
+    scEcoBarChart.options.scales.y.ticks.color = theme.text;
+    scEcoBarChart.options.plugins.legend.labels.color = theme.text;
+    scEcoBarChart.update('none');
+  }
+  renderDonutLegend();
+}
+
+function applyTheme(theme) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  const btn = document.getElementById('themeToggle');
+  const label = document.getElementById('themeToggleLabel');
+  if (btn) {
+    btn.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false');
+    btn.title = next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  }
+  if (label) label.textContent = next === 'dark' ? 'Dark' : 'Light';
+  syncChartTheme();
+}
+
+function toggleTheme() {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
+  applyTheme(next);
+}
 
 // ── Tab navigation ─────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -2985,9 +3213,11 @@ async function applyNodePolicy(action, scope){
 // ── Charts ────────────────────────────────────────────────────────────────
 let donutChart, lineChart, agentBarChart, toolBarChart, mcpBarChart, scEcoBarChart;
 function initCharts() {
+  const theme = chartTheme();
+  COLORS = theme.palette;
   Chart.defaults.font.family = '"Inter", -apple-system, BlinkMacSystemFont, sans-serif';
   Chart.defaults.font.size = 10;
-  Chart.defaults.color = '#9ca3af';
+  Chart.defaults.color = theme.text;
   donutChart = new Chart(document.getElementById('donutChart'), {
     type:'doughnut',
     data:{labels:[],datasets:[{data:[],backgroundColor:COLORS,borderWidth:0}]},
@@ -2996,46 +3226,46 @@ function initCharts() {
   lineChart = new Chart(document.getElementById('lineChart'), {
     type:'line',
     data:{labels:[],datasets:[
-      {label:'Passed',data:[],borderColor:'#CBD5E1',borderWidth:1.5,pointRadius:0,tension:0.3},
-      {label:'Intercepted',data:[],borderColor:'#E8BAEE',borderWidth:2,pointRadius:0,tension:0.3},
+      {label:'Passed',data:[],borderColor:theme.passed,borderWidth:1.5,pointRadius:0,tension:0.3},
+      {label:'Intercepted',data:[],borderColor:theme.intercepted,borderWidth:2,pointRadius:0,tension:0.3},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      scales:{x:{grid:{display:false},ticks:{callback:v=>String(v).slice(5)}},y:{grid:{color:'#f3f4f6'}}},
-      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
+      scales:{x:{grid:{display:false},ticks:{callback:v=>String(v).slice(5),color:theme.text}},y:{grid:{color:theme.grid},ticks:{color:theme.text}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8,color:theme.text}}}},
   });
   agentBarChart = new Chart(document.getElementById('agentBar'),{
     type:'bar',
-    data:{labels:[],datasets:[{label:'Blocked',data:[],backgroundColor:'#F9E5A6',borderRadius:4,barThickness:14}]},
+    data:{labels:[],datasets:[{label:'Blocked',data:[],backgroundColor:theme.barWarm,borderRadius:4,barThickness:14}]},
     options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      scales:{x:{grid:{color:'#f3f4f6'}},y:{grid:{display:false}}},
+      scales:{x:{grid:{color:theme.grid},ticks:{color:theme.text}},y:{grid:{display:false},ticks:{color:theme.text}}},
       plugins:{legend:{display:false}}},
   });
   toolBarChart = new Chart(document.getElementById('toolBar'),{
     type:'bar',
-    data:{labels:[],datasets:[{label:'Calls',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:30}]},
+    data:{labels:[],datasets:[{label:'Calls',data:[],backgroundColor:theme.barCool,borderRadius:4,barThickness:30}]},
     options:{responsive:true,maintainAspectRatio:false,
-      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
+      scales:{x:{grid:{display:false},ticks:{color:theme.text}},y:{grid:{color:theme.grid},ticks:{color:theme.text}}},
       plugins:{legend:{display:false}}},
   });
   mcpBarChart = new Chart(document.getElementById('mcpBar'),{
     type:'bar',
     data:{labels:[],datasets:[
-      {label:'Total Calls',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:18},
-      {label:'Blocked',data:[],backgroundColor:'#E8BAEE',borderRadius:4,barThickness:18},
+      {label:'Total Calls',data:[],backgroundColor:theme.barCool,borderRadius:4,barThickness:18},
+      {label:'Blocked',data:[],backgroundColor:theme.intercepted,borderRadius:4,barThickness:18},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
-      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
+      scales:{x:{grid:{display:false},ticks:{color:theme.text}},y:{grid:{color:theme.grid},ticks:{color:theme.text}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8,color:theme.text}}}},
   });
   scEcoBarChart = new Chart(document.getElementById('scEcoBar'),{
     type:'bar',
     data:{labels:[],datasets:[
-      {label:'Total',data:[],backgroundColor:'#A8D5F7',borderRadius:4,barThickness:18},
-      {label:'Blocked',data:[],backgroundColor:'#FCA5A5',borderRadius:4,barThickness:18},
+      {label:'Total',data:[],backgroundColor:theme.barCool,borderRadius:4,barThickness:18},
+      {label:'Blocked',data:[],backgroundColor:theme.barHot,borderRadius:4,barThickness:18},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      scales:{x:{grid:{display:false}},y:{grid:{color:'#f3f4f6'}}},
-      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8}}}},
+      scales:{x:{grid:{display:false},ticks:{color:theme.text}},y:{grid:{color:theme.grid},ticks:{color:theme.text}}},
+      plugins:{legend:{position:'top',align:'end',labels:{boxWidth:10,padding:8,color:theme.text}}}},
   });
 }
 
@@ -3296,7 +3526,7 @@ async function loadStats(){
     donutChart.data.labels=catKeys.map(k=>CAT_LABELS[k]);
     donutChart.data.datasets[0].data=catKeys.map(k=>threats[k]||0);
     donutChart.update();
-    document.getElementById('donutLegend').innerHTML=catKeys.map((k,i)=>'<div class="legend-item"><span class="legend-dot" style="background:'+COLORS[i]+'"></span>'+CAT_LABELS[k]+'</div>').join('');
+    renderDonutLegend();
     const ts=data.blockRateTimeseries||[];
     lineChart.data.labels=ts.map(t=>t.date);
     lineChart.data.datasets[0].data=ts.map(t=>t.passed);
@@ -3992,6 +4222,7 @@ document.getElementById('globalPolicyEditor').addEventListener('input', e => _sy
 document.getElementById('projectPolicyEditor').addEventListener('input', e => _syncModeToggle('project', e.target.value));
 
 // ── Boot + poll ───────────────────────────────────────────────────────────
+applyTheme(currentTheme());
 initCharts();
 
 // Loading screen progress
