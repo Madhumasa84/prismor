@@ -1,3 +1,9 @@
+## [1.18.3] — 2026-07-10
+
+### Fixed
+
+- **`prismor cloak run` now decloaks leading shell-style environment assignments such as `OPENAI_API_KEY=@@SECRET:OPENAI_API_KEY@@`.** Previously the Codex-owned cloak runner only resolved placeholders that appeared in positional argv entries, so normal shell patterns that passed a cloaked placeholder through a leading env assignment reached the child process as the literal `@@SECRET:...@@` string and downstream API calls failed with invalid credentials. The runner now splits leading `NAME=value` assignments, decloaks those values into the child environment, and preserves output scrubbing. Regression coverage now exercises both the Codex runner path and Claude's command-rewrite path.
+
 ## [1.18.1] — 2026-07-09
 
 ### Added
