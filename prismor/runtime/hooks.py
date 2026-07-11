@@ -360,11 +360,11 @@ def _merge_claude(config: Dict[str, Any], command: str, workspace: Path) -> Dict
     )
     hooks["PreToolUse"] = _merge_claude_entries(
         hooks.get("PreToolUse", []),
-        {"matcher": "Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch", "hooks": [{"type": "command", "command": command}]},
+        {"matcher": "Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch|mcp__.*", "hooks": [{"type": "command", "command": command}]},
     )
     hooks["PostToolUse"] = _merge_claude_entries(
         hooks.get("PostToolUse", []),
-        {"matcher": "Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch", "hooks": [{"type": "command", "command": command}]},
+        {"matcher": "Bash|Read|Edit|MultiEdit|Write|WebFetch|WebSearch|mcp__.*", "hooks": [{"type": "command", "command": command}]},
     )
     # SessionStart carries the project-memory files (CLAUDE.md/AGENTS.md) that
     # Claude auto-loads before any tool call. Scanning them here brings their

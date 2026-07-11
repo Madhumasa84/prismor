@@ -1,3 +1,9 @@
+## [1.20.1] — 2026-07-10
+
+### Fixed
+
+- **MCP tool calls under Claude are now intercepted at the PreToolUse gate.** The Claude hook matcher omitted `mcp__.*`, so a raw `mcp__<server>__<tool>` call never fired the dispatcher and slipped past policy entirely — even though the dispatcher already classifies MCP events (remote MCP → egress / secret-in-args checks; local stdio → prompt-injection rules). Both the PreToolUse and PostToolUse matchers now include `mcp__.*` (matching the Codex agent's coverage). Re-run `prismor install-hooks --agent claude` to pick up the new matcher. Coverage + end-to-end block tests added.
+
 ## [1.20.0] — 2026-07-10
 
 ### Added
