@@ -1,3 +1,9 @@
+## [1.22.0] — 2026-07-10
+
+### Added
+
+- **R4 DEFER — the fifth authorization decision.** A rule that resolves to `action: defer` no longer fails closed: the ambiguous action is held and escalated to the semantic guard (the hybrid heuristic + local-LLM judge that is too costly to run on every call), and the verdict is cached per session+action so the agent's retry resolves instantly. Block-level semantic verdict → DENY; otherwise → the action proceeds. Any evaluator error fails closed. New module `prismor/runtime/enterprise/deferred.py`; unit + end-to-end coverage in `tests/test_defer.py`. This completes the five-value decision model (ALLOW/DENY/MODIFY/STEP_UP/DEFER).
+
 ## [1.21.0] — 2026-07-10
 
 ### Added
