@@ -25,6 +25,22 @@
   <img src="assets/warden-runtime-monitor.gif" width="90%" alt="Prismor Warden runtime monitor"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/anthropics/claude-code"><picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/claude-code-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/claude-code.svg" width="20" height="20" alt="Claude Code" title="Claude Code"></picture></a>&nbsp;&nbsp;
+  <a href="https://github.com/openai/codex"><picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/codex-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/codex.svg" width="20" height="20" alt="Codex CLI" title="Codex CLI"></picture></a>&nbsp;&nbsp;
+  <a href="https://github.com/google-gemini/gemini-cli"><picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/gemini-cli-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/gemini-cli.svg" width="20" height="20" alt="Gemini CLI" title="Gemini CLI"></picture></a>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/cursor-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/cursor.svg" width="20" height="20" alt="Cursor" title="Cursor"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/github-copilot-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/github-copilot.svg" width="20" height="20" alt="GitHub Copilot" title="GitHub Copilot"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/opencode-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/opencode.svg" width="20" height="20" alt="OpenCode" title="OpenCode"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/pi-agent-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/pi-agent.svg" width="20" height="20" alt="Pi Agent" title="Pi Agent"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/kiro-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/kiro.svg" width="20" height="20" alt="Kiro" title="Kiro"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/kimi-code-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/kimi-code.svg" width="20" height="20" alt="Kimi Code" title="Kimi Code"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/trae-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/trae.svg" width="20" height="20" alt="Trae / Trae CN" title="Trae / Trae CN"></picture>&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/google-antigravity-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/google-antigravity.svg" width="20" height="20" alt="Google Antigravity" title="Google Antigravity"></picture>
+</p>
+<p align="center"><sub>Plus generic support for Hermes, OpenClaw, Devin CLI, Factory Droid, and Aider and more</sub></p>
+
+
 ---
 
 ## Table of Contents
