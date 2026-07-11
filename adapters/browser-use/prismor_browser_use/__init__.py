@@ -174,6 +174,14 @@ def guard_controller(
         )
 
         if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
+            # Headless STEP_UP → post an approval request and block until an admin
+            # decides. Approve → proceed; deny/timeout/not-enrolled → fail closed.
+            try:
+                from prismor.runtime.enterprise import approvals as _approvals
+                if _approvals.await_step_up(decision, agent=agent, session_id=sid):
+                    return await original_execute(action_name, params, **kwargs)
+            except Exception:
+                pass
             reason = decision.reason or "policy violation"
             if raise_on_block:
                 raise PrismorBlocked(reason, decision)

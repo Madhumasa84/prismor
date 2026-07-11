@@ -266,6 +266,18 @@ def _guard_function_tool(
             subject=resolve_subject(subject),
         )
         if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
+            # Headless STEP_UP: no human at the keyboard for an inline "ask", so
+            # post an approval request to the control plane and block until an
+            # admin approves. Approve → proceed; deny/timeout/not-enrolled → fail
+            # closed to the block below.
+            try:
+                from prismor.runtime.enterprise import approvals as _approvals
+                if _approvals.step_up_finding(decision) is not None and _approvals.await_step_up(
+                    decision, event=event, agent=agent, session_id=sid
+                ):
+                    return await original(ctx, input_str)
+            except Exception:
+                pass  # any approval-path error fails closed
             reason = decision.reason or "policy violation"
             if raise_on_block:
                 raise PrismorBlocked(reason, decision)

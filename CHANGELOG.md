@@ -1,3 +1,9 @@
+## [1.21.0] — 2026-07-10
+
+### Added
+
+- **R4 Phase 2 (part 1): async approval for headless STEP_UP.** A `step_up` verdict on an *interactive* agent renders an inline "ask" (Phase 1); a *headless* framework agent (OpenAI Agents / LangChain / CrewAI / browser-use) has no human at the keyboard, so it now posts a pending **approval request** to the control plane and blocks in-process until an org admin approves or denies — approve → the tool call proceeds; deny / timeout / not-enrolled / any error → fail closed. New client `prismor/runtime/enterprise/approvals.py` (`await_step_up`; tunables `PRISMOR_APPROVAL_TIMEOUT`, `PRISMOR_APPROVAL_POLL`) wired into all four SDK adapters. Control-plane endpoints: `POST /api/approvals` + `GET /api/approvals/{id}` (device-authenticated). Client coverage in `tests/test_approvals.py`. Until the control-plane queue is deployed the client fails closed, so behavior is unchanged for existing installs.
+
 ## [1.20.1] — 2026-07-10
 
 ### Fixed
