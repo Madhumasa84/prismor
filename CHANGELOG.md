@@ -1,8 +1,9 @@
-## [1.22.0] — 2026-07-10
+## [1.21.1] — 2026-07-10
 
-### Added
+### Fixed
 
-- **R4 DEFER — the fifth authorization decision.** A rule that resolves to `action: defer` no longer fails closed: the ambiguous action is held and escalated to the semantic guard (the hybrid heuristic + local-LLM judge that is too costly to run on every call), and the verdict is cached per session+action so the agent's retry resolves instantly. Block-level semantic verdict → DENY; otherwise → the action proceeds. Any evaluator error fails closed. New module `prismor/runtime/enterprise/deferred.py`; unit + end-to-end coverage in `tests/test_defer.py`. This completes the five-value decision model (ALLOW/DENY/MODIFY/STEP_UP/DEFER).
+- **Framework-adapter namespace shims now refuse to load under a top-level name.** Each `prismor.<framework>` shim (`prismor/openai`, `prismor/crewai`, `prismor/langchain`, `prismor/browser_use`) aliases its implementation into `sys.modules`. That alias now fires only when the shim is imported under its intended dotted name; if the `prismor` package directory ever leaks onto `sys.path` and Python resolves the shim as a bare top-level module (e.g. `openai`), it raises a clear `ImportError` pointing at the sys.path pollution instead of silently replacing the real SDK with the adapter. Defense in depth complementing the sys.path fix (#173).
+
 
 ## [1.21.0] — 2026-07-10
 
