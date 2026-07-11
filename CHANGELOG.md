@@ -1,3 +1,9 @@
+## [1.23.0] — 2026-07-11
+
+### Added
+
+- **Intent capture for framework SDK agents (R2/R3 task-alignment).** The hook path synthesizes intent-scoped rules from the user's prompt; a deployed OpenAI Agents / LangChain / CrewAI / browser-use agent emitted no prompt, so its tool calls were checked against static policy only. `guard_agent` / `guard_tools` / `guard_controller` now accept `goal="..."`: the session's intent-scoped rules are synthesized from the goal + the agent's own tool names (via new `prismor/runtime/intent.py`), so `evaluate_tool_call`'s scoped enforcement now applies "does this serve the task?" to headless agents too. Idempotent per session, never raises. Coverage in `tests/test_intent_capture.py`.
+
 ## [1.22.0] — 2026-07-11
 
 ### Added
