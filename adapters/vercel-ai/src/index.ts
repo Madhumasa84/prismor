@@ -6,17 +6,34 @@
  * throws PrismorBlocked (enforce mode) or logs and proceeds (observe mode).
  *
  * Quick start:
- *   const tools = prismorTools({ run_shell, search_web }, { subject: `user:${userId}` });
- *   const result = await generateText({ model, tools, prompt });
+ *   const tools = prismorTools({ run_shell, search_web });
+ *   // in your request handler — attribute every tool call to the caller:
+ *   await useSubject(`user:${userId}`, () =>
+ *     generateText({ model, tools, prompt }));
  */
 
 export interface PrismorOptions {
   /** URL of the running eval-server. Default: http://127.0.0.1:7071 */
   evalUrl?: string;
-  /** Subject for per-user attribution: "user:alice" or "user=alice;team=data" */
+  /**
+   * Subject for per-user attribution: "user:alice" or "user=alice;team=data".
+   * Resolved per call, in priority order: this option, then the ambient
+   * useSubject() context, then the PRISMOR_SUBJECT environment variable —
+   * mirroring the Python runtime's resolve_subject().
+   */
   subject?: string;
   /** "enforce" blocks denied calls; "observe" logs only. Default: "enforce" */
   mode?: "enforce" | "observe";
+  /**
+   * What to do when the eval-server cannot answer (unreachable, non-2xx,
+   * timeout). "closed" blocks the tool call; "open" allows it with a warning.
+   * Default: "closed" in enforce mode, "open" in observe mode — an enforced
+   * suspension must hold even when the sidecar is down, while observe-mode
+   * monitoring must never break the app.
+   */
+  failMode?: "open" | "closed";
+  /** Max milliseconds to wait for the eval-server. Default: 10000 */
+  timeoutMs?: number;
   /** Workspace path forwarded to the policy engine. Default: process.cwd() */
   workspace?: string;
   /** Framework identifier (e.g. "vercel-ai"). Default: "vercel-ai" */
@@ -56,19 +73,110 @@ const FAIL_OPEN_DECISION: PrismorDecision = {
   allow: true, reason: null, findings: [], blocking: null, subject: null,
 };
 
+// ── Ambient subject context ──────────────────────────────────────────────────
+
+interface SubjectStorage {
+  run<T>(subject: string, fn: () => T): T;
+  getStore(): string | undefined;
+}
+
+// AsyncLocalStorage exists on Node and on the major edge runtimes (Vercel Edge,
+// Cloudflare with nodejs_compat). Loaded lazily so merely importing this module
+// never fails on a runtime without it — only useSubject() itself requires it.
+let _subjectStorage: SubjectStorage | null | undefined;
+
+function subjectStorage(): SubjectStorage | null {
+  if (_subjectStorage !== undefined) return _subjectStorage;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { AsyncLocalStorage } = require("node:async_hooks");
+    _subjectStorage = new AsyncLocalStorage() as SubjectStorage;
+  } catch {
+    _subjectStorage = null;
+  }
+  return _subjectStorage;
+}
+
+/**
+ * Attribute every Prismor-guarded tool call inside `fn` to `subject` — the
+ * multi-tenant path for one deployed agent serving many users. Wrap the body
+ * of your request handler:
+ *
+ *   const tools = prismorTools({ run_shell });          // guard once, at module scope
+ *   await useSubject(`user:${userId}`, () =>            // per request
+ *     generateText({ model, tools, prompt }));
+ *
+ * The subject propagates through async calls (AsyncLocalStorage), so parallel
+ * requests with different users cannot bleed into each other. An explicit
+ * `subject` option on prismorTools() takes precedence over this context.
+ *
+ * Throws when the runtime has no AsyncLocalStorage: silently dropping the
+ * subject would let a user's calls escape their per-user policy. Pass the
+ * `subject` option per request instead on such runtimes.
+ */
+export function useSubject<T>(subject: string, fn: () => T): T {
+  const storage = subjectStorage();
+  if (!storage) {
+    throw new Error(
+      "[prismor] useSubject() requires AsyncLocalStorage, which this runtime does not provide. " +
+      "Pass prismorTools(tools, { subject }) per request instead.",
+    );
+  }
+  return storage.run(subject, fn);
+}
+
+function resolveSubject(explicit: string): string {
+  if (explicit) return explicit;
+  const ambient = subjectStorage()?.getStore();
+  if (ambient) return ambient;
+  if (typeof process !== "undefined" && process.env && process.env.PRISMOR_SUBJECT) {
+    return process.env.PRISMOR_SUBJECT;
+  }
+  return "";
+}
+
+// ── Evaluation ───────────────────────────────────────────────────────────────
+
+/** Resolve an eval-server failure according to failMode. */
+function onEvalFailure(
+  detail: string,
+  opts: Required<PrismorOptions>,
+): PrismorDecision {
+  if (opts.failMode === "closed") {
+    console.error(`[prismor] eval-server unavailable (${detail}) — failing closed`);
+    return {
+      allow: false,
+      reason: `eval-server unavailable (${detail}) — failing closed`,
+      findings: [],
+      blocking: null,
+      subject: null,
+    };
+  }
+  console.warn(`[prismor] eval-server unavailable (${detail}) — failing open`);
+  return FAIL_OPEN_DECISION;
+}
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(ms);
+  }
+  return undefined;
+}
+
 async function evaluate(
   toolName: string,
   args: Record<string, unknown>,
   opts: Required<PrismorOptions>,
   sessionId: string,
 ): Promise<PrismorDecision> {
+  const subject = resolveSubject(opts.subject);
   let res: Response;
   try {
     res = await fetch(`${opts.evalUrl}/v1/evaluate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(opts.subject ? { "X-Prismor-Subject": opts.subject } : {}),
+        ...(subject ? { "X-Prismor-Subject": subject } : {}),
         ...(opts.agentName ? { "X-Prismor-Agent-Name": opts.agentName } : {}),
       },
       body: JSON.stringify({
@@ -79,33 +187,33 @@ async function evaluate(
         agent_name: opts.agentName,
         mode: opts.mode,
         session_id: sessionId,
-        subject: opts.subject,
+        subject,
         workspace: opts.workspace,
       }),
+      signal: timeoutSignal(opts.timeoutMs),
     });
   } catch (err) {
-    // eval-server unreachable (not started, crashed, network error) — this is
-    // the documented fail-open case. `fetch` throws for connection failures
-    // rather than resolving with a bad status, so it needs its own catch
-    // alongside the !res.ok branch below. See PrismorSec/prismor#136.
-    console.warn(`[prismor] eval-server unreachable (${(err as Error).message}) — failing open`);
-    return FAIL_OPEN_DECISION;
+    // eval-server unreachable (not started, crashed, network error, timeout) —
+    // `fetch` throws for connection failures rather than resolving with a bad
+    // status, so it needs its own catch alongside the !res.ok branch below.
+    return onEvalFailure((err as Error).message, opts);
   }
 
   if (!res.ok) {
-    // Server error — fail open (don't break the agent on infrastructure issues)
-    console.warn(`[prismor] eval-server returned ${res.status} — failing open`);
-    return FAIL_OPEN_DECISION;
+    return onEvalFailure(`HTTP ${res.status}`, opts);
   }
   return res.json() as Promise<PrismorDecision>;
 }
 
 function resolveOpts(opts: PrismorOptions): Required<PrismorOptions> {
   const agent = opts.agent ?? "vercel-ai";
+  const mode = opts.mode ?? "enforce";
   return {
     evalUrl: opts.evalUrl ?? "http://127.0.0.1:7071",
     subject: opts.subject ?? "",
-    mode: opts.mode ?? "enforce",
+    mode,
+    failMode: opts.failMode ?? (mode === "enforce" ? "closed" : "open"),
+    timeoutMs: opts.timeoutMs ?? 10_000,
     workspace: opts.workspace ?? process.cwd(),
     agent,
     agentName: opts.agentName ?? agent,
@@ -124,7 +232,7 @@ function sessionId(): string {
  *
  * @param toolName  The key name under which this tool is registered (used in telemetry).
  * @param tool      The tool object returned by the `tool()` helper.
- * @param opts      Prismor options (evalUrl, subject, mode, …).
+ * @param opts      Prismor options (evalUrl, subject, mode, failMode, …).
  */
 export function prismorTool<
   T extends { execute?: (...args: any[]) => any },
@@ -149,8 +257,9 @@ export function prismorTool<
  * Wrap every tool in a record — the idiomatic Vercel AI SDK pattern.
  *
  * @example
- * const tools = prismorTools({ run_shell, search_web }, { subject: `user:${userId}` });
- * const result = await generateText({ model, tools, prompt });
+ * const tools = prismorTools({ run_shell, search_web });
+ * await useSubject(`user:${userId}`, () =>
+ *   generateText({ model, tools, prompt }));
  */
 export function prismorTools<
   T extends Record<string, { execute?: (...args: any[]) => any }>,
@@ -158,4 +267,75 @@ export function prismorTools<
   return Object.fromEntries(
     Object.entries(tools).map(([name, t]) => [name, prismorTool(name, t, opts)]),
   ) as T;
+}
+
+// ── LangChain JS / LangGraph JS ──────────────────────────────────────────────
+
+/** A LangChain JS StructuredTool-like object (also what LangGraph's ToolNode calls). */
+interface LangChainToolLike {
+  name?: string;
+  invoke: (input: any, config?: any) => any;
+}
+
+/** Extract the argument record from a ToolNode-style ToolCall or raw args input. */
+function langChainArgs(input: any): Record<string, unknown> {
+  if (input && typeof input === "object") {
+    // LangGraph's ToolNode invokes tools with the full ToolCall object
+    // ({ name, args, id, type: "tool_call" }); direct callers pass raw args.
+    if (input.type === "tool_call" && typeof input.args === "object" && input.args !== null) {
+      return input.args as Record<string, unknown>;
+    }
+    return input as Record<string, unknown>;
+  }
+  return { input };
+}
+
+/**
+ * Guard a LangChain JS / LangGraph JS tool so every `invoke()` is evaluated by
+ * Prismor first. Works on anything StructuredTool-shaped — `tool(fn, {...})`
+ * from `@langchain/core/tools`, and therefore the tools LangGraph's
+ * `createReactAgent` / `ToolNode` execute. The same tool object is returned
+ * with its `invoke` wrapped in place, so graphs already holding a reference
+ * are covered too.
+ *
+ * A denied call throws PrismorBlocked. LangGraph's ToolNode catches tool
+ * errors by default (`handleToolErrors: true`) and feeds the message back to
+ * the model as a ToolMessage, so the run recovers gracefully.
+ */
+export function prismorLangChainTool<T extends LangChainToolLike>(
+  tool: T,
+  opts: PrismorOptions = {},
+): T {
+  if ((tool as any).__prismor_guarded__) return tool;
+  const resolved = resolveOpts(opts);
+  const sid = sessionId();
+  const toolName = tool.name || "tool";
+  const original = tool.invoke.bind(tool);
+
+  (tool as any).invoke = async (input: any, config?: any) => {
+    const decision = await evaluate(toolName, langChainArgs(input), resolved, sid);
+    if (!decision.allow) {  // honor the runtime decision (incl. org kill-switch), not the app-passed mode
+      throw new PrismorBlocked(decision.reason ?? "policy violation", decision);
+    }
+    return original(input, config);
+  };
+  (tool as any).__prismor_guarded__ = true;
+  return tool;
+}
+
+/**
+ * Guard a list of LangChain JS / LangGraph JS tools in one call — mirrors the
+ * Python adapters' `guard_tools([...])`. Returns the same array.
+ *
+ * @example
+ * import { prismorLangChainTools, useSubject } from "prismor-warden";
+ * const tools = prismorLangChainTools([run_shell, fetch_url]);
+ * const agent = createReactAgent({ llm, tools });
+ * await useSubject(`user:${userId}`, () => agent.invoke({ messages }));
+ */
+export function prismorLangChainTools<T extends LangChainToolLike>(
+  tools: T[],
+  opts: PrismorOptions = {},
+): T[] {
+  return tools.map((t) => prismorLangChainTool(t, opts));
 }
