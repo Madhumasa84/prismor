@@ -1,3 +1,9 @@
+## [1.24.1] — 2026-07-11
+
+### Added
+
+- **Grok Build (xAI) coding-agent hook integration.** Wires Grok Build (docs.x.ai/build/features/hooks) into the same install-hooks/hook-dispatch pipeline as Claude/Cursor/Codex/Copilot: a dedicated `.grok/hooks/prismor.json` hook file, `PreToolUse`/`PostToolUse`/`UserPromptSubmit` events, and Grok's documented `{"decision": "deny", "reason": ...}` + exit-2 response contract. Also fixes 8 call sites in `cli.py` where `--agent` choices/loops were hardcoded separately from `_SUPPORTED_AGENTS`, which would have made `--agent grok` unusable at the CLI layer. Not yet verified against a live `grok` binary — built from x.ai's published docs; flagged in `AGENT_INTEGRATIONS.md` and the integration registry. See #183.
+
 ## [1.24.0] — 2026-07-11
 
 ### Changed
