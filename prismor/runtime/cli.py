@@ -274,6 +274,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         _run_trail(args)
         return
 
+    if args.command == "attest":
+        _run_attest(args, workspace, repo_root)
+        return
+
+    if args.command == "discover":
+        _run_discover(args, workspace)
+        return
+
     if args.command == "logout":
         from prismor.runtime.enterprise import identity as _identity, remote_policy as _remote
         had = _identity.clear_identity()
@@ -2045,6 +2053,35 @@ def build_parser() -> argparse.ArgumentParser:
         "checkpoint", help="Emit a signed chain-head checkpoint for external anchoring")
     trail_checkpoint.add_argument("--out", help="Write the checkpoint JSON to FILE (default stdout)")
 
+    # ── attest ─────────────────────────────────────────────────────────
+    attest_parser = subparsers.add_parser(
+        "attest",
+        help="Signed attestation bundle (posture + agent inventory + trail anchor)",
+        description="Build or verify a signed evidence bundle an auditor can "
+                    "re-verify offline.",
+    )
+    attest_parser.add_argument("--workspace", help="Workspace path")
+    attest_parser.add_argument("--out", help="Write the bundle JSON to FILE (default stdout)")
+    attest_sub = attest_parser.add_subparsers(dest="attest_command")
+    attest_verify = attest_sub.add_parser("verify", help="Re-verify a bundle's hash + signature")
+    attest_verify.add_argument("bundle", help="Path to a bundle JSON file")
+    attest_verify.add_argument(
+        "--pubkey", help="Pin verification to this base64 raw Ed25519 public key")
+    attest_verify.add_argument("--json", action="store_true", help="Machine-readable report")
+    attest_coverage = attest_sub.add_parser(
+        "coverage", help="Show framework-control coverage of the active policy")
+    attest_coverage.add_argument("--json", action="store_true", help="Machine-readable report")
+
+    # ── discover ───────────────────────────────────────────────────────
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="Sweep this host for AI agents Prismor doesn't govern (shadow AI)",
+        description="Find AI agents installed on this machine and flag any that "
+                    "run without Prismor hooks. Host-local and read-only.",
+    )
+    discover_parser.add_argument("--workspace", help="Workspace path")
+    discover_parser.add_argument("--json", action="store_true", help="Machine-readable report")
+
     # ── sandbox ────────────────────────────────────────────────────────
     sandbox_parser = subparsers.add_parser(
         "sandbox",
@@ -2779,6 +2816,106 @@ def _run_trail(args) -> None:
 
     print("Usage: prismor trail {verify|show|checkpoint}")
     raise SystemExit(2)
+
+
+def _run_discover(args, workspace: Path) -> None:
+    """`prismor discover` — sweep this host for AI agents, flagging any that
+    run without Prismor hooks (shadow AI)."""
+    from prismor.runtime.enterprise import discovery as _discovery
+    report = _discovery.discover(workspace)
+
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+        return
+
+    s = report["summary"]
+    print(f"\n  {_color('PRISMOR', _BOLD)}  host discovery  "
+          f"({s['present']} present · {s['governed']} governed · "
+          f"{_color(str(s['ungoverned']) + ' ungoverned', _BOLD)})\n")
+    for a in report["agents"]:
+        if not a["present"]:
+            continue
+        if a["governed"]:
+            mark, label = "✓", "governed"
+        else:
+            mark, label = "✗", "UNGOVERNED"
+        seen = " · seen running" if a["seen"] else ""
+        print(f"    {mark} {a['agent']:<10} {label}{seen}")
+    if s["ungoverned"]:
+        print(f"\n  {s['ungoverned']} agent(s) run without Prismor hooks. "
+              f"Wire them in with:\n    prismor install-hooks --agent <name>\n")
+    else:
+        print("\n  Every agent found on this host is governed by Prismor.\n")
+
+
+def _run_attest(args, workspace: Path, repo_root: Path) -> None:
+    """`prismor attest` — a signed evidence bundle (posture + inventory + trail
+    anchor) an auditor can re-verify offline with `attest verify`."""
+    from prismor.runtime.enterprise import attestation as _attest
+
+    sub = getattr(args, "attest_command", None)
+
+    if sub == "coverage":
+        from prismor.runtime.enterprise import compliance as _compliance
+        cov = _compliance.coverage(workspace)
+        if getattr(args, "json", False):
+            print(json.dumps(cov, indent=2))
+            return
+        s = cov["summary"]
+        print(f"\n  {_color('PRISMOR', _BOLD)}  framework coverage  "
+              f"({s['controls_covered']}/{s['controls_total']} controls across "
+              f"{s['frameworks']} frameworks)\n")
+        for fw in cov["frameworks"]:
+            print(f"  {_color(fw['title'], _BOLD)}  {fw['covered']}/{fw['total']}")
+            for c in fw["controls"]:
+                mark = "✓" if c["covered"] else "·"
+                by = f"  ({', '.join(c['by'])})" if c["covered"] else ""
+                print(f"    {mark} {c['id']:<14} {str(c['title'])[:48]}{by}")
+            print()
+        print("  Coverage = a rule mapping this control is active. Evidence of what")
+        print("  Prismor enforces, not a legal compliance opinion.\n")
+        return
+
+    if sub == "verify":
+        try:
+            bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"✗ cannot read bundle: {exc}")
+            raise SystemExit(2)
+        report = _attest.verify_bundle(bundle, pubkey_b64=getattr(args, "pubkey", None))
+        if getattr(args, "json", False):
+            print(json.dumps(report, indent=2))
+            raise SystemExit(0 if report["ok"] else 1)
+        glyph = "✓" if report["ok"] else "✗"
+        state = "verified" if report["ok"] else "FAILED"
+        print(f"{glyph} attestation {state} — schema {report.get('schema')}, "
+              f"generated {str(report.get('generated_at'))[:19]}")
+        if report.get("signing_key_id"):
+            print(f"  signed by key id {report['signing_key_id']}")
+        for err in report["errors"]:
+            print(f"  ✗ {err}")
+        raise SystemExit(0 if report["ok"] else 1)
+
+    # default: build (and optionally write) a bundle
+    bundle = _attest.build_bundle(workspace, repo_root=repo_root)
+    text = json.dumps(bundle, indent=2)
+    out = getattr(args, "out", None)
+    if out:
+        Path(out).write_text(text + "\n", encoding="utf-8")
+        n_agents = len(bundle.get("agents") or [])
+        n_findings = len(bundle.get("audit_findings") or [])
+        signed = "signed" if bundle.get("signature") else "UNSIGNED"
+        print(f"Attestation bundle ({signed}) written to {out}")
+        print(f"  {n_agents} agents · {n_findings} audit findings · "
+              f"trail anchor seq {(bundle.get('trail_checkpoint') or {}).get('seq')}")
+        print(f"  re-verify with:  prismor attest verify {out}")
+    else:
+        print(text)
+    if not bundle.get("signature"):
+        sys.stderr.write(
+            "[prismor] warning: bundle is unsigned — install `prismor[signing]` "
+            "for Ed25519 signatures\n"
+        )
 
 
 def _run_doctor(workspace: Path, as_json: bool = False) -> None:
