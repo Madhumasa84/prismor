@@ -55,7 +55,6 @@
 - [How It Works](#how-it-works)
 - [Supply Chain Enforcement](#supply-chain-enforcement)
 - [Contributing](#contributing)
-- [Contributors](#contributors)
 
 ---
 
