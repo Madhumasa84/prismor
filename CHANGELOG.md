@@ -1,3 +1,9 @@
+## [1.26.1] — 2026-07-13
+
+### Added
+
+- **Kiro CLI (AWS) coding-agent hook integration.** Wires Kiro CLI (kiro.dev/docs/cli/hooks) into the install-hooks/hook-dispatch pipeline. Structurally different from every other shipped agent: hooks live inside a named agent config (`.kiro/agents/kiro_default.json`), not a dedicated hooks file, and the built-in default agent has no on-disk file until one is created. Whether Kiro merges a partial override with its built-in tool list or replaces it outright is undocumented, so a fresh install seeds a self-contained config (explicit tools list) rather than a hooks-only fragment, avoiding silently stripping a user's default tools; an existing file is left otherwise untouched, only `hooks` is merged in. `preToolUse`/`postToolUse`/`userPromptSubmit` events, exit-2 blocking. Not yet verified against a live kiro-cli binary. See #191.
+
 ## [1.24.1] — 2026-07-11
 
 ### Added
