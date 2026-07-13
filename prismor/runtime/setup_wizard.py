@@ -273,7 +273,7 @@ def _control_line(items: List[tuple]) -> str:
 
 # ── Step 1: Enforcement Mode ─────────────────────────────────────────────────
 
-def _step_mode(current: str = "enforce") -> str:
+def _step_mode(current: str = "observe") -> str:
     opts = [
         ("observe", "Log and warn, never block"),
         ("enforce", "Block dangerous actions in real time"),
@@ -775,7 +775,7 @@ def run_wizard(target: Path) -> None:
     # step. Rules are loaded only so the confirm screen can show the count and
     # _do_install can write policy overrides if any are ever disabled.
     rules = _load_rules()
-    mode = "enforce"
+    mode = "observe"
     agents = None
     cloak = True
     scope = "project"
@@ -815,7 +815,7 @@ def run_wizard(target: Path) -> None:
                 break
     except Exception:
         rules = _load_rules()
-        mode = "enforce"
+        mode = "observe"
         agents = ["claude"]
         cloak = False
         scope = "project"
