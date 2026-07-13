@@ -1,3 +1,9 @@
+## [1.26.2] — 2026-07-13
+
+### Fixed
+
+- **Interactive setup wizard now defaults to observe mode.** `prismor setup`'s TUI mode-selection step (and its exception fallback) defaulted to `enforce`, inconsistent with every non-interactive path (`--non-interactive`, `install-hooks`, the `policy_engine` fallback), which already default to `observe`. First-time users going through the interactive wizard now see `observe` pre-selected, matching the rest of the CLI. See #193.
+
 ## [1.26.1] — 2026-07-13
 
 ### Added
