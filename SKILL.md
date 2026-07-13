@@ -208,6 +208,7 @@ pick the smallest tool that answers the question:
 | "Show all registered workspaces" | `prismor status --all` (terminal overview across every workspace where hooks are installed) |
 | "Open the dashboard" | `prismor dashboard` → http://127.0.0.1:7070 (opens a browser; `--no-open` for headless) |
 | "Am I on the latest version?" | `prismor update --check` (install with `prismor update`) |
+| "Review my agent/tool architecture for security gaps" | walk [`docs/agentic-architecture-review.md`](./docs/agentic-architecture-review.md), then `prismor attest coverage` for what's already enforced |
 
 ---
 
@@ -249,6 +250,7 @@ Capability deep dives:
 - [`docs/hermes.md`](./docs/hermes.md): Hermes Agent integration — secret cloaking plugin, pip auto-discovery, CLI install path
 - [`docs/semantic-guard.md`](./docs/semantic-guard.md): opt-in LLM-assisted prompt-injection guard
 - [`docs/skill-scanner.md`](./docs/skill-scanner.md): MCP server + skill risk scanning
+- [`docs/agentic-architecture-review.md`](./docs/agentic-architecture-review.md): design-time checklist for multi-agent/tool-using system architecture, mapped to OWASP Agentic AI, OWASP LLM Top 10, NIST AI RMF, and EU AI Act controls
 - [`docs/network-isolation.md`](./docs/network-isolation.md): egress allowlists, raw-IP detection
 - [`docs/canary.md`](./docs/canary.md): honeytoken tripwires for recon detection
 - [`docs/iam.md`](./docs/iam.md): named agent identities and permission profiles
