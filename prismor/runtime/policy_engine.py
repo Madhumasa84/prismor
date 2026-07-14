@@ -86,6 +86,13 @@ _DEFAULT_FIELDS: Dict[str, List[str]] = {
     "text": ["combined_text"],
 }
 
+# Default field(s) checked by a rule that opts in via the `mcp` event-type
+# alias (event_types: [mcp]) without naming its own `fields`. Matching on the
+# full `mcp__server__tool` tag is the common case ("block/approve calls to this
+# MCP tool"); rules wanting to inspect arguments name fields explicitly
+# (outbound_payload for remote servers, response for local stdio).
+_MCP_ALIAS_DEFAULT_FIELDS: List[str] = ["tool_name"]
+
 # Rule event-types a synthetic "text" check is evaluated against.
 _TEXT_CONTENT_TYPES = frozenset({"prompt", "tool_result"})
 
@@ -693,18 +700,36 @@ class PolicyEngine:
         field_values = _extract_fields(event)
         findings: List[Dict[str, Any]] = []
 
+        # An MCP tool call classifies as `network` (remote) or `tool_result`
+        # (stdio); the `mcp` event alias lets a custom rule target both without
+        # knowing which. An event is MCP iff the normalizer tagged its server.
+        is_mcp_event = bool(event.get("mcp_server"))
+
         for rule in self.rules:
+            matched_via_mcp_alias = False
             # A synthetic "text" event has no rules of its own; route it through
             # the agent-I/O content rules so check_text / `--type text` actually
             # validate arbitrary text. See PrismorSec/prismor#163.
             if event_type == "text":
                 if _TEXT_CONTENT_TYPES.isdisjoint(rule.event_types):
                     continue
-            elif event_type not in rule.event_types:
+            elif event_type in rule.event_types:
+                pass
+            elif is_mcp_event and "mcp" in rule.event_types:
+                # Rule opted into the MCP alias and this is an MCP call.
+                matched_via_mcp_alias = True
+            else:
                 continue
 
-            # Determine which fields to check.
-            check_fields = rule.fields if rule.fields else _DEFAULT_FIELDS.get(event_type, [])
+            # Determine which fields to check. A rule matched purely via the
+            # `mcp` alias (and naming no explicit fields) defaults to the tool
+            # tag, not the event type's canonical field.
+            if rule.fields:
+                check_fields = rule.fields
+            elif matched_via_mcp_alias:
+                check_fields = _MCP_ALIAS_DEFAULT_FIELDS
+            else:
+                check_fields = _DEFAULT_FIELDS.get(event_type, [])
             matched_evidence = None
 
             for field_name in check_fields:
@@ -1658,11 +1683,30 @@ def _extract_fields(event: Dict[str, Any]) -> Dict[str, str]:
     raw_command = str(event.get("command", ""))
     raw_path = str(event.get("path", ""))
 
+    # Concrete tool name (set by the hook normalizer in metadata.tool_name).
+    # For MCP tool calls this is the full `mcp__server__tool` tag, which lets a
+    # custom rule target the tool identity itself (fields: [tool_name]) rather
+    # than only its arguments. See _classify_mcp_event / the `mcp` event alias.
+    meta_tool = ""
+    _meta = event.get("metadata")
+    if isinstance(_meta, dict):
+        meta_tool = str(_meta.get("tool_name") or "")
+
     return {
         "command": _normalize_command(raw_command),
         "path": _resolve_path(raw_path),
         "url": str(event.get("url", "")),
         "combined_text": "\n".join(combined_parts),
+        # MCP identity + arguments, exposed so a custom guardrail can match on
+        # which MCP server/tool is being called (and its outbound arguments for
+        # remote servers) without knowing whether the pre-call classified as a
+        # `network` (remote) or `tool_result` (stdio) event. Populated only on
+        # MCP events; empty elsewhere.
+        "tool_name": meta_tool,
+        "mcp_server": str(event.get("mcp_server", "")),
+        "mcp_tool": str(event.get("mcp_tool", "")),
+        "outbound_payload": str(event.get("outbound_payload", "")),
+        "mcp_args": _extract_mcp_args(event),
         # Individual content fields, exposed so a rule can target a specific
         # field instead of only the folded ``combined_text``. Without these,
         # rules that declare ``fields: [prompt|response|content|stdout|stderr]``
@@ -1675,6 +1719,31 @@ def _extract_fields(event: Dict[str, Any]) -> Dict[str, str]:
         "stdout": str(event.get("stdout", "")),
         "stderr": str(event.get("stderr", "")),
     }
+
+
+def _extract_mcp_args(event: Dict[str, Any]) -> str:
+    """Serialized call arguments of an MCP pre-call, whatever the transport.
+
+    _classify_mcp_event puts a remote server's arguments in ``outbound_payload``
+    and a local stdio server's in ``response`` — a rule shouldn't have to know
+    which. Empty for non-MCP events, and for post-call events (there ``response``
+    is the tool's *output*, not its arguments — matching it here would make an
+    arg guardrail silently scan output too).
+    """
+    payload = str(event.get("outbound_payload", ""))
+    if payload:
+        return payload
+    if not event.get("mcp_server"):
+        return ""
+    agent_event = str(event.get("agent_event", ""))
+    lower = agent_event.lower()
+    # Mirrors hooks._is_pre_action (not imported: hooks imports this module).
+    is_pre = (
+        lower.startswith("pre")
+        or lower.startswith("before")
+        or agent_event in {"UserPromptSubmit", "PermissionRequest"}
+    )
+    return str(event.get("response", "")) if is_pre else ""
 
 
 def _extract_domain(url: str) -> str:

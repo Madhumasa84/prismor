@@ -271,7 +271,7 @@
         },
         "event_types": {
           "type": "array",
-          "description": "Event types this rule applies to (shell, file_read, file_write, network, prompt, tool_result, memory, skill_manifest). A rule listing tool_result is automatically applied to memory (CLAUDE.md/AGENTS.md) content too.",
+          "description": "Event types this rule applies to (shell, file_read, file_write, network, prompt, tool_result, memory, skill_manifest, mcp). A rule listing tool_result is automatically applied to memory (CLAUDE.md/AGENTS.md) content too. The 'mcp' alias matches any MCP tool call regardless of whether it classifies as a remote (network) or local stdio (tool_result) event.",
           "items": {
             "type": "string",
             "enum": [
@@ -282,21 +282,27 @@
               "prompt",
               "tool_result",
               "memory",
-              "skill_manifest"
+              "skill_manifest",
+              "mcp"
             ]
           },
           "minItems": 1
         },
         "fields": {
           "type": "array",
-          "description": "Event fields to match against. Defaults to the canonical field for the event type (command for shell, path for file_*, url for network, combined_text for prompt/tool_result).",
+          "description": "Event fields to match against. Defaults to the canonical field for the event type (command for shell, path for file_*, url for network, combined_text for prompt/tool_result, tool_name for the mcp alias). For MCP guardrails: tool_name is the full mcp__server__tool tag, mcp_server / mcp_tool are the parsed parts, mcp_args is the serialized pre-call arguments regardless of transport, and outbound_payload is the remote-transport raw form of the same.",
           "items": {
             "type": "string",
             "enum": [
               "command",
               "path",
               "url",
-              "combined_text"
+              "combined_text",
+              "tool_name",
+              "mcp_server",
+              "mcp_tool",
+              "mcp_args",
+              "outbound_payload"
             ]
           }
         },
@@ -313,9 +319,16 @@
           "enum": [
             "block",
             "warn",
-            "log"
+            "log",
+            "step_up",
+            "modify",
+            "defer"
           ],
-          "description": "Legacy/decorative classification. Observe vs enforce is now controlled by `mode`/`default_mode`, not this field."
+          "description": "Authorization verdict when this rule fires as an enforce finding on a pre-action event. block = deny; step_up = require inline human approval (maps to an 'ask' prompt on Claude/Copilot; other surfaces fail closed); modify = rewrite the tool input via `transform`; defer = escalate to the semantic evaluator. warn/log are non-blocking (observe). Whether a rule blocks at all is still gated by `mode`/`default_mode`."
+        },
+        "transform": {
+          "type": "string",
+          "description": "Named input transform applied when action is 'modify'. The hook dispatcher rewrites the tool input via this transform."
         },
         "mode": {
           "type": "string",

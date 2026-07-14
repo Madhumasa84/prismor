@@ -47,7 +47,60 @@ Commit the policy file to share rules across your team. CI picks it up automatic
 | `step_up`      | Require inline human approval — Claude and Copilot emit an "ask" prompt. Surfaces without an approval prompt fail closed to `block`.                 |
 | `modify`       | Rewrite the tool input via a named `transform:` (e.g. `transform: sandbox` runs the command in the Docker sandbox). Surfaces that can't rewrite input fail closed to `block`. |
 
-Any verdict a surface cannot honor fails closed to a block — never a silent allow. `defer` is reserved (accepted by the validator, not yet emitted).
+Any verdict a surface cannot honor fails closed to a block, never a silent allow. `defer` is reserved (accepted by the validator, not yet emitted).
+
+### Custom guardrails for MCP tools
+
+Say you want a human to sign off before the agent merges a PR through the GitHub MCP, and you want the production database MCP off-limits entirely. Write a rule with the `mcp` event type and Prismor gates the call before it runs:
+
+```yaml
+rules:
+  # A human approves GitHub MCP writes before they happen.
+  - id: github-mcp-writes-need-approval
+    severity: HIGH
+    category: mcp_guardrail
+    title: GitHub MCP write operations require human approval
+    event_types: [mcp]
+    mode: enforce
+    action: step_up            # inline "ask" on Claude and Copilot
+    patterns:
+      - "^mcp__github__(create|merge|delete)_"
+
+  # The prod database MCP is blocked outright.
+  - id: block-prod-db-mcp
+    severity: CRITICAL
+    category: mcp_guardrail
+    title: The production database MCP is blocked
+    event_types: [mcp]
+    fields: [mcp_server]
+    mode: enforce
+    action: block
+    patterns: ["^prod-db$"]
+```
+
+The `mcp` event type matches whether the server runs remote over HTTP (which Prismor classifies as a `network` event) or local over stdio (a `tool_result` event). You write one rule and it covers both transports.
+
+With no `fields:`, a rule matches the full `mcp__server__tool` tag, which is what you want most of the time. To narrow it, name a field:
+
+| Field              | Matches on                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `tool_name`        | The full tag, e.g. `mcp__github__create_pr` (the default).                                                         |
+| `mcp_server`       | Just the server, e.g. `github`.                                                                                     |
+| `mcp_tool`         | Just the tool, e.g. `create_pr`.                                                                                    |
+| `mcp_args`         | The serialized call arguments on either transport. Matches the pre-call only, never the tool's output.             |
+| `outbound_payload` | The raw remote-transport form of the arguments. Prefer `mcp_args` unless you want to match remote calls only.       |
+
+`action` decides what happens when a pattern hits. `block` denies the call, `step_up` asks a human, and `warn`/`log` record the call and let it through. A rule needs `mode: enforce` to gate anything; in observe mode every rule only logs.
+
+#### What it doesn't cover yet
+
+Two limits to know before you lean on this.
+
+**Agent coverage.** Prismor tags MCP calls for Claude, Copilot, Codex, Grok, Kiro, and Windsurf. Cursor, Hermes, and OpenClaw don't tag them yet, so an `mcp` rule stays silent on those three. If your team runs one of them, the rule won't fire and nothing tells you it didn't.
+
+**Where approval actually prompts.** Only Claude and Copilot have an inline approval surface, so `step_up` shows a real "ask" prompt there. On Codex, Grok, Kiro, and Windsurf there's nowhere to draw the prompt, so the open-source runtime fails the call closed: it blocks instead of asking, which is the safe direction, but the human never sees the question. The enterprise build sends that request to an async approval queue an admin resolves from the console, so even a headless agent waits for a real yes or no.
+
+Both behaviors are pinned by `tests/test_mcp_guardrails.py` if you want to read the exact contract.
 
 See [`prismor/runtime/default_policy.yaml`](../prismor/runtime/default_policy.yaml) for the complete rule list.
 
