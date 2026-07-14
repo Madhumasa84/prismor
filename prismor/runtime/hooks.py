@@ -229,7 +229,7 @@ def normalize_payload(*, agent: str, payload: Dict[str, Any], workspace: Path) -
     elif agent == "codex":
         event = _normalize_codex(payload, session_id, workspace)
     elif agent == "copilot":
-        event = _normalize_copilot(payload, session_id)
+        event = _normalize_copilot(payload, session_id, workspace)
     elif agent == "grok":
         event = _normalize_grok(payload, session_id, workspace)
     elif agent == "kiro":
@@ -901,7 +901,7 @@ def _strip_kiro(config: Dict[str, Any], marker: str) -> tuple[Dict[str, Any], bo
     return {**config, "hooks": hooks}, removed
 
 
-def _normalize_copilot(payload: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+def _normalize_copilot(payload: Dict[str, Any], session_id: str, workspace: Path) -> Dict[str, Any]:
     hook_event = payload.get("hookEventName") or payload.get("hook_event_name") or "unknown"
     tool_name = payload.get("toolName") or payload.get("tool_name") or ""
     # Copilot sends toolArgs as a JSON-encoded string; parse it.
@@ -930,6 +930,19 @@ def _normalize_copilot(payload: Dict[str, Any], session_id: str) -> Dict[str, An
         return {**base, "type": "file_write", "path": tool_args.get("path") or tool_args.get("filePath", ""), "content": tool_args.get("content", "")}
     if tool_name in {"WebFetch", "web_fetch", "WebSearch"}:
         return {**base, "type": "network", "url": tool_args.get("url", "")}
+    # Copilot is an approval-capable surface (inline "ask"), so MCP calls must
+    # be classified like the other agents' — otherwise `mcp` guardrail rules
+    # (block / step_up on mcp__server__tool) silently never fire here.
+    mcp_event = _classify_mcp_event(
+        base=base,
+        tool_name=tool_name,
+        tool_input=tool_args,
+        response=payload.get("toolResult", payload.get("tool_result", payload.get("response"))),
+        is_post=(hook_event == "PostToolUse"),
+        workspace=workspace,
+    )
+    if mcp_event is not None:
+        return mcp_event
     return {**base, "type": "tool_result", "response": json.dumps(payload)}
 
 

@@ -84,6 +84,7 @@ Standard OS-level and endpoint security tools monitor the kernel and filesystem.
 - 📦 [Supply Chain](docs/supply-chain.md) covers install-time enforcement, IOC matching, and risk scoring
 - 🛜 [Network Isolation](docs/network-isolation.md) covers egress allowlists, raw IP detection, and tunnel blocking
 - 🔍 [Skill Scanner](docs/skill-scanner.md) covers MCP server and skill risk scanning across supported agents
+- 🚦 [MCP Guardrails](docs/prismor-runtime.md#custom-guardrails-for-mcp-tools) let you block a specific MCP server or tool, or require human approval before the agent calls it, with a policy rule you write yourself
 - 🔐 [Sweep and Cloak](docs/sweep-and-cloak.md) covers secret prevention at tool boundaries, practical setup, best practices, threat model, and cleanup for leaked secrets
 - 🤖 [Hermes Agent Cloaking](docs/hermes.md) covers Hermes-specific secret cloaking with pip entry-point auto-discovery, filesystem install, and pre_gateway_dispatch paste guard
 - 🧠 [Semantic Guard](docs/semantic-guard.md): opt-in hybrid layer that adds an LLM-assisted intent check for paraphrased prompt-injection attempts the regex rules cannot catch
