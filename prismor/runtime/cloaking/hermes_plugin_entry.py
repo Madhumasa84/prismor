@@ -153,6 +153,24 @@ def _scan_for_raw_secrets(text: str) -> List[str]:
     return matches
 
 
+def _is_scrubbable_secret(value: str) -> bool:
+    """Whether a raw secret value is distinctive enough to mask by substring
+    without false positives. Eligible if >= 16 chars, or >= 8 chars AND carrying
+    a digit, a symbol, or mixed case. A short single-case word collides with
+    ordinary text and is skipped. Mirrors is_scrubbable_secret() in runtime.py.
+    """
+    n = len(value or "")
+    if n < 8:
+        return False
+    if n >= 16:
+        return True
+    return (
+        any(c.isdigit() for c in value)
+        or any(not c.isalnum() for c in value)
+        or (any(c.isupper() for c in value) and any(c.islower() for c in value))
+    )
+
+
 def _scrub_secrets(text: str) -> str:
     """Replace known secret values in text with ``@@SECRET:name@@`` placeholders."""
     sdir = _secrets_dir()
@@ -187,7 +205,7 @@ def _scrub_secrets(text: str) -> str:
     for value, placeholder in sorted(
         value_to_name.items(), key=lambda x: -len(x[0])
     ):
-        if value and len(value) >= 4 and value in result:
+        if value and value in result and _is_scrubbable_secret(value):
             result = result.replace(value, placeholder)
     return result
 

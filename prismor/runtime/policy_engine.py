@@ -780,9 +780,16 @@ class PolicyEngine:
                 # this is "enforce". EXCEPTION: the non-overridable floor (core
                 # rule IDs + core block categories) always enforces — it can't be
                 # left in observe by default_mode, nor downgraded by an overlay.
+                # The floor only applies to rules whose action is "block"; a rule
+                # that explicitly declares action: "warn" is honored as a warning
+                # (observe unless the install is --mode enforce), even inside a
+                # core category — otherwise a warn-intended rule silently hard-blocks.
                 "mode": (
                     "enforce"
-                    if (rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES)
+                    if (
+                        rule.action == "block"
+                        and (rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES)
+                    )
                     else (rule.mode or self.default_mode)
                 ),
             })

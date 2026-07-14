@@ -68,3 +68,19 @@ prismor_value_is_cloaked() {
   done
   return 1
 }
+
+# prismor_scrubbable <value>
+# Returns 0 if a raw secret value is distinctive enough to match by substring
+# without false positives. Mirrors is_scrubbable_secret() in ../runtime.py:
+# eligible if >= 16 chars, or >= 8 chars AND carrying a digit, a symbol, or
+# mixed case. A short single-case word (e.g. a 4-char value) collides with
+# ordinary source/prose and is skipped so it never wrongly blocks a read.
+prismor_scrubbable() {
+  local v="$1" n=${#1}
+  (( n >= 8 )) || return 1
+  (( n >= 16 )) && return 0
+  [[ "$v" == *[[:digit:]]* ]] && return 0
+  [[ "$v" == *[![:alnum:]]* ]] && return 0
+  [[ "$v" == *[[:lower:]]* && "$v" == *[[:upper:]]* ]] && return 0
+  return 1
+}

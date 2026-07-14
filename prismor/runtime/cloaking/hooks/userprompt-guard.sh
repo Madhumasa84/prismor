@@ -60,7 +60,7 @@ if [[ -n "$mentions" ]]; then
     for sf in "$SECRETS_DIR"/*; do
       [[ -f "$sf" ]] || continue
       rv="$(cat "$sf")"
-      [[ ${#rv} -ge 4 ]] || continue
+      prismor_scrubbable "$rv" || continue
       if grep -qF -- "$rv" "$fp" 2>/dev/null; then
         name="$(basename "$sf")"
         reason="Prismor cloaking: your prompt references @${mp}, and that file contains the registered secret '${name}'. Claude Code would attach its raw contents to the model context, bypassing cloaking. Remove the @-mention and reference @@SECRET:${name}@@ in a tool command instead — Prismor substitutes the real value at execution time and scrubs it from the output."

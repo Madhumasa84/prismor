@@ -29,6 +29,21 @@ if [[ ! -d "$SECRETS_DIR" ]]; then
   exec cat
 fi
 
+# Whether a raw secret value is distinctive enough to match by substring
+# without false positives. Mirrors is_scrubbable_secret() in ../runtime.py:
+# eligible if >= 16 chars, or >= 8 chars AND carrying a digit, a symbol, or
+# mixed case. A short single-case word is skipped — masking it would corrupt
+# ordinary output far more than it protects anything.
+_prismor_scrubbable() {
+  local v="$1" n=${#1}
+  (( n >= 8 )) || return 1
+  (( n >= 16 )) && return 0
+  [[ "$v" == *[[:digit:]]* ]] && return 0
+  [[ "$v" == *[![:alnum:]]* ]] && return 0
+  [[ "$v" == *[[:lower:]]* && "$v" == *[[:upper:]]* ]] && return 0
+  return 1
+}
+
 # Build a single sed program: real value → placeholder, for each secret.
 # Escape sed's `s|...|...|` delimiters and metacharacters in the real value.
 sed_filter=""
@@ -37,9 +52,7 @@ for secret_file in "$SECRETS_DIR"/*; do
   [[ -f "$secret_file" ]] || continue
   name="$(basename "$secret_file")"
   real="$(cat "$secret_file")"
-  # Skip empty or trivially short values: masking a 1-2 char string would
-  # corrupt ordinary output far more than it protects anything.
-  [[ ${#real} -ge 4 ]] || continue
+  _prismor_scrubbable "$real" || continue
   esc_real="$(printf '%s' "$real" | sed 's/[\/&|]/\\&/g')"
   sed_filter+="s|$esc_real|@@SECRET:${name}@@|g;"
 done

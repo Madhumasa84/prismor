@@ -71,12 +71,44 @@ def decloak_text(text: str, *, secrets: Optional[Dict[str, str]] = None) -> str:
     return _PLACEHOLDER_RE.sub(repl, text)
 
 
+# Minimum length before a raw secret value is eligible for substring masking.
+# The scrubbers/read-guard replace a value wherever it appears as a SUBSTRING,
+# so short or low-entropy values collide with ordinary source and prose — a
+# 4-char value blocked reads of 20+ project source files and mangled command
+# output. Keep this in sync with the Bash `_prismor_scrubbable` helper in
+# cloaking/hooks/*.sh.
+_MIN_SCRUB_LEN = 8
+
+
+def is_scrubbable_secret(value: str) -> bool:
+    """Whether a registered secret VALUE is distinctive enough to mask by raw
+    substring match without unacceptable false positives.
+
+    A value is eligible when it is either long (>= 16 chars — realistic tokens)
+    or short-but-distinctive: it carries a digit, a symbol, or mixed case. A
+    short, single-case, all-alphabetic value (a dictionary word, a common
+    identifier) is NOT masked, because substring-matching it corrupts unrelated
+    text. Realistic API keys/tokens satisfy the shape check; only genuinely
+    weak, word-like secrets are skipped.
+    """
+    v = value or ""
+    n = len(v)
+    if n < _MIN_SCRUB_LEN:
+        return False
+    if n >= 16:
+        return True
+    has_digit = any(c.isdigit() for c in v)
+    has_symbol = any(not c.isalnum() for c in v)
+    has_mixed_case = any(c.isupper() for c in v) and any(c.islower() for c in v)
+    return has_digit or has_symbol or has_mixed_case
+
+
 def scrub_text(text: str, *, secrets: Optional[Dict[str, str]] = None) -> str:
     """Replace registered raw secret values with placeholders."""
     secrets = _read_secret_map() if secrets is None else secrets
     out = text
     for name, value in sorted(secrets.items(), key=lambda item: len(item[1]), reverse=True):
-        if len(value) >= 4:
+        if is_scrubbable_secret(value):
             out = out.replace(value, f"@@SECRET:{name}@@")
     return out
 

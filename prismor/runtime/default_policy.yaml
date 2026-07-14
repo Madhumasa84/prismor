@@ -173,10 +173,17 @@ rules:
       - 'chmod\s+(?:-[A-Za-z]+\s+)*[0-7]?[0-7][0-7][2367]\b'
       - 'chmod\s+(?:-[A-Za-z]+\s+)*[ugoa,+=rwxXst-]*[oa][+=][a-zX]*w'
       - 'chown\s+-R\s+[^\n]*\s(/|\$\{?HOME\}?|~)(\s|$|/)'
-      - 'mkfs\b'
+      # Command-position anchored: match these as an actual command — at the
+      # start of the line, after a shell separator (; && || |), or invoked via
+      # sudo/doas/systemctl — NOT as a bare word inside a commit message, an
+      # npm/pm2 script name, or a quoted string. Prevents FPs like
+      # `git commit -m "graceful shutdown handler"`, `npm run reboot`,
+      # `man mkfs`, `pm2 shutdown` while still catching real `sudo shutdown`,
+      # `systemctl reboot`, `mkfs /dev/sda1`, `&& reboot`.
+      - '(?:^|[\n;&|]\s*|\b(?:sudo|doas|systemctl)\s+)mkfs\b'
       - 'dd\s+if=.*of=/dev/'
-      - 'shutdown\b'
-      - 'reboot\b'
+      - '(?:^|[\n;&|]\s*|\b(?:sudo|doas|systemctl)\s+)shutdown\b'
+      - '(?:^|[\n;&|]\s*|\b(?:sudo|doas|systemctl)\s+)reboot\b'
       - 'launchctl\s+unload\b'
     action: block
 
@@ -206,7 +213,9 @@ rules:
       - 'yes\s*\|'
       - 'dd\s+if=/dev/(zero|urandom)\b'
       - 'cat\s+/dev/urandom\b'
-      - '\b(stress|stress-ng)\b'
+      # Command-position anchored so `npm run stress-test` / a commit message
+      # mentioning "stress test" don't trip the stress(-ng) load-generator rule.
+      - '(?:^|[\n;&|]\s*|\b(?:sudo|doas)\s+)(stress|stress-ng)\b'
       - 'ulimit\s+-[a-z]+\s+unlimited'
     action: block
 
@@ -226,7 +235,11 @@ rules:
       - '\bnc\b[^\n]*\s-[a-z]*(?:lp|pl|lvp|pvl)[a-z]*\b'
       # Separate nc -l and -p flags
       - '\bnc\b[^\n]*\s-[a-z]*l[a-z]*\b[^\n]*\s-[a-z]*p[a-z]*\b'
-      - 'python3?\s+-c\s+.*(?:exec|eval|import\s+os)'
+      # A bare `import os` is not RCE — `python -c "import os; print(os.getcwd())"`
+      # and reading `os.environ[...]` are routine, benign introspection. Flag the
+      # actual execution sinks instead: exec()/eval() calls, os.system/os.popen/
+      # os.exec*/os.spawn*, subprocess, __import__, and socket (reverse shells).
+      - 'python3?\s+-c\s+.*(?:\bexec\s*\(|\beval\s*\(|os\.(?:system|popen|exec|spawn)|\bsubprocess\b|__import__|socket\.)'
       - 'perl\s+-e\s+.*(?:socket|exec)'
       - 'node\s+-e\b[^\n]*(child_process|execSync|spawnSync|\bexec\s*\()'
       - 'ruby\s+-e\b[^\n]*(\bsystem\s*\(|\bexec\s*\(|IO\.popen|Open3)'
