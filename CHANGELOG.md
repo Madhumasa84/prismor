@@ -1,3 +1,9 @@
+## [1.26.3] — 2026-07-14
+
+### Added
+
+- **Enterprise agent tool-capability inventory and remote governance.** Runtime sessions now register MCP names, internal tools, declared SDK tool rosters, and synthesized session-scope access with the Prismor control plane. The dashboard can show which tools each agent/session has access to and apply organization-level allow/deny changes before delivery. LangChain, CrewAI, and OpenAI Agents adapters declare their complete tool roster, while direct runtime calls report observed and scoped tools. See `docs/enterprise-tool-access.md`.
+
 ## [1.26.2] — 2026-07-13
 
 ### Fixed
