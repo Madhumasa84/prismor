@@ -51,3 +51,11 @@ Content-Type: application/json
 Use `action: "allow"` with the same tool and scope to lift that deny. Scope may
 be `org`, `agent`, `device`, or `session`. The change is included in signed
 policy and enforced on-device before the MCP or internal tool receives a call.
+
+`action: "allow"` is more than lifting a deny: it ships as an explicit org
+override that also beats a LOCAL restriction (a developer's
+`.prismor/agents.yaml` deny, or a session's synthesized scope) for that same
+tool — org policy is the most-preferred authority for tool access. See
+[docs/tool-access-precedence.md](tool-access-precedence.md) for the full
+precedence order and why it doesn't touch the agent kill switch or a
+different org-level deny.

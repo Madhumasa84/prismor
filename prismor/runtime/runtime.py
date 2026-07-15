@@ -314,6 +314,48 @@ def evaluate_tool_call(
         except Exception as exc:
             sys.stderr.write(f"[prismor] org tool-deny error: {exc}\n")
 
+    # Org signed-policy tool ALLOWS (same settings.tool_denies list, entries
+    # with action:'allow' — set by an admin clicking "Allowed" on prismor.dev
+    # for a tool that a LOCAL layer still restricts). Org policy is
+    # authoritative: an explicit org allow for this tool/scope drops the local
+    # per-agent deny list (.prismor/agents.yaml) and the session-scoped
+    # allowlist finding for the SAME event's tool, so a fleet admin's decision
+    # always wins over a developer's local toggle or a stale synthesized scope.
+    # It does NOT lift a separate org-level deny (a distinct admin decision —
+    # see the block above) or the agent kill-switch (ruleId "agent-disabled"),
+    # which stay authoritative floors regardless of any allow.
+    if _org_denies:
+        try:
+            from prismor.runtime.scoped_agent import _resolve_tool_name
+            _otn2 = _resolve_tool_name(event)
+            if _otn2:
+                for _a in _org_denies:
+                    if not isinstance(_a, dict) or _a.get("action") != "allow":
+                        continue
+                    if _a.get("tool") != _otn2:
+                        continue
+                    _ascope = _a.get("scope") or "org"
+                    _asid = _a.get("scopeId")
+                    _ahit = (
+                        _ascope in ("org", "device")
+                        or (_ascope == "agent" and _asid == _agent_name)
+                        or (_ascope == "session" and _asid == session_id)
+                    )
+                    if _ahit:
+                        findings = [
+                            f for f in findings
+                            if not (
+                                f.get("ruleId") == "agent-tool-deny"
+                                or (
+                                    f.get("ruleId") == "scoped-agent"
+                                    and str(f.get("evidence") or "").startswith("Tool '")
+                                )
+                            )
+                        ]
+                        break
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] org tool-allow error: {exc}\n")
+
     # IAM named-identity enforcement (now subject-aware + per-agent profile).
     try:
         from prismor.runtime.iam import check_iam
