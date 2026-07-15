@@ -47,6 +47,7 @@ _NON_OVERRIDABLE_RULE_IDS = frozenset({
     # The signed audit trail is evidence — a policy override that disables
     # this rule would let an agent erase its own history undetected.
     "audit-trail-tampering",
+    "tool-category-crossover",
 })
 
 # Categories that must stay in settings.block_categories no matter what an
@@ -60,6 +61,7 @@ _CORE_BLOCK_CATEGORIES = frozenset({
     "rce_canary",
     "privilege_escalation",
     "dos_resource_exhaustion",
+    "lethal_trifecta",
 })
 
 # Canonical field for each event type when 'fields' is not specified in the rule.
@@ -610,6 +612,10 @@ class PolicyEngine:
         # workspaces only.
         _sc = settings.get("subject_controls")
         self.subject_controls: Dict[str, Any] = _sc if isinstance(_sc, dict) else {}
+        # Tool-combination governance config (settings.tool_tags):
+        # customizable tags + forbidden combinations (generalized trifecta).
+        _tt = settings.get("tool_tags")
+        self.tool_tags: Dict[str, Any] = _tt if isinstance(_tt, dict) else {}
         # Global observe/enforce default for rules that don't set their own mode.
         # Defaults to "observe" — a fresh policy blocks nothing until an admin
         # flips rules (or this) to enforce.
@@ -1154,6 +1160,56 @@ class PolicyEngine:
                     _domain = _extract_domain(url)
                     if _domain:
                         taint.add_domain(_domain)
+
+        # ── Forbidden tool-tag combination (generalized lethal trifecta) ──
+        # Tools carry customizable tags; a session may not COMPLETE a forbidden
+        # tag set (default: untrusted_content + critical_action). Block the call
+        # that completes it, before it executes. Detection lives in trifecta.py
+        # (swappable); enforcement is here.
+        if self.tool_tags.get("enabled") and session_id and self.workspace is not None:
+            try:
+                from prismor.runtime.trifecta import (
+                    classify_tool_tags, TagLedger, normalize_incompatible,
+                )
+                _tt_tool = str((event.get("metadata") or {}).get("tool_name") or "")
+                _tags = classify_tool_tags(
+                    event, event_type,
+                    {f.get("category") for f in findings},
+                    self.tool_tags,
+                )
+                if _tags:
+                    _incompat = normalize_incompatible(self.tool_tags.get("incompatible"))
+                    _ledger = TagLedger(self.workspace, session_id)
+                    _done = _ledger.completes(_tags, _incompat, index)
+                    if _done is not None:
+                        _tt_mode = str(self.tool_tags.get("mode", "observe")).lower()
+                        _intro = _done.get("introduced_by") or {}
+                        _prior = ", ".join(
+                            f"{_t} (by '{(_intro.get(_t) or {}).get('tool', '?')}')"
+                            for _t in _done["set"] if _t in _intro
+                        )
+                        _fid = f"tool-category-crossover-{index}"
+                        _pfx = f"{session_id}:{_fid}" if session_id else _fid
+                        findings.append({
+                            "id": _pfx,
+                            "severity": "CRITICAL",
+                            "category": "lethal_trifecta",
+                            "title": (
+                                f"Forbidden tool combination: '{_tt_tool}' completes "
+                                f"tag set [{', '.join(_done['set'])}] in this session"
+                            ),
+                            "evidence": (
+                                f"call adds tag(s) {_done['this_call_tags']}; "
+                                f"prior: {_prior or 'n/a'}"
+                            ),
+                            "eventIndex": index,
+                            "ruleId": "tool-category-crossover",
+                            "action": "block",
+                            "mode": _tt_mode,
+                        })
+                    _ledger.record(_tags, index, _tt_tool)
+            except Exception:
+                pass
 
         # Normalize enforcement for code-authored (synthetic) findings: canary /
         # vault / cloaked-secret-exfil / taint / html-injection carry
