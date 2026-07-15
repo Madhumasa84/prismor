@@ -205,11 +205,13 @@ def evaluate_tool_call(
         # Throttled auto-registration.  The current tool is observed; an SDK
         # may declare its full roster in metadata.available_tools; exact tools
         # in a synthesized session scope are registered as scoped access.
-        from prismor.runtime.scoped_agent import _resolve_tool_name, load_scoped_rules
+        from prismor.runtime.scoped_agent import resolve_tool_tags, load_scoped_rules
         _capabilities = []
-        _current_tool = _resolve_tool_name(event)
-        if _current_tool:
-            _capabilities.append({"name": _current_tool, "source": "observed"})
+        # A skill call yields both the bare "Skill" tag and the qualified
+        # "Skill:<name>" tag, so the console can inventory which skills this
+        # agent actually reaches for — not just that it uses skills at all.
+        for _tag in resolve_tool_tags(event):
+            _capabilities.append({"name": _tag, "source": "observed"})
         for _tool in meta.get("available_tools") or []:
             _capabilities.append({"name": str(_tool), "source": "declared"})
         _scoped = load_scoped_rules(workspace, session_id) if session_id else None
@@ -274,11 +276,14 @@ def evaluate_tool_call(
     # operator decision, not a passive detection.
     if _control is not None and getattr(_control, "deny_tools", ()):  # noqa: SIM102
         try:
-            from prismor.runtime.scoped_agent import _resolve_tool_name
+            from prismor.runtime.scoped_agent import resolve_tool_tags
             from prismor.runtime.agents import make_agent_tool_deny_finding
-            _tname = _resolve_tool_name(event)
-            if _tname and _tname in _control.deny_tools:
-                findings.append(make_agent_tool_deny_finding(_agent_name, _tname, session_id))
+            # Deny on any tag this event answers to: the bare "Skill" tag
+            # blocks every skill, "Skill:<name>" blocks just the one.
+            for _tname in resolve_tool_tags(event):
+                if _tname in _control.deny_tools:
+                    findings.append(make_agent_tool_deny_finding(_agent_name, _tname, session_id))
+                    break
         except Exception as exc:
             sys.stderr.write(f"[prismor] tool-deny error: {exc}\n")
 
@@ -290,14 +295,15 @@ def evaluate_tool_call(
     _org_denies = getattr(engine, "tool_denies", None)
     if _org_denies:
         try:
-            from prismor.runtime.scoped_agent import _resolve_tool_name
+            from prismor.runtime.scoped_agent import resolve_tool_tags
             from prismor.runtime.agents import make_agent_tool_deny_finding
-            _otn = _resolve_tool_name(event)
-            if _otn:
+            _otags = resolve_tool_tags(event)
+            if _otags:
                 for _d in _org_denies:
                     if not isinstance(_d, dict) or _d.get("action", "deny") != "deny":
                         continue
-                    if _d.get("tool") != _otn:
+                    _otn = _d.get("tool")
+                    if _otn not in _otags:
                         continue
                     _scope = _d.get("scope") or "org"
                     _sid = _d.get("scopeId")
@@ -326,13 +332,13 @@ def evaluate_tool_call(
     # which stay authoritative floors regardless of any allow.
     if _org_denies:
         try:
-            from prismor.runtime.scoped_agent import _resolve_tool_name
-            _otn2 = _resolve_tool_name(event)
-            if _otn2:
+            from prismor.runtime.scoped_agent import resolve_tool_tags
+            _otags2 = resolve_tool_tags(event)
+            if _otags2:
                 for _a in _org_denies:
                     if not isinstance(_a, dict) or _a.get("action") != "allow":
                         continue
-                    if _a.get("tool") != _otn2:
+                    if _a.get("tool") not in _otags2:
                         continue
                     _ascope = _a.get("scope") or "org"
                     _asid = _a.get("scopeId")

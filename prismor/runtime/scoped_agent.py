@@ -45,6 +45,55 @@ def _resolve_tool_name(event: Dict[str, Any]) -> Optional[str]:
     return _EVENT_TYPE_TO_TOOL.get(event.get("type", ""))
 
 
+# The tool tag a Claude Code skill invocation arrives under. Every skill shares
+# it — the specific skill lives in the tool_input, not the tag.
+_SKILL_TOOL = "Skill"
+
+# Qualified skill tags are namespaced so they can never collide with a real
+# tool tag, and so the console can classify them without a side-channel field.
+_SKILL_PREFIX = "Skill:"
+
+_MAX_SKILL_NAME = 120
+
+
+def resolve_skill_name(event: Dict[str, Any]) -> Optional[str]:
+    """Return the skill name for a ``Skill`` tool call, else None.
+
+    Every skill invocation shares the tool tag ``Skill``; the name that says
+    WHICH skill ran is only in the raw hook payload's tool_input. Without this
+    the whole skill surface collapses to one undifferentiated tag.
+    """
+    meta = event.get("metadata") or {}
+    raw = meta.get("raw")
+    if not isinstance(raw, dict):
+        return None
+    tool_input = raw.get("tool_input") or raw.get("toolInput") or {}
+    if not isinstance(tool_input, dict):
+        return None
+    name = tool_input.get("skill") or ""
+    if not isinstance(name, str):
+        return None
+    return name.strip()[:_MAX_SKILL_NAME] or None
+
+
+def resolve_tool_tags(event: Dict[str, Any]) -> List[str]:
+    """Tool tags this event may be inventoried or denied under.
+
+    Usually just the resolved tool name. A skill call additionally yields the
+    qualified ``Skill:<name>`` tag, so an operator can deny one skill without
+    denying the whole mechanism. The bare tag stays first: denying ``Skill``
+    must keep blocking every skill.
+    """
+    base = _resolve_tool_name(event)
+    if not base:
+        return []
+    if base == _SKILL_TOOL:
+        skill = resolve_skill_name(event)
+        if skill:
+            return [base, f"{_SKILL_PREFIX}{skill}"]
+    return [base]
+
+
 # ── Rule synthesis ─────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
