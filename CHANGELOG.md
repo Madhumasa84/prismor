@@ -1,3 +1,9 @@
+## [1.26.4] — 2026-07-14
+
+### Fixed
+
+- **Org tool-allow now overrides local restrictions.** The dashboard's "Allowed" toggle for a tool previously only meant "no org-level deny" — a local `.prismor/agents.yaml` deny or a session's synthesized scope could still silently block the call, so an admin's "Allowed" click sometimes appeared to do nothing. Org policy is now authoritative for tool access: an explicit org allow drops the matching local restriction, while the agent kill switch and a separate org-level deny stay non-overridable floors. See `docs/tool-access-precedence.md`.
+
 ## [1.26.3] — 2026-07-14
 
 ### Added
