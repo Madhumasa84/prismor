@@ -371,9 +371,13 @@
   .trail-meta { font-size: 10px; color: var(--gray-400); margin-bottom: 2px; display: flex; gap: 5px; flex-wrap: wrap; }
   .drawer-rule-row {
     display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
-    font-size: 11px;
+    font-size: 11px; min-width: 0; max-width: 100%;
   }
   .drawer-rule-label { color: var(--gray-400); min-width: 80px; flex-shrink: 0; }
+  .drawer-rule-row > div {
+    flex: 1; min-width: 0; max-width: 100%;
+    overflow-wrap: anywhere; word-break: break-word;
+  }
   .drawer-rule-tags  { display: flex; gap: 4px; flex-wrap: wrap; }
 
   /* Users list */
