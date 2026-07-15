@@ -1,3 +1,9 @@
+## [1.26.5] — 2026-07-15
+
+### Fixed
+
+- **Concurrent hook writes no longer corrupt the session log.** Several hook processes can fire for one tool call (`hook-dispatch` registered in both user and project settings, or parallel agents sharing a session id) and all append to the same session log. The record's JSON and its trailing newline were written as two separate calls, so a second writer could land between them and weld two records onto one line; large records also tore because they exceed the size below which appends are atomic. `read_session_events` then raised `JSONDecodeError` out of the hook path, so a single torn line failed every later tool call in that session and silently dropped policy enforcement until the log was hand-edited. Records are now written as one locked write, and logs already torn by earlier versions are salvaged on read instead of raising. See #197.
+
 ## [1.26.4] — 2026-07-14
 
 ### Fixed
