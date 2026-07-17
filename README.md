@@ -1,8 +1,6 @@
 <h1 align="center">Prismor</h1>
 
-<p align="center"><sub>formerly <strong>Immunity Agent</strong></sub></p>
-
-<h3 align="center">Runtime security hooks for Claude Code, Cursor, and other AI coding agents.<br>Blocks dangerous commands, prevents secret leaks, and stops prompt injection in real time.</h3>
+<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.<br>Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/prismor/"><img src="https://img.shields.io/pypi/v/prismor" alt="PyPI"/></a>
@@ -15,15 +13,8 @@
 
 <h3 align="center">
   <a href="https://prismor.dev"><b>Website</b></a> &bull;
-  <a href="SKILL.md"><b>Onboard with Skill</b></a> &bull;
-  <a href="docs/cli-reference.md"><b>CLI Reference</b></a> &bull;
-  <a href="docs/supply-chain.md"><b>Supply Chain</b></a> &bull;
-  <a href="docs/sweep-and-cloak.md"><b>Sweep & Cloak</b></a>
+  <a href="SKILL.md"><b>Onboard with Skill</b></a>
 </h3>
-
-<p align="center">
-  <img src="assets/warden-runtime-monitor.gif" width="90%" alt="Prismor Warden runtime monitor"/>
-</p>
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code"><picture><source media="(prefers-color-scheme: dark)" srcset="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/claude-code-white.svg"><img src="https://d205xtizsu1yjh.cloudfront.net/icons/coding-agents/claude-code.svg" width="20" height="20" alt="Claude Code" title="Claude Code"></picture></a>&nbsp;&nbsp;
@@ -43,21 +34,9 @@
 
 ---
 
-## Table of Contents
-
-- [The Problem](#the-problem)
-- [Capabilities](#capabilities)
-  - [Architecture](#how-it-works)
-- [Quick Start](#quick-start)
-- [Selected Capabilities, Walked Through](#selected-capabilities-walked-through)
-  - [Hybrid Semantic Prompt-Injection Defense](#hybrid-semantic-prompt-injection-defense)
-  - [Self-Hosted Dashboard](#self-hosted-dashboard)
-  - [Supply Chain Enforcement](#supply-chain-enforcement)
-- [Disabling Prismor](#disabling-prismor)
-- [Benchmarks](#benchmarks)
-- [Contributing](#contributing)
-
----
+<p align="center">
+  <img src="assets/readme-demo.gif" width="90%" alt="Prismor demo"/>
+</p>
 
 ## The Problem<a name="the-problem" />
 
@@ -295,7 +274,7 @@ prismor dashboard --no-open  # headless server only (was: prismor serve)
 
 Sessions, findings, threat categories, agent breakdowns, and a live event feed — all from local workspace DBs. No cloud.
 
-![Self-Hosted Dashboard](assets/self-serve-img.png)
+![Self-Hosted Dashboard](assets/self-hosted-dashboard.png)
 
 ### Supply Chain Enforcement<a name="supply-chain-enforcement" />
 

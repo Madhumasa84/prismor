@@ -46,6 +46,8 @@ prismor/runtime/hermes-plugin/
 *.swo
 .DS_Store
 assets/*
+!assets/readme-demo.gif
+!assets/self-hosted-dashboard.png
 experiments/*
 .agents/*node_modules/
 node_modules/
