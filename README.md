@@ -1,6 +1,6 @@
 <h1 align="center">Prismor</h1>
 
-<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.<br>Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages</h3>
+<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.<br>Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages<br>Prismor can also be used in observe mode to see agent session activity and dangerous actions in a local self-serve dashboard which grows by time</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/prismor/"><img src="https://img.shields.io/pypi/v/prismor" alt="PyPI"/></a>
@@ -88,47 +88,99 @@ These capabilities map to the [OWASP Top 10 for LLM Applications](https://genai.
 
 ### Architecture<a name="how-it-works" />
 
-How a tool call, a decloak, and a package install each flow through the modules above:
+How Prismor's local protections, evidence controls, and optional enterprise
+services fit together:
 
 ```mermaid
 flowchart TD
-    IDE["Your IDE / Agent\n(Claude Code · Cursor · Windsurf · Codex)"]
+    Agent["AI coding agents and production frameworks\nClaude Code · Codex · Cursor · OpenClaw · Hermes · SDKs"]
 
-    IDE -->|"PreToolUse / PostToolUse hooks"| Prismor
-
-    subgraph Prismor["Prismor Runtime Monitor"]
-        Policy["Policy Engine\n(YAML rules)"]
-        Session["Session Store\n(SQLite / JSONL)"]
-        Policy --> Session
+    subgraph Integrations["Integration surfaces"]
+        Hooks["Runtime Hooks\nIDE agents + OpenClaw integration"]
+        Hermes["Hermes Agent Cloaking\nplugin + paste guard"]
+        Frameworks["Framework Agents\nOpenAI Agents · LangChain/LangGraph · CrewAI\nbrowser-use · Vercel AI SDK"]
+        Eval["Eval Server\nHTTP adapter for any framework"]
     end
 
-    Prismor -->|"action permitted"| Allow["ALLOW\n+ log event"]
-    Prismor -->|"rule matched"| Block["BLOCK\n+ log finding"]
+    Agent --> Hooks
+    Agent --> Hermes
+    Agent --> Frameworks
+    Frameworks --> Eval
 
-    IDE -->|"PreToolUse hook\n(inject @@SECRET@@)"| Cloak
-    IDE -->|"PostToolUse hook\n(scrub output)"| Cloak
+    subgraph Runtime["Prismor local runtime"]
+        Dispatch["Tool-call dispatcher"]
 
-    subgraph Cloak["Cloak Secret Prevention"]
-        Store["Secrets Store\n(~/.prismor/secrets/)"]
-    Cloak_Hook["Resolve locally\n+ scrub output"]
-        Store --> Cloak_Hook
+        subgraph Enforcement["Pre-execution enforcement"]
+            Policy["Policy Engine\nYAML rules · observe/enforce"]
+            Semantic["Semantic Guard\nhybrid prompt-injection defense"]
+            Network["Network Isolation\negress allowlists · raw IP · tunnel blocking"]
+            MCP["MCP Guardrails\nallow · block · human approval"]
+            IAM["IAM and Agent Controls\nleast privilege · named agents · suspension"]
+            Scoped["Scoped Agent\ntask-specific session rules"]
+            Sandbox["Docker Sandbox\nisolated command execution"]
+        end
+
+        subgraph Protection["Secret and supply-chain protection"]
+            Cloak["Cloak\nlocal placeholder resolution + output scrub"]
+            Sweep["Sweep\nfind and vault leaked secret residue"]
+            Canary["Canary\nhoneytoken tripwires"]
+            Scanner["Skill Scanner\nMCP server and skill risk scanning"]
+            Supply["Supply Chain\nIOC matching + package risk scoring"]
+            Feed["Signed Advisory Feed\nPrismor intelligence + NVD"]
+        end
     end
 
-    Sweep["Sweep: Secret Cleanup\n(scan & redact AI tool caches)"]
-    IDE -.->|"offline scan"| Sweep
+    Hooks --> Dispatch
+    Hermes --> Cloak
+    Eval --> Dispatch
+    Dispatch --> Policy
+    Dispatch --> Cloak
+    Dispatch --> Canary
+    Policy -.-> Semantic
+    Policy -.-> Network
+    Policy -.-> MCP
+    Policy -.-> IAM
+    Policy -.-> Scoped
+    Policy -.-> Sandbox
+    Feed --> Supply
 
-    IDE -->|"prismor supplychain npm/pip/cargo..."| SC
+    Policy --> Verdict{"Allow · warn · block"}
+    Supply --> PackageManager["Package managers\nnpm · pip · cargo · go"]
 
-    subgraph SC["Supply Chain Install Enforcement"]
-        Scorer["Risk Scorer\n(age · maintainers · scripts)"]
-        IOC["IOC Database\n(known compromised packages)"]
-        Feed["Advisory Feed\n(Prismor / NVD)"]
-        Scorer --> IOC
-        Scorer --> Feed
+    subgraph Evidence["Visibility, evidence, and continuous improvement"]
+        Store["Session Store\nSQLite + JSONL · session forensics"]
+        Dashboard["Dashboard\nlocal web + terminal views"]
+        Audit["Security Audit\nhooks · policy · cloak · network posture"]
+        Trail["Signed Audit Trail\nhash chain + Ed25519 signatures"]
+        Attest["Attestation Bundle\nposture + framework-control coverage"]
+        Discovery["Host Discovery\nfind ungoverned agents (shadow AI)"]
+        Learning["Learning\npropose rules · flag false positives · detect evasion"]
+        Review["Agentic AI Architecture Review\ndesign-time control checklist"]
     end
 
-    SC -->|"score < 30"| PkgMgr["Package Manager\n(npm · pip · cargo · go...)"]
-    SC -->|"score >= 60 or IOC match"| SCBlock["BLOCK\n+ log to Prismor store"]
+    Verdict --> Store
+    Cloak --> Store
+    Sweep --> Store
+    Canary --> Store
+    Scanner --> Store
+    Supply --> Store
+    Store --> Dashboard
+    Store --> Audit
+    Store --> Trail
+    Trail --> Attest
+    Discovery --> Attest
+    Store --> Learning
+    Learning -.-> Policy
+
+    subgraph Enterprise["Optional self-hosted enterprise control plane"]
+        Layers["Layered Policy and Exemptions\norg · project · repo · time-boxed"]
+        Telemetry["Live Telemetry\nredacted events + offline spool"]
+        OrgDashboard["Organization Dashboard\npolicy, devices, sessions, approvals"]
+    end
+
+    Layers -->|"signed remote policy"| Policy
+    Store -->|"redacted telemetry"| Telemetry
+    Telemetry --> OrgDashboard
 ```
 
 ---
