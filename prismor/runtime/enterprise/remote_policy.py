@@ -228,9 +228,19 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_subject_sig is not None
         and str(latest_subject_sig) != str(_current_subject_controls_sig())
     )
+    # The device-level observe/enforce override (settings.device_mode) lives on
+    # the Device row server-side, not in any profile, so it never bumps the
+    # version — compare the raw value, like fullCapture, so a console toggle
+    # reaches this machine within one debounce interval.
+    latest_device_mode = body.get("deviceMode")
+    device_mode_changed = (
+        latest_device_mode is not None
+        and str(latest_device_mode) != _current_device_mode()
+    )
     if (version_changed or profile_changed or capture_changed
             or repos_changed or controls_changed or rule_ex_changed
-            or tool_denies_changed or subject_controls_changed):
+            or tool_denies_changed or subject_controls_changed
+            or device_mode_changed):
         return fetch(force=True)
     return False
 
@@ -344,6 +354,19 @@ def _current_tool_denies_sig() -> str:
             return ""
         import hashlib
         return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _current_device_mode() -> str:
+    """The cached policy's device-level mode override (settings.device_mode),
+    matching the server's deviceMode field: "observe", "enforce", or "" when
+    no override is set — so the device re-pulls the moment an admin flips or
+    clears the toggle in the console."""
+    try:
+        pol = verify_and_load()
+        mode = str(((pol or {}).get("settings") or {}).get("device_mode") or "").lower()
+        return mode if mode in ("observe", "enforce") else ""
     except Exception:
         return ""
 

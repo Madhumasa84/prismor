@@ -123,3 +123,29 @@ def test_override_cannot_drop_core_block_categories(tmp_path):
     assert "prompt_injection" in engine.block_categories  # tightening kept
     for cat in _CORE_BLOCK_CATEGORIES:
         assert cat in engine.block_categories  # core restored
+
+
+# ── device-level mode override propagation ──────────────────────────────
+
+
+def test_current_device_mode_parses_cached_policy(monkeypatch):
+    """_current_device_mode mirrors the server's deviceMode field: the cached
+    policy's settings.device_mode normalized to observe/enforce, else ""."""
+    from prismor.runtime.enterprise import remote_policy
+
+    monkeypatch.setattr(remote_policy, "verify_and_load", lambda: {"settings": {"device_mode": "Enforce"}})
+    assert remote_policy._current_device_mode() == "enforce"
+
+    monkeypatch.setattr(remote_policy, "verify_and_load", lambda: {"settings": {"device_mode": "observe"}})
+    assert remote_policy._current_device_mode() == "observe"
+
+    monkeypatch.setattr(remote_policy, "verify_and_load", lambda: {"settings": {}})
+    assert remote_policy._current_device_mode() == ""
+
+    # An unknown value must read as "no override", matching the engine's
+    # own validation — never a stuck re-pull loop on a junk value.
+    monkeypatch.setattr(remote_policy, "verify_and_load", lambda: {"settings": {"device_mode": "paused"}})
+    assert remote_policy._current_device_mode() == ""
+
+    monkeypatch.setattr(remote_policy, "verify_and_load", lambda: None)
+    assert remote_policy._current_device_mode() == ""
