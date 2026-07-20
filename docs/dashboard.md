@@ -95,6 +95,32 @@ agents within 30 s. The topbar also shows the **effective enforcement mode**
 (observe/enforce, merged across enterprise > project > global policy) at all
 times.
 
+### Approvals tab (human-in-the-loop)
+
+A policy rule with `action: step_up` doesn't allow or block — it holds the
+action for a human. On Claude and Copilot that's an inline "ask" in the
+terminal. For a **headless** agent (a framework worker, CI) with no one at the
+keyboard, the enterprise build routes the held action to the **Approvals** tab
+instead, so a person still decides:
+
+- **Pending queue** — each waiting request shows the tool, the reason the rule
+  gave, the exact call (`params`: command/args/URL — *what* runs, not just the
+  tool name), and the severity. The requesting agent is **blocked in-process**
+  the whole time, so this is time-sensitive: an unactioned request expires and
+  fails closed.
+- **Show context** — expands the run-up: the device and session it came from,
+  the conversation chain that led to the call (so you can read what the user
+  actually asked for), and the last tool calls before the step-up.
+- **Approve / Deny** — approve lets the waiting agent proceed; deny (with an
+  optional reason) fails it closed. Either way the decision is recorded on the
+  signed audit trail with who decided and why.
+- **Decision history** — a table of previously approved/denied requests and who
+  actioned each, with the full record on click.
+
+Approvals are **ADMIN+** only and scoped to your org. See the `step_up` action
+in [prismor-runtime.md](prismor-runtime.md#rule-actions) for how to write a rule that
+requires approval, and [audit-trail.md](audit-trail.md) for the approval records.
+
 ---
 
 ## Drilling in: `sessions` and `session`
