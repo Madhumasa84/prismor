@@ -1,3 +1,16 @@
+## [1.29.0] — 2026-07-19
+
+### Added
+
+- **Per-device observe/enforce override in the policy engine.** The signed policy can now carry `settings.device_mode`, a per-device kill switch scoped server-side to the requesting device. It wins over `rule.mode` and `default_mode` everywhere mode is resolved, but never downgrades the non-overridable enforce floor. Because the override lives on the Device row outside any policy-profile version, the version heartbeat now carries a `deviceMode` field and the runtime re-pulls the signed policy when it changes — a console toggle reaches the machine within one debounce interval.
+
+## [1.28.0] — 2026-07-19
+
+### Added
+
+- **Local pause/resume without uninstalling hooks.** `prismor pause [--for 30m]` suspends screening (hooks stay installed and fail open with a "paused" marker) and `prismor resume` re-arms it; timed pauses auto-expire. Devices report a "paused" status to the control plane. See #204.
+- **Scoped unblock steps on every enforcement block.** When a command is blocked, the block message now prints the narrowest concrete path to proceed — the exact `prismor unblock` invocation scoped to that rule/tool/session — instead of a generic pointer. New `prismor/runtime/unblock.py`. See #196.
+
 ## [1.27.0] — 2026-07-18
 
 ### Added
