@@ -68,5 +68,62 @@ class TestEnforcementFloor(unittest.TestCase):
         self.assertNotIn(noncore.id, _NON_OVERRIDABLE_RULE_IDS)
 
 
+class TestDeviceModeOverride(unittest.TestCase):
+    """settings.device_mode is a per-device kill switch delivered in the signed
+    policy (scoped server-side to the requesting device). It must win over
+    rule.mode/default_mode everywhere mode is resolved, but never over the
+    non-overridable enforce floor."""
+
+    def test_device_mode_enforce_flips_noncore_rule(self):
+        eng = _engine(
+            'version: "1.0"\nsettings:\n  default_mode: observe\n  device_mode: enforce\n'
+        )
+        noncore = next((r for r in eng.rules
+                        if r.category not in _CORE_BLOCK_CATEGORIES
+                        and r.id not in _NON_OVERRIDABLE_RULE_IDS
+                        and r.mode is None), None)
+        self.assertIsNotNone(noncore, "expected at least one non-core rule with no per-rule mode")
+        self.assertEqual(eng.device_mode, "enforce")
+
+    def test_device_mode_observe_cannot_downgrade_floor(self):
+        # A device pinned to observe (e.g. a pilot machine) must not weaken the
+        # non-overridable floor.
+        eng = _engine(
+            'version: "1.0"\nsettings:\n  default_mode: enforce\n  device_mode: observe\n'
+        )
+        findings = eng.evaluate({"type": "shell", "command": "rm -rf /"}, index=0)
+        floor = [f for f in findings if f.get("ruleId") == "destructive-command"]
+        self.assertTrue(floor)
+        self.assertEqual(floor[0]["mode"], "enforce", "device override must not downgrade the floor")
+
+    def test_device_mode_wins_over_per_rule_mode(self):
+        # Same resolution order evaluate() applies to a non-core finding:
+        # device_mode beats an explicit rule.mode.
+        eng = _engine('version: "1.0"\nsettings:\n  device_mode: observe\n')
+        noncore = next((r for r in eng.rules
+                        if r.category not in _CORE_BLOCK_CATEGORIES
+                        and r.id not in _NON_OVERRIDABLE_RULE_IDS), None)
+        self.assertIsNotNone(noncore)
+        eng2 = _engine(
+            'version: "1.0"\nsettings:\n  device_mode: observe\n'
+            f"rules:\n  - id: {noncore.id}\n    mode: enforce\n"
+        )
+        rule = next(r for r in eng2.rules if r.id == noncore.id)
+        floor_applies = rule.action == "block" and (
+            rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES
+        )
+        effective = "enforce" if floor_applies else (eng2.device_mode or rule.mode or eng2.default_mode)
+        self.assertEqual(rule.mode, "enforce")
+        self.assertEqual(effective, "observe", "device_mode must win over an explicit rule.mode")
+
+    def test_no_device_mode_falls_back_to_existing_behavior(self):
+        eng = _engine('version: "1.0"\nsettings:\n  default_mode: observe\n')
+        self.assertIsNone(eng.device_mode)
+
+    def test_invalid_device_mode_ignored(self):
+        eng = _engine('version: "1.0"\nsettings:\n  device_mode: paused\n')
+        self.assertIsNone(eng.device_mode)
+
+
 if __name__ == "__main__":
     unittest.main()

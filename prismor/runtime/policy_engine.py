@@ -621,6 +621,16 @@ class PolicyEngine:
         # flips rules (or this) to enforce.
         _dm = settings.get("default_mode") or settings.get("mode") or "observe"
         self.default_mode: str = str(_dm).lower()
+        # Per-device observe/enforce override, delivered in the signed policy
+        # already scoped server-side to this device (see remote_policy.py /
+        # the control plane's device settings). A fleet-wide kill switch for
+        # one machine: wins over rule.mode and default_mode everywhere mode is
+        # resolved below, but never the non-overridable enforce floor (core
+        # rule IDs / core block categories / intrinsic hard-floor findings).
+        _dev_mode = settings.get("device_mode")
+        self.device_mode: Optional[str] = (
+            str(_dev_mode).lower() if str(_dev_mode).lower() in ("observe", "enforce") else None
+        )
         # Did the operator explicitly adopt the per-rule observe/enforce model?
         # Used by the backward-compat enforce bridge (see is_legacy_policy).
         self._default_mode_explicit: bool = ("default_mode" in settings) or ("mode" in settings)
@@ -796,7 +806,7 @@ class PolicyEngine:
                         rule.action == "block"
                         and (rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES)
                     )
-                    else (rule.mode or self.default_mode)
+                    else (self.device_mode or rule.mode or self.default_mode)
                 ),
             })
 
@@ -1182,7 +1192,7 @@ class PolicyEngine:
                     _ledger = TagLedger(self.workspace, session_id)
                     _done = _ledger.completes(_tags, _incompat, index)
                     if _done is not None:
-                        _tt_mode = str(self.tool_tags.get("mode", "observe")).lower()
+                        _tt_mode = self.device_mode or str(self.tool_tags.get("mode", "observe")).lower()
                         _intro = _done.get("introduced_by") or {}
                         _prior = ", ".join(
                             f"{_t} (by '{(_intro.get(_t) or {}).get('tool', '?')}')"
@@ -1357,9 +1367,10 @@ class PolicyEngine:
             "safe_version": _sv.version if _sv else None,
             "remediation": f"Use {_sv.version} instead ({_sv.reason})" if _sv else None,
             # Same default as every other dependency_risk rule: no per-rule
-            # override exists here, so inherit the policy's default_mode
-            # exactly as a YAML rule without an explicit `mode` would.
-            "mode": self.default_mode,
+            # override exists here, so inherit the device override (if any)
+            # or the policy's default_mode, exactly as a YAML rule without an
+            # explicit `mode` would.
+            "mode": self.device_mode or self.default_mode,
         }
 
     def _check_supply_chain(
