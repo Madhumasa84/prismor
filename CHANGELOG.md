@@ -1,3 +1,15 @@
+## [1.30.0] — 2026-07-21
+
+### Added
+
+- **MCP Gateway (`prismor mcp-gateway`).** One MCP connector that fronts every downstream MCP server: point any MCP client (Claude Code, Cursor, Codex, …) at a single `prismor` entry and move the existing `mcpServers` block behind it (`prismor mcp-gateway install` automates the migration, with backup). Every `tools/call` runs through `evaluate_tool_call` before forwarding — org tool denies, tool-category crossover, IAM, policy rules — and every tool **result** is injection-scanned before the model sees it. Denials return MCP `isError` results carrying the block reason and rule id so the agent can adapt. Tools are exposed as `<server>__<tool>` while events record `mcp__<server>__<tool>` with the real server name, so existing matchers and console inventory apply unchanged. Supports stdio and streamable-HTTP/SSE upstreams, aggregator and single-upstream shim modes, with zero new dependencies. See #207.
+- **Resumable gateway sessions.** `prismor mcp-gateway --session-id` (or `PRISMOR_SESSION_ID`) pins a stable session id so hosted deployments that restore session state across restarts keep one continuous session — a fresh id per boot would orphan the restored trifecta ledger and reopen the wait-out-the-restart bypass. See #207.
+
+### Fixed
+
+- **Trifecta ledger poisoning (security).** A blocked call's tags were recorded in the session ledger anyway, marking the forbidden set as already covered — so after one denied critical call, every later same-tagged call was waved through. Additionally, `completes()` never fired on sets already fully present, turning an observe-period or restored ledger into a permanent bypass after flipping to enforce. Blocked enforce-mode crossover calls no longer record their tags, and a session that has entered the forbidden state stays restricted. See #207.
+- **HTTP MCP upstreams behind CDNs.** The gateway's upstream client now sends a real `User-Agent` (`prismor-gateway/<version>`); urllib's default was rejected outright by common WAFs (Cloudflare returned 403 before the request reached the MCP server). See #207.
+
 ## [1.29.0] — 2026-07-19
 
 ### Added
