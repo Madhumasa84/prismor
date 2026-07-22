@@ -1,3 +1,9 @@
+## [1.30.1] — 2026-07-22
+
+### Fixed
+
+- **Control-plane requests now send a real User-Agent.** Every enterprise HTTP call (policy version/pull, telemetry upload, enrollment, approvals, sink deliveries) used urllib's default `Python-urllib/x.y` UA, which CDN/WAF fronts reject before the request reaches the app — Cloudflare's browser integrity check returns 403 (error 1010). The runtime interpreted that 403 as key revocation and silently stopped telemetry and policy sync. Found live when prismor.dev moved behind a proxying CDN; all outbound requests now identify as `prismor-runtime/<version>`.
+
 ## [1.30.0] — 2026-07-21
 
 ### Added
