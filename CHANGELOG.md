@@ -1,3 +1,12 @@
+## [1.30.3] — 2026-07-22
+
+### Docs
+
+- **MCP Gateway: per-tool and per-user governance.** Documented turning off
+  individual tools of a server for the whole org (`settings.tool_denies`) or
+  for one person (`settings.subject_controls` deny_tools), managed from the
+  console MCP Hub and enforced by every gateway. See docs/mcp-gateway.md.
+
 ## [1.30.2] — 2026-07-22
 
 ### Docs

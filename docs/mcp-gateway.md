@@ -101,6 +101,22 @@ defaults (`mcp__*__send_email`), org tool denies, tool-tag rules pushed from
 the control plane, and the console's tool inventory. One gateway process is
 one Prismor session; the trifecta ledger spans your whole agent session.
 
+## Governing tools (admins)
+
+Beyond blocking a whole server, an admin can turn off **individual tools** —
+for everyone, or for one person — from the console **MCP Hub** (per-server
+*Tools* panel):
+
+- **For everyone:** an org-scoped tool deny on `mcp__<server>__<tool>`. It
+  rides the signed org policy, so it applies to every gateway — local and
+  hosted alike. The same thing can be set as code in `policy.yaml`
+  (`settings.tool_denies`) and shipped with `prismor-cli policy apply`.
+- **For one person:** a per-user rule (`settings.subject_controls` →
+  `deny_tools` for `user:<id>`). It applies when the gateway runs under that
+  person's subject — a hosted instance bound to them, or `PRISMOR_SUBJECT`
+  set locally. A denied tool is blocked before it reaches the server, with the
+  usual `isError` reason returned to the model.
+
 ## Hosted instances (Enterprise)
 
 Everything above runs the gateway **locally** on your machine — available on
