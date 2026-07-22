@@ -1,3 +1,14 @@
+## [1.30.2] — 2026-07-22
+
+### Docs
+
+- **Hosted MCP instances (Enterprise).** Documented the managed-edge option
+  for the gateway: from the console's MCP Hub, Enterprise orgs can provision a
+  governed `mcp.prismor.dev/mcp/<key>` URL — the same real policy engine and
+  telemetry as the local gateway, running on Prismor's fleet, with the
+  registry's servers attached and secrets kept server-side. The local
+  `prismor mcp-gateway` remains available on every plan. See docs/mcp-gateway.md.
+
 ## [1.30.1] — 2026-07-22
 
 ### Fixed

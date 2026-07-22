@@ -101,6 +101,36 @@ defaults (`mcp__*__send_email`), org tool denies, tool-tag rules pushed from
 the control plane, and the console's tool inventory. One gateway process is
 one Prismor session; the trifecta ledger spans your whole agent session.
 
+## Hosted instances (Enterprise)
+
+Everything above runs the gateway **locally** on your machine — available on
+every plan. Enterprise adds a **hosted** option: from the MCP Hub in the
+console, *Spin up MCP instance* provisions a governed MCP URL on Prismor's
+managed edge:
+
+```
+https://mcp.prismor.dev/mcp/<instance-key>
+```
+
+Paste that one URL into any agent, on any machine — no local install. The
+servers you registered in the Hub are attached automatically (their secrets
+stay server-side, encrypted at rest and only ever decrypted for the fleet).
+The instance is a service identity, so the full control loop applies: every
+call is policy-evaluated and streamed to your Activity feed, an admin can flip
+it between observe/enforce from the console, and revoking it is an instant kill
+switch. The instance key *is* the credential in the URL — treat it like a
+secret; it's shown only once.
+
+Local gateway vs hosted instance:
+
+| | Local (`prismor mcp-gateway`) | Hosted instance |
+|---|---|---|
+| Plan | Any | Enterprise |
+| Runs on | Your machine | Prismor edge (mcp.prismor.dev) |
+| Setup | CLI / config file | One click, paste a URL |
+| Secrets | In your local config | Encrypted server-side |
+| Telemetry / policy / kill switch | Yes (enrolled) | Yes (built in) |
+
 ## Notes
 
 - The gateway config may contain tokens in `env` blocks; `install` writes it
