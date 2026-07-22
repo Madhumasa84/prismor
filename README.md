@@ -1,6 +1,8 @@
 <h1 align="center">Prismor</h1>
 
-<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.<br>Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages<br>Prismor can also be used in observe mode to see agent session activity and dangerous actions in a local self-serve dashboard which grows by time</h3>
+<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.</h3>
+
+<h5 align="center">Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages <br><br>Prismor can also be used in observe mode to see agent session activity and dangerous actions in a local self-serve dashboard which grows by time</h4>
 
 <p align="center">
   <a href="https://pypi.org/project/prismor/"><img src="https://img.shields.io/pypi/v/prismor" alt="PyPI"/></a>
@@ -324,9 +326,12 @@ prismor dashboard --port 8080
 prismor dashboard --no-open  # headless server only (was: prismor serve)
 ```
 
-Sessions, findings, threat categories, agent breakdowns, and a live event feed — all from local workspace DBs. No cloud.
+Sessions, findings, threat categories, agent breakdowns, and a live event feed - all from local workspace DBs. No cloud.
 
-![Self-Hosted Dashboard](assets/self-hosted-dashboard.png)
+<h3>Self hosted dashboard </h3>
+
+<img width="1500" height="771" alt="image" src="https://github.com/user-attachments/assets/258e4437-205d-495a-b33b-a2f5aeeae2ca" />
+
 
 ### Supply Chain Enforcement<a name="supply-chain-enforcement" />
 
