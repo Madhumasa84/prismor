@@ -1,9 +1,9 @@
 ---
-name: immunity-agent
+name: prismor
 description: Runtime security for AI coding agents. Use when about to install a package, paste a secret, run a destructive command, set up a new workspace, or recover from a Prismor block.
 ---
 
-# immunity-agent: Runtime Security Skill
+# prismor: Runtime Security Skill
 
 You are a coding agent. This skill keeps your tool calls safe: it blocks
 destructive shell commands, scores package installs against a live IOC feed,
@@ -70,7 +70,7 @@ prismor setup            # interactive 4-step TUI
 ```
 
 For Claude Code, `prismor setup` also drops this skill into
-`<workspace>/.claude/skills/immunity-agent/` so it travels with the project —
+`<workspace>/.claude/skills/prismor/` so it travels with the project —
 that's where this file came from if you're reading it locally.
 
 Non-interactive / CI / piped:
