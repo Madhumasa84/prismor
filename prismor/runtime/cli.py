@@ -271,10 +271,66 @@ def main(argv: Optional[List[str]] = None) -> None:
             _remote.fetch(force=True)
         except Exception:
             pass
-        org = ident.get("org_name") or ident.get("org_id")
-        print(f"Enrolled this machine ({ident.get('label')}) into org: {org}")
-        print(f"  device id: {ident.get('device_id')}")
-        print("  Telemetry is redacted by default. An admin can enable full capture per org.")
+        org = ident.get("org_name") or ident.get("org_id") or "unknown"
+
+        # Gather local state (hooks/mode/cloak/rules) the same way `prismor status` does,
+        # so the confirmation box reflects what's actually installed on this machine.
+        agents_with_hooks: List[str] = []
+        mode: Optional[str] = None
+        for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok"):
+            hook_path = _find_hook_config(agent_name, workspace)
+            if hook_path and hook_path.exists():
+                try:
+                    content = hook_path.read_text()
+                    if "prismor" in content.lower():
+                        agents_with_hooks.append(agent_name)
+                        if mode is None:
+                            if "--mode enforce" in content:
+                                mode = "enforce"
+                            elif "--mode observe" in content:
+                                mode = "observe"
+                except Exception:
+                    pass
+
+        cloak_installed = False
+        cloak_secret_count = 0
+        try:
+            from prismor.runtime.cloaking import status as _cloak_status_fn, list_secrets as _list_secrets
+            cinfo = _cloak_status_fn(workspace=workspace, scope="project")
+            cloak_installed = bool(cinfo.get("installed"))
+            cloak_secret_count = len(_list_secrets())
+        except Exception:
+            pass
+
+        rules_active = 0
+        try:
+            rules_active = len(PolicyEngine(workspace=workspace).rules)
+        except Exception:
+            pass
+
+        full_capture = False
+        try:
+            from prismor.runtime.enterprise import remote_policy as _remote2
+            meta_path = _remote2._meta_path()
+            if meta_path.exists():
+                import json as _json
+                full_capture = bool(_json.loads(meta_path.read_text(encoding="utf-8")).get("full_capture"))
+        except Exception:
+            pass
+
+        from prismor.runtime.tui_format import print_enroll_summary
+        print_enroll_summary(
+            workspace=workspace,
+            org=str(org),
+            device_label=str(ident.get("label")),
+            device_id=str(ident.get("device_id")),
+            mode=mode,
+            agents=agents_with_hooks,
+            rules_active=rules_active,
+            cloak_installed=cloak_installed,
+            cloak_secret_count=cloak_secret_count,
+            full_capture=full_capture,
+        )
         # One continuous flow: link the machine → guard it. Offer to install the
         # agent hooks now. Enforcement is governed by the signed policy from here
         # on, so the admin controls observe/enforce from the console with no
