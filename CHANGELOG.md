@@ -1,3 +1,13 @@
+## [1.33.0] — 2026-07-23
+
+### Added
+
+- **Enrollment guards the whole machine, not just one project.** An enrolled device is now installed at GLOBAL scope by default — the post-enroll prompt offers to guard every project (`~/.claude` etc.), and `prismor setup --scope global` (or `PRISMOR_SCOPE=global`) does it non-interactively. This closes the gap where an agent escaped governance simply by working in an un-hooked directory. `prismor enroll-status` now reports per-agent hook coverage and flags any UNGUARDED agent with the fix command; on a policy refresh the runtime self-heals by re-asserting the global hook for a detected agent that has none (`prismor/runtime/hooks.py`: `coverage`/`unguarded_agents`/`ensure_global_coverage`). Global-scope install at enroll is the primary guarantee; self-heal is defense-in-depth. (#210)
+
+### Changed
+
+- **The paused heartbeat follows the user, not a 30-second timer.** A paused device emitted a "Prismor paused locally" heartbeat every ~30s of tool activity, so a long paused session flooded the Activity feed with dozens of identical rows. It now beats only on a user-turn boundary (a prompt submit / session start) — roughly one "still paused" per message — with a 60s floor to coalesce rapid messages. An idle paused machine stays quiet and beats again the moment the user acts.
+
 ## [1.32.1] — 2026-07-23
 
 ### Fixed
