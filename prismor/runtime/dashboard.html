@@ -12,10 +12,10 @@
 <script>
   (function () {
     try {
-      var theme = localStorage.getItem('prismor-dashboard-theme') || 'light';
-      document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+      var theme = localStorage.getItem('prismor-dashboard-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
     } catch (_) {
-      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.setAttribute('data-theme', 'dark');
     }
   })();
 </script>
@@ -53,28 +53,28 @@
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   html[data-theme="dark"] {
-    --gray-50: #020617; --gray-100: #0f172a; --gray-200: #1e293b;
-    --gray-300: #334155; --gray-400: #64748b; --gray-500: #94a3b8;
-    --gray-600: #cbd5e1; --gray-700: #e2e8f0; --gray-800: #f8fafc; --gray-900: #ffffff;
-    --app-bg: #020617;
-    --surface: #0f172a;
-    --surface-muted: #111827;
-    --surface-strong: #162033;
-    --overlay: rgba(2,6,23,0.72);
-    --accent: #8ba4ff;
-    --chart-text: #94a3b8;
-    --chart-grid: #1e293b;
-    --chart-passed: #475569;
+    --gray-50: #1a1a1d; --gray-100: #202024; --gray-200: #2c2c33;
+    --gray-300: #3d3d45; --gray-400: #86868d; --gray-500: #a9a9af;
+    --gray-600: #cfcfd2; --gray-700: #e8e8ea; --gray-800: #f7f7f8; --gray-900: #ffffff;
+    --app-bg: #050506;
+    --surface: #131316;
+    --surface-muted: #0c0c0e;
+    --surface-strong: #1e1e23;
+    --overlay: rgba(3,3,3,0.72);
+    --accent: #f2542d;
+    --chart-text: #95959a;
+    --chart-grid: #1c1c1f;
+    --chart-passed: #4b4b52;
     --chart-intercepted: #f9a8d4;
     --chart-bar-warm: #fbbf24;
     --chart-bar-cool: #38bdf8;
-    --chart-bar-hot: #fb7185;
-    --chart-palette-1: #818cf8;
+    --chart-bar-hot: #f2542d;
+    --chart-palette-1: #f2542d;
     --chart-palette-2: #f472b6;
     --chart-palette-3: #fbbf24;
     --chart-palette-4: #38bdf8;
     --chart-palette-5: #34d399;
-    --chart-palette-6: #f87171;
+    --chart-palette-6: #fb7185;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -371,13 +371,9 @@
   .trail-meta { font-size: 10px; color: var(--gray-400); margin-bottom: 2px; display: flex; gap: 5px; flex-wrap: wrap; }
   .drawer-rule-row {
     display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
-    font-size: 11px; min-width: 0; max-width: 100%;
+    font-size: 11px;
   }
   .drawer-rule-label { color: var(--gray-400); min-width: 80px; flex-shrink: 0; }
-  .drawer-rule-row > div {
-    flex: 1; min-width: 0; max-width: 100%;
-    overflow-wrap: anywhere; word-break: break-word;
-  }
   .drawer-rule-tags  { display: flex; gap: 4px; flex-wrap: wrap; }
 
   /* Users list */
@@ -1331,6 +1327,90 @@
     font-size: 12px !important;
   }
 
+  /* ═══════════════════════════════════════════════════════════════════
+     AGENTOS LAYER — left sidebar nav + breadcrumb top bar, dark-first,
+     dense uppercase tables. Appended last so single-class overrides win
+     on source order (same convention as the Material layer above).
+     ═══════════════════════════════════════════════════════════════════ */
+  :root {
+    --sidebar-w: 212px;
+    --md-primary: #f2542d; --md-primary-d: #d6431f; --md-primary-soft: rgba(242,84,45,.12);
+    --accent: #f2542d;
+  }
+  body { background: var(--app-bg); }
+
+  .tab-nav {
+    position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w);
+    background: var(--surface); border-bottom: none; border-right: 1px solid var(--gray-200);
+    display: flex; flex-direction: column; gap: 2px; padding: 14px 10px;
+    overflow-y: auto; z-index: 90;
+  }
+  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 12px; }
+  .sidebar-brand .topbar-logo { display: block; width: 20px; height: 20px; }
+  .sidebar-brand-name { font-size: 13px; font-weight: 700; color: var(--gray-900); }
+  .tab-nav .mode-chip { margin: 0 6px 14px; align-self: flex-start; }
+  .tab-nav .tab-btn {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 500;
+    color: var(--gray-500); text-align: left; text-transform: none; letter-spacing: 0;
+    border-bottom: none; background: none; box-shadow: none;
+  }
+  .tab-nav .tab-btn .icon { width: 15px; height: 15px; flex-shrink: 0; }
+  .tab-nav .tab-btn:hover { background: rgba(255,255,255,.045); color: var(--gray-800); }
+  .tab-nav .tab-btn.active {
+    background: var(--md-primary-soft); color: var(--md-primary); font-weight: 600;
+    border-bottom: none; box-shadow: none; border-radius: 6px 7px 7px 6px;
+  }
+  .tab-nav .tab-lock { margin-left: auto; }
+
+  .topbar, .page, .prismor-cta { margin-left: var(--sidebar-w); }
+  .topbar {
+    height: 44px; padding: 0 20px; background: var(--surface);
+    border-bottom: 1px solid var(--gray-200); box-shadow: none;
+  }
+  .topbar-left { gap: 8px; }
+  .topbar h1 { font-size: 12.5px; font-weight: 500; color: var(--gray-500); }
+  .topbar .topbar-logo { display: none; }
+  #breadcrumbLabel { font-size: 12.5px; font-weight: 600; color: var(--gray-900); }
+
+  /* dense rows, uppercase headers, full-row hover to match the reference table */
+  th { text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding: 0 18px 10px 0; }
+  td { padding: 11px 18px 11px 0; }
+  tbody tr:hover td { background: rgba(255,255,255,.035); }
+  .sess-checkbox { width: 28px; accent-color: var(--md-primary); cursor: pointer; }
+
+  html[data-theme="dark"] .upgrade-btn {
+    background: var(--surface-strong); color: var(--gray-700); border: 1px solid var(--gray-300);
+  }
+  html[data-theme="dark"] .upgrade-btn:hover { background: var(--gray-200); opacity: 1; }
+  html[data-theme="dark"] .btn-primary { background: var(--md-primary); color: #fff; }
+  html[data-theme="dark"] .btn-primary:hover { background: var(--md-primary-d); }
+  html[data-theme="dark"] .pg-btn, html[data-theme="dark"] .pg-num.cur {
+    background: var(--surface-strong); color: var(--gray-700); border-color: var(--gray-300);
+  }
+  html[data-theme="dark"] .pg-num.cur { background: var(--md-primary); border-color: var(--md-primary); color: #fff; }
+
+  /* Policy precedence ranking — number badge + connecting arrow between layers */
+  .prec-row { display: flex; align-items: stretch; gap: 10px; }
+  .prec-row .drawer-policy-card { flex: 1; min-width: 0; margin-bottom: 0; }
+  .prec-rank {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--surface-strong); border: 1px solid var(--gray-300);
+    color: var(--gray-600); font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .prec-arrow {
+    margin: 2px 0 6px 11px; font-size: 12px; line-height: 1;
+    color: var(--gray-400); border-left: 1px dashed var(--gray-300);
+    height: 14px; padding-left: 7px; display: flex; align-items: center;
+  }
+
+  @media (max-width: 900px) {
+    .tab-nav { width: 60px; }
+    .tab-nav .tab-btn span, .sidebar-brand-name { display: none; }
+    .topbar, .page, .prismor-cta { margin-left: 60px; }
+  }
+
 </style>
 </head>
 <body>
@@ -1354,37 +1434,67 @@
   <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
 </svg>
 
-<!-- ═══ TOP BAR ═══════════════════════════════════════════════════ -->
+<!-- ═══ SIDEBAR ═══════════════════════════════════════════════════ -->
+<div class="tab-nav">
+  <div class="sidebar-brand">
+    <img class="topbar-logo" src="https://prismor.dev/Prismor_Logo.png" alt="Prismor" />
+    <span class="sidebar-brand-name">Prismor</span>
+  </div>
+  <button id="modeChip" class="mode-chip unknown" onclick="gotoPolicy()"
+          title="Effective enforcement mode — click to manage in Policy Control">
+    <span class="badge-dot"></span><span id="modeChipLabel">mode</span>
+  </button>
+  <button class="tab-btn active" data-tab="overview" data-label="Overview"><svg class="icon"><use href="#i-home"/></svg><span>Overview</span></button>
+  <button class="tab-btn" data-tab="agents" data-label="Agents"><svg class="icon"><use href="#i-bot"/></svg><span>Agents</span></button>
+  <button class="tab-btn" data-tab="sessions" data-label="Sessions"><svg class="icon"><use href="#i-radio"/></svg><span>Sessions</span></button>
+  <button class="tab-btn" data-tab="mcp" data-label="MCP Playground"><svg class="icon"><use href="#i-database"/></svg><span>MCP Playground</span></button>
+  <button class="tab-btn" data-tab="policy" data-label="Policy Control"><svg class="icon"><use href="#i-shield"/></svg><span>Policy Control</span></button>
+  <button class="tab-btn" data-tab="fleet" data-label="Fleet"><svg class="icon"><use href="#i-building"/></svg><span>Fleet</span><span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
+</div>
+
+<!-- ═══ TOP BAR (breadcrumb) ══════════════════════════════════════ -->
 <div class="topbar">
   <div class="topbar-left">
-    <img class="topbar-logo" src="https://prismor.dev/Prismor_Logo.png" alt="Prismor" />
-    <h1>Prismor</h1>
-    <button id="modeChip" class="mode-chip unknown" onclick="gotoPolicy()"
-            title="Effective enforcement mode — click to manage in Policy Control">
-      <span class="badge-dot"></span><span id="modeChipLabel">mode</span>
-    </button>
+    <h1>Local Prismor</h1>
+    <span class="breadcrumb-sep">/</span>
+    <span id="breadcrumbLabel">Overview</span>
   </div>
   <div class="topbar-right">
     <span id="lastUpdated" class="last-updated"></span>
     <span id="statusBadge" class="badge badge-demo"><span class="badge-dot"></span> loading</span>
     <button id="themeToggle" class="theme-toggle" type="button" onclick="toggleTheme()" aria-pressed="false" title="Switch theme">
       <span class="theme-toggle-dot"></span>
-      <span id="themeToggleLabel">Light</span>
+      <span id="themeToggleLabel">Dark</span>
     </button>
     <button id="refreshBtn" class="upgrade-btn" onclick="refreshDashboard()"><svg class="icon"><use href="#i-refresh"/></svg> Refresh</button>
     <button class="upgrade-btn" onclick="openUpgradeModal()"><svg class="icon"><use href="#i-sparkles"/></svg> Upgrade</button>
   </div>
 </div>
 
-<!-- ═══ TAB NAV ═══════════════════════════════════════════════════ -->
-<div class="tab-nav">
-  <button class="tab-btn active" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="agents">Agents</button>
-  <button class="tab-btn" data-tab="sessions">Sessions</button>
-  <button class="tab-btn" data-tab="policy">Policy Control</button>
-  <button class="tab-btn" data-tab="fleet">Fleet<span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
+<!-- ═══ PAGE: MCP PLAYGROUND ══════════════════════════════════════ -->
+<div id="page-mcp" class="page">
+  <div class="section"><h2>MCP Playground</h2><div class="rule"></div>
+    <span class="hint">Claude Code tool access — every call is evaluated by Prismor before delivery.</span>
+  </div>
+  <div class="grid grid-1-2">
+    <div class="card">
+      <div class="card-title">Demo MCP server</div>
+      <div id="mcpServerMeta" style="font:12px var(--font-mono);color:var(--gray-600);margin-bottom:14px">Loading…</div>
+      <div class="bar"><input id="mcpNewTool" class="fsel" style="flex:1" placeholder="e.g. lookup_customer" />
+        <button class="btn-primary" onclick="mcpAddTool()">Add tool</button></div>
+      <div id="mcpTools"></div>
+      <button class="btn-ghost" style="margin-top:14px" onclick="mcpReset()">Reset playground</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Delivery log</div>
+      <p style="font-size:11px;color:var(--gray-500);line-height:1.55;margin-bottom:12px">Enabled/denied writes the project-level policy for the <code>claude</code> agent and syncs the tool into active session scopes. A denied call is recorded by Prismor but never reaches the local MCP server.</p>
+      <div id="mcpResult" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">Choose a tool to invoke it.</div>
+      <div id="mcpDelivered" style="font:12px var(--font-mono);color:var(--gray-600)"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -1523,38 +1633,6 @@
             <th class="right">Blocked</th><th>When</th>
           </tr></thead>
           <tbody id="scSessionsBody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>Token Usage</h2><div class="rule"></div><span id="hintTokens" class="hint">last 24h · Claude Code</span>
-  </div>
-
-  <div class="grid grid-4">
-    <div class="card"><div class="card-title">Input Tokens</div><div id="tkInput" class="kpi-value">-</div></div>
-    <div class="card"><div class="card-title">Output Tokens</div><div id="tkOutput" class="kpi-value">-</div></div>
-    <div class="card"><div class="card-title">Cache Read</div><div id="tkCacheRead" class="kpi-value" style="color:var(--green-500)">-</div><div id="tkHitRate" class="hint">-</div></div>
-    <div class="card"><div class="card-title">Total Tokens</div><div id="tkTotal" class="kpi-value accent">-</div></div>
-  </div>
-
-  <div class="grid grid-1-2">
-    <div class="card">
-      <div class="card-title">Where It's Going — by Tool</div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead><tr><th>Tool</th><th class="right">Approx. Tokens</th><th class="right">Calls</th></tr></thead>
-          <tbody id="tkByToolBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Biggest Individual Tool Calls</div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead><tr><th>Tool</th><th>Detail</th><th class="right">Approx. Tokens</th></tr></thead>
-          <tbody id="tkOffendersBody"></tbody>
         </table>
       </div>
     </div>
@@ -1748,6 +1826,7 @@
       <table>
         <thead id="sessThead">
           <tr>
+            <th style="width:28px;padding-right:8px"><input type="checkbox" class="sess-checkbox" onclick="event.stopPropagation()" /></th>
             <th data-col="sessionId">Session<span class="sort-ind">↕</span></th>
             <th data-col="agent">Agent<span class="sort-ind">↕</span></th>
             <th data-col="workspace">Workspace<span class="sort-ind">↕</span></th>
@@ -2264,6 +2343,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     const tabId = 'page-' + btn.dataset.tab;
     document.getElementById(tabId)?.classList.add('active');
+    const crumb = document.getElementById('breadcrumbLabel');
+    if (crumb) crumb.textContent = btn.dataset.label || btn.textContent.trim();
 
     if (btn.dataset.tab === 'sessions') {
       // Render from cache instantly, refresh in background
@@ -2286,8 +2367,43 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       if (_agentsCache) renderAgents(_agentsCache);
       loadAgents();           // silent background refresh
     }
+    if (btn.dataset.tab === 'mcp') loadMcpPlayground();
   });
 });
+
+let _mcpPlayground = null;
+async function loadMcpPlayground() {
+  try { _mcpPlayground = await apiFetch('/api/mcp-playground'); renderMcpPlayground(_mcpPlayground); }
+  catch (e) { toast('Could not load MCP playground: ' + e.message, true); }
+}
+function renderMcpPlayground(data) {
+  document.getElementById('mcpServerMeta').textContent = data.server + ' · session ' + data.sessionId;
+  const tools = data.tools || [];
+  document.getElementById('mcpTools').innerHTML = tools.map(t =>
+    '<div class="drawer-rule-row" style="padding:8px 0;border-bottom:1px solid var(--gray-100)">' +
+    '<code>' + safe(t.name) + '</code><span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+    '<label style="font-size:11px"><input type="checkbox" ' + (t.enabled ? 'checked' : '') + ' onchange="mcpSetEnabled(\'' + safeJsArg(t.name) + '\', this.checked)"> enabled</label>' +
+    '<button class="btn-ghost" style="padding:4px 8px" onclick="mcpCall(\'' + safeJsArg(t.name) + '\')">Invoke</button></span></div>').join('');
+  const calls = data.delivered || [];
+  document.getElementById('mcpDelivered').textContent = calls.length ? 'Delivered: ' + calls.join(', ') : 'No calls delivered yet.';
+}
+async function mcpRequest(body) {
+  const result = await apiFetch('/api/mcp-playground', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (result.state) _mcpPlayground = result.state; else _mcpPlayground = result;
+  renderMcpPlayground(_mcpPlayground); return result;
+}
+async function mcpAddTool() {
+  const input = document.getElementById('mcpNewTool'), name = input.value.trim(); if (!name) return;
+  try { await mcpRequest({action:'add', name}); input.value = ''; toast('MCP tool added'); } catch (e) { toast(e.message, true); }
+}
+async function mcpSetEnabled(name, enabled) {
+  try { await mcpRequest({action:'set-enabled', name, enabled}); toast(name + (enabled ? ' enabled' : ' denied')); } catch (e) { toast(e.message, true); }
+}
+async function mcpCall(name) {
+  try { const r = await mcpRequest({action:'call', name}); document.getElementById('mcpResult').textContent = r.allowed ? name + ' allowed and delivered.' : name + ' blocked before delivery: ' + (r.reason || 'denied by policy'); toast(r.allowed ? 'MCP call delivered' : 'MCP call blocked', !r.allowed); }
+  catch (e) { toast(e.message, true); }
+}
+async function mcpReset() { try { await mcpRequest({action:'reset'}); document.getElementById('mcpResult').textContent = 'Playground reset.'; } catch (e) { toast(e.message, true); } }
 
 // ── Toast (non-blocking feedback — replaces alert()) ──────────────────────
 let _toastTimer;
@@ -2839,7 +2955,7 @@ function renderPolicyPrecedenceHtml(precedence, opts = {}) {
   }
   return '<div class="drawer-section-title">' + safe(title) + '</div>' +
     '<div style="font-size:11px;color:var(--gray-500);margin-top:4px;margin-bottom:10px">' + safe(intro) + '</div>' +
-    chain.map(entry => {
+    chain.map((entry, idx) => {
       const badges = [
         entry.winning ? '<span class="scoped-tag tag-allow">takes precedence</span>' : '',
         entry.exists ? '<span class="scoped-tag tag-net">active</span>' : '<span class="scoped-tag">not set</span>',
@@ -2848,12 +2964,15 @@ function renderPolicyPrecedenceHtml(precedence, opts = {}) {
       const openBtn = entry.scope === 'session'
         ? (entry.exists ? '<button class="btn-ghost" style="padding:5px 8px" onclick="document.getElementById(\'scopeEditSection\')?.scrollIntoView({behavior:\'smooth\',block:\'start\'})">View scope</button>' : '')
         : '<button class="btn-ghost" style="padding:5px 8px" onclick="openPolicyScope(' + safeJsArg(policyScopeTarget(entry.scope)) + ')">Open</button>';
-      return '<div class="drawer-policy-card ' + (entry.winning ? '' : ' allowed') + '" style="margin-bottom:8px">' +
+      const card = '<div class="drawer-policy-card ' + (entry.winning ? '' : ' allowed') + '">' +
         '<div class="drawer-rule-row"><span class="drawer-rule-label">' + safe(entry.label || entry.scope) + '</span>' +
           '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + badges + openBtn + '</div></div>' +
         '<div style="font-size:11px;color:var(--gray-600);line-height:1.5">' + safe(entry.summary || '') + '</div>' +
         (entry.path ? '<div style="font-size:10px;color:var(--gray-400);margin-top:4px;word-break:break-all">' + safe(entry.path) + '</div>' : '') +
       '</div>';
+      const row = '<div class="prec-row"><div class="prec-rank">' + (idx + 1) + '</div>' + card + '</div>';
+      const arrow = idx < chain.length - 1 ? '<div class="prec-arrow">&#8595;</div>' : '';
+      return row + arrow;
     }).join('');
 }
 function tsCell(rel, abs, color) {
@@ -3401,12 +3520,13 @@ async function loadSessions() {
 function renderSessions(rows) {
   const tbody=document.getElementById('sessBody');
   renderOverviewSessions(rows.slice(0, 5));
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No sessions yet</td></tr>';return;}
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No sessions yet</td></tr>';return;}
   tbody.innerHTML=rows.map(s=>{
     const rc=riskClass(s.riskScore);
     const srcCls=s.source==='supply_chain'?'supply':'';
     const srcLabel=s.source==='supply_chain'?'supply-chain':'agent';
     return '<tr class="clickable-row" onclick="navigateToSession(\''+safeAttr(s.sessionId)+'\', \''+safeAttr(s.workspace)+'\')">'+
+      '<td style="padding-right:8px"><input type="checkbox" class="sess-checkbox" onclick="event.stopPropagation()" /></td>'+
       '<td class="mono" title="'+safeAttr(s.sessionId)+'">'+safe(shortId(s.sessionId,24))+'</td>'+
       '<td><span class="agent-pill link" onclick="event.stopPropagation();openAgentView(\''+safeAttr(s.agent)+'\')">'+safe(s.agent)+'</span><span class="src-pill '+srcCls+'">'+safe(srcLabel)+'</span></td>'+
       '<td style="color:var(--gray-500)" title="'+safeAttr(s.workspace || '')+'">'+safe(s.workspaceName || workspaceName(s.workspace))+'</td>'+
@@ -3733,37 +3853,7 @@ async function loadSupplyChain(){
     ).join('');}
   }catch(e){console.error('[prismor] supply-chain:',e);}
 }
-
-// ── Token usage ────────────────────────────────────────────────────────────
-async function loadTokens(){
-  try{
-    const days=document.getElementById('globalDays').value;
-    document.getElementById('hintTokens').textContent='last '+days+' day'+(days==1?'':'s')+' · Claude Code';
-    const data=await apiFetch('/api/tokens?days='+days);
-    document.getElementById('tkInput').textContent=fmtNum(data.inputTokens||0);
-    document.getElementById('tkOutput').textContent=fmtNum(data.outputTokens||0);
-    document.getElementById('tkCacheRead').textContent=fmtNum(data.cacheReadTokens||0);
-    document.getElementById('tkHitRate').textContent=(data.cacheHitRate||0)+'% cache-hit rate';
-    document.getElementById('tkTotal').textContent=fmtNum(data.totalTokens||0);
-    const byTool=data.byTool||[];
-    const tbody=document.getElementById('tkByToolBody');
-    if(!byTool.length){tbody.innerHTML='<tr><td colspan="3" class="empty">No tool activity yet</td></tr>';}
-    else{tbody.innerHTML=byTool.map(t=>
-      '<tr><td>'+safe(t.tool)+'</td>'+
-        '<td class="right" style="font-weight:500">'+fmtNum(t.approxTokens||0)+'</td>'+
-        '<td class="right" style="color:var(--gray-500)">'+(t.calls||0)+'</td></tr>'
-    ).join('');}
-    const offenders=data.topOffenders||[];
-    const obody=document.getElementById('tkOffendersBody');
-    if(!offenders.length){obody.innerHTML='<tr><td colspan="3" class="empty">No tool activity yet</td></tr>';}
-    else{obody.innerHTML=offenders.map(o=>
-      '<tr><td>'+safe(o.tool)+'</td>'+
-        '<td style="color:var(--gray-600);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+safeAttr(o.label)+'">'+safe(o.label)+'</td>'+
-        '<td class="right" style="font-weight:600;color:var(--pink-600)">'+fmtNum(o.approxTokens||0)+'</td></tr>'
-    ).join('');}
-  }catch(e){console.error('[prismor] tokens:',e);}
-}
-document.getElementById('globalDays').addEventListener('change',()=>{loadStats();loadSupplyChain();loadTokens();});
+document.getElementById('globalDays').addEventListener('change',()=>{loadStats();loadSupplyChain();});
 
 // ══════════════════════════════════════════════════════════════════════════
 // AGENTS TAB — per-agent kill switch, mode override, IAM profile
@@ -4375,7 +4465,7 @@ initCharts();
 const _loadFill = document.getElementById('loadingFill');
 const _loadLabel = document.getElementById('loadingLabel');
 let _loadDone = 0;
-const _loadTotal = 8;
+const _loadTotal = 7;
 function _loadTick(label) {
   _loadDone++;
   if (_loadFill) _loadFill.style.width = Math.min(100, Math.round(_loadDone / _loadTotal * 100)) + '%';
@@ -4396,7 +4486,6 @@ const _bootTasks = [
   loadFindings().then(()      => _loadTick('Findings loaded')),
   loadEvents().then(()        => _loadTick('Events loaded')),
   loadSupplyChain().then(()   => _loadTick('Supply chain loaded')),
-  loadTokens().then(()        => _loadTick('Token usage loaded')),
   loadAgents().then(()        => _loadTick('Agents loaded')),
   loadWorkspaces()
     .then(() => Promise.allSettled([loadSessionControl(), loadPolicy()]))
@@ -4408,7 +4497,6 @@ setInterval(() => {
   loadStats();
   loadSessions();
   loadSupplyChain();
-  loadTokens();
   loadSessionControl();
   loadPolicy();
   loadAgents();
