@@ -1,3 +1,10 @@
+## [1.32.1] — 2026-07-23
+
+### Fixed
+
+- **`prismor update` / startup update-nag checked the wrong PyPI package.** Both the passive startup notice and `prismor update` looked up the pre-rename `immunity-agent` package instead of `prismor`, and the notice's 24h cache had no way to invalidate after the rename — producing contradictory output like `note: prismor 1.31.0 is available (you're on 1.32.0)` immediately followed by `prismor 1.32.0 is already the latest version.` Both now check `prismor` on PyPI, and a live check (e.g. `prismor update`) refreshes the shared cache so the passive notice doesn't linger stale.
+- **`prismor resume` left the dashboard showing "paused".** `prismor pause` heartbeats the control plane immediately so the console reflects the paused state right away; `prismor resume` only removed the local marker and relied on the *next* real tool call to clear it server-side. It now sends an immediate resumed heartbeat, so the console clears the paused badge as soon as you resume.
+
 ## [1.31.0] — 2026-07-22
 
 ### Added
