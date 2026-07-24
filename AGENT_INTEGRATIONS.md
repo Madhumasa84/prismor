@@ -58,6 +58,14 @@ _Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by 
 | CrewAI | framework | sdk | ✅ | `throw` |
 | LangChain / LangGraph | framework | sdk | ✅ | `throw` |
 | browser-use | framework | sdk | ✅ | `throw` |
+| Pydantic AI | framework | sdk | ✅ | `throw` |
+| AutoGen (Microsoft) — Core runtime | framework | sdk | ✅ | `throw` |
+| Agno | framework | sdk | ✅ | `throw` |
+| Semantic Kernel (Microsoft) | framework | sdk | ✅ | `throw` |
+| Google Agent Development Kit (ADK) | framework | sdk | ✅ | `throw` |
+| Mastra (TypeScript) | framework | sdk | ✅ | `throw` |
+| BeeAI Framework (IBM Research / Linux Foundation) | framework | sdk | ✅ | `throw` |
+| Claude Code Agent SDK | framework | sdk | ✅ | `json-permission` |
 | Vercel AI SDK | framework | http | ✅ | `throw` |
 | HTTP Eval-Server (any language) | framework | http | ✅ | `client-side` |
 | MCP Gateway (any MCP-speaking agent) | framework | mcp | ✅ | `proxy-deny` |
@@ -257,6 +265,202 @@ telemetry scope to the end-user.
 - **Verified:** live against a `Crew` with a shell tool — `rm -rf /` blocked
   before execution, `echo` allowed.
 - **Code:** `adapters/crewai/prismor_crewai/__init__.py`.
+
+### Pydantic AI
+
+- **Surface:** in-process `WrapperToolset` (`surface: sdk`).
+- **Package:** [`adapters/pydantic-ai/`](adapters/pydantic-ai/) → `prismor-pydantic-ai`.
+  `guard_toolsets([toolset], subject="user:alice", mode="enforce")`.
+- **Hook:** `PrismorToolset(WrapperToolset)` overrides `call_tool(name, tool_args, ctx, tool)` —
+  the single choke point every tool call passes through (plain functions, MCP-server
+  tools, or any composed toolset). Not calling `super().call_tool(...)` means the
+  wrapped tool never runs.
+- **Blocking:** raises `pydantic_ai.exceptions.ToolFailed` by default (a definitive
+  failure the model sees and adapts to, without consuming `ModelRetry`'s retry
+  budget — this is a policy denial, not a transient error); `raise_on_block=True`
+  raises `PrismorBlocked` instead for a hard stop. `mode="observe"` is log-only.
+- **Verified:** live against a real `Agent("openai:gpt-4o-mini")` with a genuine
+  OpenAI API key — `sudo rm -rf /` denied before the tool's Python implementation
+  ever ran, `echo hello` executed normally.
+- **Code:** `adapters/pydantic-ai/prismor_pydantic_ai/__init__.py`.
+
+### AutoGen (Microsoft) — Core runtime
+
+- **Surface:** in-process `InterventionHandler` (`surface: sdk`).
+- **Package:** [`adapters/autogen-core/`](adapters/autogen-core/) → `prismor-autogen-core`.
+  `PrismorInterventionHandler(subject="user:alice", mode="enforce")` passed to
+  `SingleThreadedAgentRuntime(intervention_handlers=[...])`.
+- **Hook:** overrides `on_send(message, *, message_context, recipient)` — the
+  real per-message gate every `autogen-core` `AgentRuntime.send_message` call
+  passes through. Tool calls reach a `ToolAgent` as individual `FunctionCall`
+  messages via exactly this path.
+- **Blocking:** raises `autogen_core.tool_agent.ToolException` by default —
+  `tool_agent_caller_loop` specifically catches this exception type and
+  converts it into a failed `FunctionExecutionResult` fed back to the model,
+  so the conversation continues with the denial visible (same UX as the other
+  adapters). `drop_instead_of_raise=True` returns `DropMessage` instead
+  (silently cancels delivery, no result fed back). `mode="observe"` is log-only.
+- **Scope caveat (unchanged from the roadmap entry):** this only covers the
+  low-level `autogen-core` runtime — the high-level `AgentChat`
+  `AssistantAgent`, what most AutoGen users actually build with, does not
+  route tool execution through this same `send_message`/`ToolAgent` path.
+- **Verified:** live against a real `SingleThreadedAgentRuntime` + `ToolAgent`
+  + `tool_agent_caller_loop` calling `openai:gpt-4o-mini` with a genuine
+  OpenAI API key — a destructive shell command was denied before the tool's
+  Python implementation ever ran, a benign command executed normally.
+- **Code:** `adapters/autogen-core/prismor_autogen_core/__init__.py`.
+
+### Agno
+
+- **Surface:** in-process `tool_hooks` chain (`surface: sdk`).
+- **Package:** [`adapters/agno/`](adapters/agno/) → `prismor-agno`.
+  `Agent(tools=[...], tool_hooks=[prismor_tool_hook])`, or
+  `make_tool_hook(subject="user:alice", mode="enforce")` to customize.
+- **Hook:** `tool_hooks` list on `Agent`/`Team` — distinct from the singular
+  `pre_hook`/`post_hook`. Agno introspects the hook's own signature and
+  injects `function_name` / `function_call` / `args`/`arguments` by
+  parameter name; `function_call` is the callable that continues the
+  execution chain, not a data object.
+- **Blocking:** raise inside the hook instead of calling
+  `function_call(**arguments)` — confirmed against source that the
+  `try/finally` wrapper around hook calls only isolates message-list state,
+  it does not swallow exceptions. Raises plain `RuntimeError` by default
+  (Agno surfaces it to the model as a tool error); `raise_on_block=True`
+  (via `make_tool_hook`) raises `PrismorBlocked` instead. `mode="observe"`
+  is log-only.
+- **Verified:** live against a real `Agent(model=OpenAIChat(id="gpt-4o-mini"))`
+  with a genuine OpenAI API key — `sudo rm -rf /` denied before the tool's
+  Python implementation ever ran (model correctly reported the block),
+  `echo hello` executed normally.
+- **Code:** `adapters/agno/prismor_agno/__init__.py`.
+
+### Semantic Kernel (Microsoft)
+
+- **Surface:** in-process filter middleware (`surface: sdk`).
+- **Package:** [`adapters/semantic-kernel/`](adapters/semantic-kernel/) → `prismor-semantic-kernel`.
+  `kernel.add_filter(FilterTypes.AUTO_FUNCTION_INVOCATION, make_filter(subject="user:alice", mode="enforce"))`.
+- **Hook:** `filter_fn(context, next)` wraps the actual invocation — every
+  registered filter composes into one middleware stack whose innermost link
+  calls `context.function.invoke(...)`. The cleanest gate-then-continue
+  semantics of any framework in this table: not calling `await next(context)`
+  means the real tool never runs. (Python confirmed; the .NET
+  `IAutoFunctionInvocationFilter` equivalent was not independently
+  re-verified in this pass.)
+- **Blocking:** deny by skipping `next(context)` and setting a synthetic
+  `context.function_result` so the model still sees a coherent (denied) tool
+  response. `raise_on_block=True` raises `PrismorBlocked` instead.
+  `mode="observe"` is log-only.
+- **Verified:** live against a real `Kernel` + `OpenAIChatCompletion(ai_model_id="gpt-4o-mini")`
+  with a genuine OpenAI API key — a destructive shell command was denied
+  before the tool's Python implementation ever ran, a benign command
+  executed normally.
+- **Code:** `adapters/semantic-kernel/prismor_semantic_kernel/__init__.py`.
+
+### Google Agent Development Kit (ADK)
+
+- **Surface:** in-process `before_tool_callback` (`surface: sdk`).
+- **Package:** [`adapters/google-adk/`](adapters/google-adk/) → `prismor-google-adk`.
+  `LlmAgent(before_tool_callback=make_before_tool_callback(subject="user:alice", mode="enforce"))`.
+- **Hook:** `before_tool_callback(tool, args, tool_context)` on `LlmAgent`
+  (or as a `BasePlugin` method — plugin-level callbacks take precedence
+  over agent-level ones).
+- **Blocking:** deny-by-substitution by default, not exception: returning
+  `None` proceeds with the real tool call; returning a `dict` **skips**
+  tool execution and that dict becomes the result instead — the model
+  never sees the tool actually run. `raise_on_block=True` raises
+  `PrismorBlocked` instead. `mode="observe"` is log-only.
+- **Verified:** live against a real `LlmAgent` using ADK's `LiteLlm` wrapper
+  for `openai/gpt-4o-mini` (`pip install "google-adk[extensions]"`) with a
+  genuine OpenAI API key — a destructive shell command was denied before
+  the tool's Python implementation ever ran, a benign command executed
+  normally.
+- **Code:** `adapters/google-adk/prismor_google_adk/__init__.py`.
+
+### Mastra (TypeScript)
+
+- **Surface:** in-process tool wrapper, via the Prismor eval-server sidecar (`surface: sdk`).
+- **Package:** [`adapters/mastra/`](adapters/mastra/) → `prismor-mastra` (npm).
+  `prismorTool("run_shell", runShell, { mode: "enforce", subject: "user:alice" })`.
+- **Hook:** wraps a tool's `execute` function directly — the same pattern
+  the CrewAI/LangChain adapters use — calling the Prismor eval-server
+  (`prismor eval-server --port 7071`) before the body runs.
+- **⚠️ Corrected from the roadmap entry:** the originally-planned
+  `processOutputStep` + `abort()` hook (Mastra's own documented "after LLM
+  response, before tool execution" mechanism) was tried first and found
+  **not reliable** when tested against a real agent run
+  (`@mastra/core` v0.x, 2026-07): calling `abort()` throws a
+  workflow-level error, but the tool's `execute` function runs anyway
+  regardless — confirmed with timestamped logging showing `execute` firing
+  *after* `abort()` was called. Direct `execute`-wrapping does reliably
+  block, since the wrapped function is what Mastra actually calls.
+- **Blocking:** a denied call throws `PrismorBlocked`; Mastra's
+  tool-execution step catches it and feeds the error back to the model as
+  the tool's result. `mode="observe"` is log-only; `failMode` controls
+  eval-server-unreachable behavior (`"closed"` by default in enforce mode).
+- **Verified:** live against a real Mastra `Agent` running `gpt-4o-mini`
+  (via `@ai-sdk/openai`) with a genuine OpenAI API key and a local
+  `prismor eval-server` — a destructive shell command was denied before
+  the tool's JavaScript implementation ever ran, a benign command executed
+  normally.
+- **Code:** `adapters/mastra/src/index.ts`.
+
+### BeeAI Framework (IBM Research / Linux Foundation)
+
+- **Surface:** in-process tool wrapper (`surface: sdk`).
+- **Package:** [`adapters/beeai/`](adapters/beeai/) → `prismor-beeai`.
+  `guard_tool(tool, subject="user:alice", mode="enforce")` /
+  `guard_tools([...])`.
+- **Hook:** subscribes a blocking listener to a `Tool`'s `Emitter`
+  `"start"` event — `emitter.on("start", handler, EmitterOptions(is_blocking=True))`
+  — which `Tool.run()` awaits *before* calling `self._run(...)`.
+- **Extra scrutiny applied:** after finding that Mastra's documented
+  "before execution" hook did *not* actually block (above), the same
+  source-reading discipline was applied here before writing any adapter
+  code: `Emitter._invoke` runs listeners as tasks inside
+  `asyncio.TaskGroup`, which always awaits every task and re-raises on
+  failure before the surrounding block exits — so a listener that raises
+  genuinely prevents `self._run(...)` from ever executing, confirmed
+  against source rather than assumed from docs.
+- **Blocking:** a denied call raises inside the listener (`RuntimeError`
+  by default, or `PrismorBlocked` with `raise_on_block=True`); BeeAI's
+  tool executor surfaces this as a tool error visible to the agent.
+- **Verified:** live against a real `ReActAgent` running `gpt-4o-mini`
+  (via `ChatModel.from_name("openai:gpt-4o-mini")`) with a genuine OpenAI
+  API key — a destructive shell command was denied before the tool's
+  `_run` ever executed, a benign command executed normally.
+- **Code:** `adapters/beeai/prismor_beeai/__init__.py`.
+
+### Claude Code Agent SDK
+
+- **Surface:** in-process hooks (`surface: sdk`).
+- **Package:** [`adapters/claude-agent-sdk/`](adapters/claude-agent-sdk/) →
+  `prismor-claude-agent-sdk`. `prismor_hook_matcher(mode="enforce",
+  subject="user:alice")` passed into `ClaudeAgentOptions(hooks={"PreToolUse": [...]})`.
+- **Hook:** the exact same `PreToolUse` hooks system the Claude Code CLI
+  itself uses, exposed programmatically — `HookMatcher(matcher=None,
+  hooks=[cb])` against a `PreToolUseHookInput` (`tool_name`, `tool_input`).
+  `matcher` defaults to `None` (every tool call) rather than a fixed
+  built-in-tool-name list, since custom tools registered via
+  `create_sdk_mcp_server` arrive as `mcp__<server>__<tool>` — a narrower
+  default would silently exempt every custom/MCP tool from policy.
+- **Blocking:** deny via `hookSpecificOutput.permissionDecision: "deny"`,
+  which overrides even `bypassPermissions` mode.
+- **Verification methodology note:** unlike the OpenAI-key-backed
+  adapters above, this one needs genuine Anthropic auth to run at all, so
+  it was live-tested on a separate host with an authenticated Claude Code
+  CLI session rather than the shared OpenAI key. Naive destructive
+  commands (`rm -rf /`, cloud-metadata SSRF) turned out to be an
+  unreliable test signal here — Claude's own alignment refuses those
+  regardless of any hook (confirmed with a baseline run that had *zero*
+  Prismor hooks installed and still refused). Switched to a discriminating
+  case instead: a benign-framed write to `.claude/settings.json`
+  (Prismor's own `agent-config-tampering` rule) that Claude readily
+  executes with no hook installed, and that the adapter denies once
+  installed — this is what actually isolates the adapter's effect from
+  the model's own judgment, and it's also what caught a real bug (an
+  earlier default `matcher` regex that never matched custom MCP tool
+  names, so the hook silently never fired).
+- **Code:** `adapters/claude-agent-sdk/prismor_claude_agent_sdk/__init__.py`.
 
 ### MCP proxy — roadmap
 
