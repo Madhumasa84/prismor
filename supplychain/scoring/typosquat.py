@@ -9,6 +9,7 @@ POPULAR_PACKAGES: Dict[str, List[str]] = {
         "axios", "moment", "jest", "babel", "eslint",
         "next", "vue", "angular", "tailwindcss", "vite",
         "redux", "graphql", "prisma", "zod", "langchain",
+        "langfuse",
     ],
     "pnpm": [
         "react", "lodash", "express", "webpack", "typescript",
@@ -28,11 +29,16 @@ POPULAR_PACKAGES: Dict[str, List[str]] = {
         "fastapi", "pytest", "boto3", "tensorflow", "torch",
         "langchain", "openai", "anthropic", "pydantic", "sqlalchemy",
         "celery", "redis", "aiohttp", "httpx", "click",
+        "langfuse", "haystack-ai", "dspy", "mirascope", "instructor",
+        "ollama", "gradio", "smolagents", "crewai", "pyautogen",
+        "langflow", "promptfoo",
     ],
     "pip": [
         "requests", "numpy", "pandas", "flask", "django",
         "fastapi", "pytest", "boto3", "tensorflow", "torch",
         "langchain", "openai", "anthropic", "pydantic", "sqlalchemy",
+        "langfuse", "haystack-ai", "dspy", "mirascope", "instructor",
+        "ollama", "gradio", "smolagents", "crewai", "pyautogen",
     ],
     "uv": [
         "requests", "numpy", "pandas", "flask", "django",

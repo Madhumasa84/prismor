@@ -2,6 +2,8 @@
 
 Prismor wraps your package manager so every install is evaluated before it runs. The `prismor` CLI intercepts the command, scores each package against live threat intelligence, then either passes through to the real package manager or blocks with a reason.
 
+See [LLM_FRAMEWORK_COVERAGE.md](../LLM_FRAMEWORK_COVERAGE.md) for which LLM app frameworks/libraries (LangChain, CrewAI, Langfuse, etc.) currently have NVD advisory tracking and typosquat protection.
+
 ---
 
 ## Usage
