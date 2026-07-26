@@ -1,9 +1,11 @@
 """Local pause/resume for the Prismor runtime.
 
-`prismor pause` suspends local screening and enforcement WITHOUT uninstalling
-the hooks. The hook dispatcher short-circuits to "allow" for every tool call,
-but keeps emitting a lightweight heartbeat so the control plane shows the
-machine as *paused* — a deliberate, attributable, time-boxed state — rather
+`prismor pause` suspends local ENFORCEMENT only, WITHOUT uninstalling the
+hooks — observe-mode screening/telemetry keeps running as normal, so nothing
+goes dark. Auto-resumes after 24h (or a custom `--for` window) unless started
+via `prismor pause-hard`, which pauses indefinitely until `prismor resume`.
+A lightweight heartbeat keeps emitting the whole time so the control plane
+shows the machine as *paused* — a deliberate, attributable state — rather
 than letting it silently go idle, which is the failure mode of just deleting
 the hooks (indistinguishable from a closed laptop).
 
@@ -61,15 +63,25 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def set_paused(duration_seconds: Optional[int] = None, reason: str = "", by: str = "") -> Dict[str, Any]:
-    """Write the pause marker. ``duration_seconds=None`` pauses indefinitely.
+_DEFAULT_DURATION_SECONDS = 86400  # `prismor pause` auto-resumes after 24h unless --for overrides it
+
+
+def set_paused(duration_seconds: Optional[int] = None, reason: str = "", by: str = "", hard: bool = False) -> Dict[str, Any]:
+    """Write the pause marker. ``hard=True`` (from `prismor pause-hard`) pauses
+    indefinitely; otherwise defaults to 24h unless ``duration_seconds`` overrides
+    it. Enforcement only — observe-mode screening/telemetry stays on regardless.
     Returns the record written."""
     now = _now()
+    if hard:
+        until = None
+    else:
+        until = now + (duration_seconds if duration_seconds else _DEFAULT_DURATION_SECONDS)
     record: Dict[str, Any] = {
         "schema": _SCHEMA,
         "paused": True,
+        "hard": hard,
         "at": now,
-        "until": (now + duration_seconds) if duration_seconds else None,
+        "until": until,
         "reason": (reason or "")[:300],
         "by": (by or "")[:120],
         "last_beat": 0.0,
