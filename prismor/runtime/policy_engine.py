@@ -115,6 +115,10 @@ _EVENT_SOURCE: Dict[str, str] = {
     "memory": "project_memory",
 }
 
+# Provenance stamped on a finding raised from the body of a script the agent
+# executes, rather than from the command text itself (PrismorSec/prismor#27).
+_SCRIPT_SOURCE = "executed_script"
+
 
 def is_floor_protected_rule(
     rule_id: str,
@@ -829,12 +833,41 @@ class PolicyEngine:
                 ),
             })
 
+        # ── Indirect command bypass: inspect executed script contents (#27) ─
+        # A shell rule matches only the command string, so `bash ./vendor/x.sh`
+        # hides whatever the script body does. Resolve each invoked script
+        # inside the workspace and evaluate its body line-by-line as synthetic
+        # shell events, so the script is judged by the same rules as a typed
+        # command. Fail-open: any resolution/read error skips silently.
+        # Pre-action only — post-action re-reads would duplicate every finding
+        # and cannot stop an exec that already happened.
+        if (
+            event_type == "shell"
+            and self.workspace is not None
+            and event.get("_script_depth", 0) < _MAX_SCRIPT_DEPTH
+            and _is_pre_action_event(event)
+        ):
+            _cmd = field_values.get("command", "")
+            if _cmd:
+                try:
+                    findings.extend(
+                        self._scan_invoked_script_contents(
+                            event, _cmd, index, session_id, subject,
+                            depth=int(event.get("_script_depth", 0)),
+                            seen=event.get("_script_seen"),
+                        )
+                    )
+                except Exception as exc:
+                    sys.stderr.write(f"[prismor] script-content inspection error: {exc}\n")
+
         # ── Supply-chain install risk (OSV CVEs, typosquat, IOC) ────────
         # Wires the same scoring `prismor supplychain npm install <pkg>`
         # runs explicitly into the automatic hook path, so a plain
         # `npm install lodash@4.17.4` an agent runs on its own — without
         # being told to route through that wrapper — gets checked too.
-        if event_type == "shell" and self.supply_chain_install_check:
+        # Skipped for synthetic script lines: this does network-backed OSV /
+        # typosquat lookups, which must not fire once per line of a script.
+        if event_type == "shell" and self.supply_chain_install_check and not event.get("_script_line"):
             _cmd = field_values.get("command", "")
             if _cmd:
                 try:
@@ -1041,7 +1074,9 @@ class PolicyEngine:
                     })
 
         # Also check shell commands for URLs to non-allowed domains.
-        if self.egress_allowlist and event_type == "shell":
+        # Skipped for synthetic script lines — a URL on every line of a script
+        # would emit an egress finding per line.
+        if self.egress_allowlist and event_type == "shell" and not event.get("_script_line"):
             command_text = field_values.get("command", "")
             for domain in _extract_domains_from_command(command_text):
                 if not self._is_domain_allowed(domain):
@@ -1092,7 +1127,10 @@ class PolicyEngine:
         # that the YAML regex rules miss. Heuristic pre-screen is <1ms; LLM
         # subagent is only invoked on the uncertain zone [low, high). See
         # settings.semantic_guard in default_policy.yaml for tuning.
-        if self.semantic_guard_config.get("enabled"):
+        # Skipped for synthetic script lines: the guard is LLM-backed, so
+        # running it once per line would multiply cost and latency by the
+        # length of the script. Script bodies stay on the deterministic path.
+        if self.semantic_guard_config.get("enabled") and not event.get("_script_line"):
             try:
                 sem_finding = self._run_semantic_layer(event, field_values, index, session_id)
                 if sem_finding:
@@ -1104,7 +1142,11 @@ class PolicyEngine:
         # If this event produced any prompt_injection findings, persist that
         # fact so subsequent network events can be escalated regardless of
         # their destination.
-        taint = self._get_taint(session_id)
+        # Synthetic script lines never load or mark taint: _get_taint() reads
+        # the session's taint file from disk, and doing that once per line of a
+        # script is hundreds of needless reads. The originating shell event
+        # still marks once, from this same findings list, after the script scan.
+        taint = None if event.get("_script_line") else self._get_taint(session_id)
         if taint is not None and any(
             f.get("category") in ("prompt_injection", "prompt_injection_semantic")
             for f in findings
@@ -1195,7 +1237,17 @@ class PolicyEngine:
         # tag set (default: untrusted_content + critical_action). Block the call
         # that completes it, before it executes. Detection lives in trifecta.py
         # (swappable); enforcement is here.
-        if self.tool_tags.get("enabled") and session_id and self.workspace is not None:
+        # Not for synthetic script lines: TagLedger is a persisted, accumulating
+        # per-session record, so classifying each line of a script would write
+        # the ledger hundreds of times and could complete an incompatible-tag
+        # pair (e.g. untrusted_content + critical_action) from unrelated lines
+        # of one file. The originating shell event is classified instead.
+        if (
+            self.tool_tags.get("enabled")
+            and session_id
+            and self.workspace is not None
+            and not event.get("_script_line")
+        ):
             try:
                 from prismor.runtime.trifecta import classify_tool_tags, TagLedger
                 from prismor.runtime.tag_rules import compile_tool_tag_rules
@@ -1621,6 +1673,186 @@ class PolicyEngine:
         })
         return findings
 
+    def _resolve_script_in_workspace(
+        self, raw_path: str, bases: Optional[List[str]] = None
+    ) -> Optional[Path]:
+        """Resolve a script path referenced by a shell command to a real file
+        that lives *inside* the workspace. Returns None otherwise.
+
+        A relative path is tried against the workspace root first, then against
+        any directory the command cds into (``cd build && bash run.sh``).
+
+        Containment is the security boundary and applies to every candidate:
+        the real (symlink-resolved) path must sit under the real workspace root.
+        This is deliberately strict — it stops the inspector from being coerced
+        into reading files outside the project (`bash /etc/shadow`, a `./x.sh`
+        symlink pointing at ~/.ssh) and surfacing their contents in a finding.
+        Out-of-workspace droppers (`/tmp/x`) are already covered by the
+        fetch-then-execute rule.
+        """
+        if self.workspace is None or not raw_path:
+            return None
+        try:
+            ws_real = Path(os.path.realpath(str(self.workspace)))
+        except (OSError, ValueError):
+            return None
+
+        candidates: List[Path] = []
+        cand = Path(raw_path)
+        if cand.is_absolute():
+            candidates.append(cand)
+        else:
+            candidates.append(Path(self.workspace) / raw_path)
+            for base in bases or []:
+                # A cd target is itself untrusted text; containment below is
+                # what makes trying it safe.
+                candidates.append(Path(self.workspace) / base / raw_path)
+
+        for c in candidates:
+            try:
+                real = Path(os.path.realpath(str(c)))
+                # Containment check (relative_to raises when outside).
+                real.relative_to(ws_real)
+                if real.is_file():
+                    return real
+            except (OSError, ValueError):
+                continue
+        return None
+
+    def _scan_invoked_script_contents(
+        self,
+        event: Dict[str, Any],
+        command: str,
+        index: int,
+        session_id: str,
+        subject: Optional[Any],
+        depth: int = 0,
+        seen: Optional[set] = None,
+    ) -> List[Dict[str, Any]]:
+        """For each local script a shell command runs, evaluate the script's
+        body **line by line as synthetic shell events**.
+
+        The security principle is equivalence: a line inside a script the agent
+        is about to run gets judged by exactly the same standard as the same
+        text typed at the command line. That reuses the shell rule set as-is —
+        which is already tuned against real command lines, so it inherits its
+        false-positive profile rather than inventing a new one — and it closes
+        the indirect bypass where `bash ./x.sh` hides `curl … | bash`.
+
+        Per-line (not whole-body) matters: the shell patterns are written with
+        ``[^\\n]`` single-line semantics, and evaluating a whole body at once
+        would let unrelated lines match as if adjacent.
+
+        Fail-open throughout: a script that can't be resolved or read is
+        skipped, never raised.
+        """
+        findings: List[Dict[str, Any]] = []
+        # Shared across the whole invocation tree: bounds total work and makes
+        # a mutual-recursion cycle (a.sh -> b.sh -> a.sh) terminate.
+        if seen is None:
+            seen = set()
+        cd_bases = _extract_cd_targets(command)
+        for n, raw_path in enumerate(_extract_invoked_scripts(command)):
+            real = self._resolve_script_in_workspace(raw_path, cd_bases)
+            if real is None:
+                continue
+            key = str(real)
+            if key in seen or len(seen) >= _MAX_TOTAL_SCRIPTS:
+                continue
+            seen.add(key)
+            try:
+                # Bounded read — never load the whole file just to slice it.
+                # One byte over the cap tells us the file was longer without
+                # holding the rest of it.
+                with open(real, "rb") as fh:
+                    raw_bytes = fh.read(_MAX_SCRIPT_BYTES + 1)
+            except OSError:
+                continue
+            size_truncated = len(raw_bytes) > _MAX_SCRIPT_BYTES
+            body = raw_bytes[:_MAX_SCRIPT_BYTES].decode("utf-8", "replace")
+            if not body.strip():
+                continue
+
+            try:
+                # Relative to the *resolved* root — `real` is already
+                # symlink-resolved, so relpath against the raw workspace would
+                # leak `../` noise on platforms where the root is itself a
+                # symlink (e.g. macOS /var → /private/var).
+                rel = os.path.relpath(str(real), os.path.realpath(str(self.workspace)))
+            except ValueError:
+                rel = str(real)
+
+            # One finding per rule per script: a loop that repeats a risky line
+            # shouldn't produce fifty identical findings.
+            seen_rules: set[str] = set()
+            lines, line_truncated = _executable_lines(body)
+
+            # Silently stopping inspection is exactly what padding a script
+            # counts on, so say so out loud. Warn-level: not knowing is not
+            # itself proof of malice, but it must never look like a clean scan.
+            if size_truncated or line_truncated:
+                limit = (f"first {_MAX_SCRIPT_BYTES // 1024} KB"
+                         if size_truncated else f"first {_MAX_SCRIPT_LINES} statements")
+                finding_id = f"script-not-fully-inspected-{index}"
+                prefixed_id = f"{session_id}:{finding_id}" if session_id else finding_id
+                findings.append({
+                    "id": f"{prefixed_id}~s{n}",
+                    "severity": "LOW",
+                    # Deliberately its own category, outside the policy's
+                    # block_categories: incomplete coverage is a reporting
+                    # signal, never grounds to fail a build. Omitting `mode`
+                    # leaves it observe-only, so should_block() ignores it —
+                    # same convention as the other code-authored warnings.
+                    "category": "inspection_coverage",
+                    "title": f"Executed script too large to inspect fully: {rel}",
+                    "evidence": _truncate(
+                        f"[{rel}] only the {limit} were scanned; the rest of the "
+                        f"script was not checked"
+                    ),
+                    "eventIndex": index,
+                    "ruleId": "script-not-fully-inspected",
+                    "action": "warn",
+                    "subject": subject.as_dict() if subject is not None else None,
+                    "source": _SCRIPT_SOURCE,
+                    "viaScript": rel,
+                })
+
+            for lineno, line in lines:
+                synthetic = {
+                    "type": "shell",
+                    "command": line,
+                    # Preserve the originating phase so should_block() gates on
+                    # the real event's pre/post action state.
+                    "agent_event": event.get("agent_event", ""),
+                    # Marks this as a synthetic script line: suppresses the
+                    # stateful / network-backed side checks that must not run
+                    # once per line, and bounds how far nested `bash b.sh`
+                    # invocations are followed.
+                    "_script_line": True,
+                    "_script_depth": depth + 1,
+                    "_script_seen": seen,
+                }
+                for f in self.evaluate(synthetic, index, session_id, subject):
+                    rule_id = str(f.get("ruleId", ""))
+                    if rule_id in seen_rules:
+                        continue
+                    seen_rules.add(rule_id)
+                    # Provenance: the match is in a script the command runs,
+                    # not in the command text itself. A finding bubbling up
+                    # from a nested script already carries its own (deeper)
+                    # location — don't overwrite it with this level's.
+                    if not f.get("viaScript"):
+                        f["viaScript"] = rel
+                        f["viaScriptLine"] = lineno
+                        f["source"] = _SCRIPT_SOURCE
+                        f["evidence"] = f"[{rel}:{lineno}] {f.get('evidence', '')}"
+                        # Disambiguate ids when one command runs several
+                        # scripts that trip the same rule (evaluate keys ids
+                        # off `index`).
+                        f["id"] = f"{f['id']}~s{n}"
+                    findings.append(f)
+        return findings
+
     def check_command(self, command: str) -> List[Dict[str, Any]]:
         """Quick check: evaluate a shell command string. Returns findings."""
         event = {"type": "shell", "command": command}
@@ -1763,6 +1995,137 @@ def _normalize_command(cmd: str) -> str:
     # `...` → space-separated inner content
     cmd = re.sub(r'`([^`]*)`', r' \1 ', cmd)
     return " ".join(cmd.split())
+
+
+# ── Script-content inspection (#27) ──────────────────────────────────────────
+# A shell rule only sees the command string, so `bash ./vendor/build.sh` — whose
+# body may pipe curl into a shell — matches nothing. These helpers detect a
+# command that runs a local script and hand the script's *path* back so the
+# engine can read the body and re-check it against the content-scan rules.
+
+# Script extensions we resolve+read. Kept to interpreted-source types; a compiled
+# binary has no text body worth pattern-scanning.
+_SCRIPT_EXTS = "sh|bash|zsh|ksh|dash|py|js|cjs|mjs|rb|pl|php"
+
+# Bounds — an executed script's body is untrusted input to the scanner, so cap
+# how much we read (regex over a multi-MB file is a needless DoS surface), how
+# many lines we evaluate, and how many scripts one command can pull in.
+_MAX_SCRIPT_BYTES = 256 * 1024
+_MAX_SCRIPT_LINES = 800
+_MAX_SCRIPTS_PER_COMMAND = 4
+# A script that runs another script is the obvious one-hop bypass, so follow it
+# — but only a bounded distance. Depth 2 covers `run.sh -> vendor/install.sh`;
+# the shared already-scanned set caps total work and makes a mutual-recursion
+# cycle (a.sh -> b.sh -> a.sh) terminate.
+_MAX_SCRIPT_DEPTH = 2
+_MAX_TOTAL_SCRIPTS = 8
+
+# (A) interpreter followed by a path operand: `bash x.sh`, `python3 -u a.py`,
+#     `sudo bash ./deploy.sh`, `. ./env.sh`, `source lib/util.sh`.
+#     Option flags between the interpreter and the path are skipped.
+_INTERP_INVOKE_RE = re.compile(
+    r'(?:^|[;&|(]|&&|\|\|)\s*(?:sudo\s+)?'
+    r'(?:bash|sh|zsh|ksh|dash|source|\.|python3?|node(?:js)?|ruby|perl|php)\s+'
+    r'(?:-[\w-]+\s+)*'
+    r'(?P<path>"[^"]+"|\'[^\']+\'|[^\s;&|()]+)',
+)
+
+# (B) direct execution of a script file by path: `./vendor/x.sh`, `/opt/a.py`.
+_DIRECT_EXEC_RE = re.compile(
+    r'(?:^|[;&|(]|&&|\|\|)\s*'
+    r'(?P<path>\.{0,2}/[^\s;&|()]*\.(?:' + _SCRIPT_EXTS + r'))\b',
+)
+
+# `cd build && bash run.sh` is an everyday idiom, and it makes the script path
+# relative to the new directory rather than the workspace root. Capture leading
+# `cd` targets so resolution can try them as bases too.
+_CD_RE = re.compile(
+    r'(?:^|[;&|(]|&&|\|\|)\s*cd\s+(?P<dir>"[^"]+"|\'[^\']+\'|[^\s;&|()]+)',
+)
+
+
+def _extract_cd_targets(command: str) -> List[str]:
+    """Directories a command cds into, in order. Used only to widen where a
+    relative script path may resolve from; every candidate still has to pass
+    the workspace-containment check."""
+    out: List[str] = []
+    for m in _CD_RE.finditer(command):
+        d = m.group("dir").strip().strip('"').strip("'")
+        if d and not d.startswith("-") and d not in out:
+            out.append(d)
+    return out
+
+
+def _extract_invoked_scripts(command: str) -> List[str]:
+    """Return distinct script paths a shell command runs via an interpreter or
+    direct execution. Path-shaped operands only; bare options/subcommands are
+    ignored. Order-preserving and de-duplicated, capped for safety."""
+    out: List[str] = []
+    seen: set[str] = set()
+    for rx in (_INTERP_INVOKE_RE, _DIRECT_EXEC_RE):
+        for m in rx.finditer(command):
+            raw = m.group("path").strip().strip('"').strip("'")
+            # Skip flag-like tokens and anything that isn't a plausible path.
+            if not raw or raw.startswith("-"):
+                continue
+            if raw in seen:
+                continue
+            seen.add(raw)
+            out.append(raw)
+            if len(out) >= _MAX_SCRIPTS_PER_COMMAND:
+                return out
+    return out
+
+
+def _is_pre_action_event(event: Dict[str, Any]) -> bool:
+    """True when the event is still pre-action (the exec can still be stopped).
+
+    Mirrors ``hooks._is_pre_action`` (not imported: hooks imports this module),
+    with one addition — an event carrying no ``agent_event`` is an ad-hoc check
+    (``check_command`` / ``prismor check``) rather than a live post-action hook,
+    and should still be inspected.
+    """
+    agent_event = str(event.get("agent_event", "") or "")
+    if not agent_event:
+        return True
+    lower = agent_event.lower()
+    return (
+        lower.startswith("pre")
+        or lower.startswith("before")
+        or agent_event in {"PreToolUse", "UserPromptSubmit", "PermissionRequest"}
+    )
+
+
+def _executable_lines(body: str) -> Tuple[List[Tuple[int, str]], bool]:
+    """Split a script body into the lines worth evaluating as commands.
+
+    Returns ``([(line_number, text), ...], truncated)``. Backslash
+    continuations are joined first (``\\r\\n`` included, so a Windows-authored
+    script is handled), so a wrapped ``curl ... \\\n  | bash`` is judged as the
+    single command it actually is. Blank and comment-only lines are dropped: a
+    comment never executes, and scanning prose like ``# don't run: curl x |
+    bash`` is pure false-positive surface.
+
+    ``truncated`` is True when the line cap cut the body short — the caller
+    surfaces that, because silently stopping inspection is exactly what an
+    attacker padding a script is counting on.
+    """
+    # Join shell/py line continuations before splitting. \r\n tolerated so a
+    # CRLF script's wrapped pipeline isn't split into two harmless halves.
+    joined = re.sub(r'\\\r?\n', ' ', body)
+    out: List[Tuple[int, str]] = []
+    truncated = False
+    for n, raw in enumerate(joined.split("\n"), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith("//"):
+            continue
+        if len(out) >= _MAX_SCRIPT_LINES:
+            truncated = True
+            break
+        out.append((n, line))
+    return out, truncated
 
 
 def _resolve_path(path: str) -> str:
