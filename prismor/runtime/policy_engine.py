@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
+from prismor.runtime.egress import EgressPolicy
+
 try:
     import yaml
 except ImportError:
@@ -547,7 +549,11 @@ class PolicyEngine:
         self.allowlists: List[AllowlistEntry] = []
         self.block_categories: set[str] = set()
         self._manifest_re: Optional[re.Pattern[str]] = None
-        self.egress_allowlist: List[str] = []
+        self.egress_allowlist = []
+        self.egress: EgressPolicy = EgressPolicy()
+        # Which policy layer last set the egress config. "remote" means the org
+        # signed it, which is what makes an enforce verdict authoritative.
+        self._egress_source: str = "default"
         self.outputs: List[Dict[str, Any]] = []
         self.semantic_guard_config: Dict[str, Any] = {}
         self.sandbox_config: Dict[str, Any] = {}
@@ -706,6 +712,12 @@ class PolicyEngine:
                     f"{sorted(dropped)} — restoring (cannot be weakened)\n"
                 )
                 override_settings["block_categories"] = sorted(cats | _CORE_BLOCK_CATEGORIES)
+        # Record which layer owns the egress config. The remote (org-signed)
+        # layer is applied last, so if it sets egress it wins here too — and
+        # that provenance is what lets an org enforce verdict survive a local
+        # observe downgrade (see EgressPolicy.evaluate / runtime.py).
+        if "egress" in override_settings or "egress_allowlist" in override_settings:
+            self._egress_source = source
         settings.update(override_settings)
 
     def _load(self, workspace: Optional[Path], policy_path: Optional[Path]) -> None:
@@ -838,7 +850,20 @@ class PolicyEngine:
             joined = "|".join(f"(?:{p})" for p in manifest_pats)
             self._manifest_re = re.compile(joined, re.IGNORECASE)
 
+        # Legacy flat allowlist — still read verbatim so scanner.py and any
+        # external consumer keep working.
         self.egress_allowlist = list(settings.get("egress_allowlist", []) or [])
+        # Full egress policy (settings.egress), falling back to the legacy list
+        # with its historic warn-only semantics when only that is set.
+        self.egress = EgressPolicy.from_settings(settings, source=self._egress_source)
+        for _egress_err in self.egress.errors:
+            sys.stderr.write(f"[prismor] egress policy: {_egress_err}\n")
+        # Keep the flat list in sync when a modern policy defines the allowlist
+        # only under settings.egress, so the MCP static scanner still sees it.
+        if not self.egress_allowlist and self.egress.enabled:
+            self.egress_allowlist = [
+                e.host for e in self.egress.allow if e.network is None and not e.any_host
+            ]
 
         # Automatic OSV/typosquat/IOC scoring of package-manager install
         # commands found in shell events — see settings comment in
@@ -1357,45 +1382,28 @@ class PolicyEngine:
                     "action": "warn",
                 })
 
-        # ── Egress allowlist check ──────────────────────────────────────
-        if self.egress_allowlist and event_type == "network":
-            url = field_values.get("url", "")
-            if url:
-                domain = _extract_domain(url)
-                if domain and not self._is_domain_allowed(domain):
-                    finding_id = f"egress-not-allowed-{index}"
-                    prefixed_id = f"{session_id}:{finding_id}" if session_id else finding_id
-                    findings.append({
-                        "id": prefixed_id,
-                        "severity": "HIGH",
-                        "category": "network_isolation",
-                        "title": f"Outbound request to domain not in egress allowlist: {domain}",
-                        "evidence": _truncate(url),
-                        "eventIndex": index,
-                        "ruleId": "egress-allowlist",
-                        "action": "warn",
-                    })
-
-        # Also check shell commands for URLs to non-allowed domains.
-        # Skipped for synthetic script lines — a URL on every line of a script
-        # would emit an egress finding per line.
-        if self.egress_allowlist and event_type == "shell" and not event.get("_script_line"):
-            command_text = field_values.get("command", "")
-            for domain in _extract_domains_from_command(command_text):
-                if not self._is_domain_allowed(domain):
-                    finding_id = f"egress-not-allowed-{index}-{domain}"
-                    prefixed_id = f"{session_id}:{finding_id}" if session_id else finding_id
-                    findings.append({
-                        "id": prefixed_id,
-                        "severity": "HIGH",
-                        "category": "network_isolation",
-                        "title": f"Shell command contacts domain not in egress allowlist: {domain}",
-                        "evidence": _truncate(command_text),
-                        "eventIndex": index,
-                        "ruleId": "egress-allowlist",
-                        "action": "warn",
-                    })
-                    break  # One finding per command is enough.
+        # ── Egress policy ───────────────────────────────────────────────
+        # Destination-driven, not pattern-driven: every network event and every
+        # shell command is decomposed into concrete (host, port, scheme) tuples
+        # and screened against settings.egress. Handles URLs of any scheme,
+        # user@host:path, bare curl/wget hosts, and nc/telnet host-port pairs —
+        # see prismor/runtime/egress.py. A legacy settings.egress_allowlist is
+        # honored with its original warn-only semantics.
+        #
+        # Synthetic script lines are skipped: an inspected script with a URL on
+        # every line would otherwise emit one egress finding per line.
+        if self.egress.enabled and not event.get("_script_line"):
+            try:
+                findings.extend(self.egress.evaluate(
+                    event,
+                    index,
+                    session_id=session_id,
+                    agent_name=str(event.get("agent_name") or event.get("agent") or ""),
+                    default_mode=self.default_mode,
+                    device_mode=self.device_mode,
+                ))
+            except Exception as _egress_exc:  # never let egress screening break evaluation
+                sys.stderr.write(f"[prismor] egress evaluation error: {_egress_exc}\n")
 
         # ── Prompt injection: structural HTML analysis (sanitizer) ─────────
         # The YAML rules match injection keywords in plaintext. This pass
@@ -1552,13 +1560,23 @@ class PolicyEngine:
             and not event.get("_script_line")
         ):
             try:
-                from prismor.runtime.trifecta import classify_tool_tags, TagLedger
+                from prismor.runtime.trifecta import (
+                    classify_tool_tags, egress_tags, TagLedger,
+                )
                 from prismor.runtime.tag_rules import compile_tool_tag_rules
                 _tt_tool = str((event.get("metadata") or {}).get("tool_name") or "")
+                # Destination-derived tags let a tag rule reference where a call
+                # is going, not just which tool it is — the egress verdict for
+                # THIS event is already in `findings` by the time we get here.
+                _extra = (
+                    egress_tags(findings)
+                    if self.tool_tags.get("egress_tags_enabled", True) else set()
+                )
                 _tags = classify_tool_tags(
                     event, event_type,
                     {f.get("category") for f in findings},
                     self.tool_tags,
+                    extra_tags=_extra,
                 )
                 if _tags:
                     _rules = compile_tool_tag_rules(self.tool_tags)
@@ -2252,6 +2270,30 @@ class PolicyEngine:
             if entry.applies_to(rule_id) and entry.patterns.search(evidence):
                 return True
         return False
+
+    @property
+    def egress_allowlist(self) -> List[str]:
+        """The flat legacy allowlist (``settings.egress_allowlist``).
+
+        Kept as a property because assigning it after construction is a
+        supported way to configure an engine — ``scanner.py`` reads it, and
+        callers/tests set it directly. Since the real screening now runs off the
+        compiled :attr:`egress` policy, the setter has to rebuild that policy or
+        a direct assignment would silently do nothing.
+        """
+        return self._egress_allowlist
+
+    @egress_allowlist.setter
+    def egress_allowlist(self, value: Any) -> None:
+        self._egress_allowlist = list(value or [])
+        # Only synthesize from the flat list when there is no richer policy to
+        # clobber: a real settings.egress always wins over the legacy list.
+        current = getattr(self, "egress", None)
+        if current is None or current.legacy or not current.enabled:
+            self.egress = EgressPolicy.from_settings(
+                {"egress_allowlist": self._egress_allowlist},
+                source=getattr(self, "_egress_source", "default"),
+            )
 
     def _is_domain_allowed(self, domain: str) -> bool:
         """Check if a domain matches any entry in the egress allowlist.

@@ -57,7 +57,7 @@
         },
         "egress_allowlist": {
           "type": "array",
-          "description": "Outbound domains allowed without a warning (supports wildcards, e.g. \"*.github.com\"). Empty allows all.",
+          "description": "DEPRECATED, superseded by `egress`. Outbound domains allowed without a warning (supports wildcards, e.g. \"*.github.com\"). Empty allows all. Never blocks.",
           "items": {
             "type": "string"
           }
@@ -316,6 +316,89 @@
               }
             }
           }
+        },
+        "egress": {
+          "type": "object",
+          "description": "Policy-driven network egress control. Screens every network event and shell command destination (URLs of any scheme, user@host:path, bare curl/wget hosts, nc/telnet host+port) against allow/deny lists.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt in to egress screening. Defaults to false."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "observe",
+                "enforce"
+              ],
+              "description": "observe logs only; enforce blocks the call. Org-signed enforce is authoritative and survives a local observe downgrade."
+            },
+            "default": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny"
+              ],
+              "description": "Verdict for a destination no entry matches. `deny` makes `allow` a strict allowlist."
+            },
+            "allow_private": {
+              "type": "boolean",
+              "description": "Skip the check for loopback/RFC1918/link-local/.local destinations. Cloud metadata endpoints are never treated as private. Defaults to true."
+            },
+            "allow": {
+              "type": "array",
+              "description": "Destinations permitted. First match wins.",
+              "items": {
+                "$ref": "#/definitions/egressEntry"
+              }
+            },
+            "deny": {
+              "type": "array",
+              "description": "Destinations refused. Evaluated before `allow`, so an explicit deny always wins.",
+              "items": {
+                "$ref": "#/definitions/egressEntry"
+              }
+            },
+            "agents": {
+              "type": "object",
+              "description": "Per-agent overrides keyed by registered agent name, layered over the fleet lists.",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "observe",
+                      "enforce"
+                    ]
+                  },
+                  "default": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "allow_private": {
+                    "type": "boolean"
+                  },
+                  "allow": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/egressEntry"
+                    }
+                  },
+                  "deny": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/egressEntry"
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -323,6 +406,72 @@
   },
   "additionalProperties": false,
   "definitions": {
+    "egressEntry": {
+      "description": "A destination matcher: either a bare host string or an object with additional constraints.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Hostname, wildcard (\"*.github.com\"), \"*\", IP address, or CIDR."
+        },
+        {
+          "type": "object",
+          "required": [
+            "host"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string",
+              "description": "Hostname, wildcard (\"*.github.com\"), \"*\", IP address, or CIDR (\"10.0.0.0/8\")."
+            },
+            "ports": {
+              "type": "array",
+              "description": "Restrict this entry to these destination ports.",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "schemes": {
+              "type": "array",
+              "description": "Restrict this entry to these URL schemes (https, ssh, postgres, \u2026).",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agents": {
+              "type": "array",
+              "description": "Restrict this entry to these registered agent names.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny",
+                "warn"
+              ],
+              "description": "Override the verdict for this entry. Defaults to the list it appears in."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "observe",
+                "enforce"
+              ],
+              "description": "Per-entry observe/enforce override."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Human-readable justification, surfaced in the finding."
+            }
+          }
+        }
+      ]
+    },
     "rule": {
       "type": "object",
       "required": [

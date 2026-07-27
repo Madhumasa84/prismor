@@ -49,6 +49,7 @@ prismor
 │   ├─ semantic-check         Hybrid LLM prompt-injection guard
 │   ├─ sandbox <action>       status · check · run — Docker command sandbox
 │   ├─ eval-server            HTTP evaluation endpoint for non-Python adapters
+│   ├─ egress <action>        show · report · test · allow · deny · mode — network egress policy
 │   └─ policy <action>        init · validate · show · edit · test
 │
 ├─ Visibility (audit & forensics)
@@ -117,6 +118,12 @@ Modes (`observe` vs `enforce`): [Prismor](prismor-runtime.md).
 | `prismor policy validate <file>` | — | Static-validate a policy YAML file. |
 | `prismor policy test` | `--file` | Run declarative policy tests (falls back to the bundled OWASP LLM starter pack). |
 | `prismor sandbox <status\|check\|run>` | `--workspace` | Docker-backed command sandbox: show config, check the backend, or run one command isolated. See [Docker sandbox](docker.md). |
+| `prismor egress show` | `--workspace` | Effective network egress policy, its mode, and which layer (default / project / org) set it. See [Network Isolation](network-isolation.md). |
+| `prismor egress report` | `--last N`, `--fail-on-block`, `--workspace` | Every destination recorded sessions actually contacted, with the verdict the current policy gives it. The on-ramp before flipping to enforce; `--fail-on-block` gates CI. |
+| `prismor egress test <target>...` | `--agent <name>`, `--workspace` | Dry-run a URL, host, or whole shell command against the policy. Exit `1` if anything would be blocked. |
+| `prismor egress allow <host>...` | `--reason`, `--workspace` | Add hosts, wildcards, IPs, or CIDRs to `settings.egress.allow` (`egress deny` / `egress rm` for the others). |
+| `prismor egress mode <observe\|enforce>` | `--workspace` | Flip enforcement (`egress default <allow\|deny>` sets the no-match verdict; `egress enable` / `disable` toggle screening). |
+| `prismor egress migrate` | `--workspace` | Convert a legacy warn-only `settings.egress_allowlist` into an enforceable `settings.egress`. |
 | `prismor tags list` | `--last N`, `--workspace` | Tools seen in recent sessions + resolved tags + which tier resolved them (explicit / `_meta` / default / inference). See [Tool Tags](tool-tags.md). |
 | `prismor tags set <tool> <tag>...` | `--workspace` | Tag a tool or glob in `.prismor/policy.yaml` (`tags rm` removes). |
 | `prismor tags rules [add\|rm]` | `--workspace` | List, add, or remove tag-rule expressions, e.g. `"untrusted_content then critical_action -> block"`. Adds are parse-checked with caret diagnostics. |

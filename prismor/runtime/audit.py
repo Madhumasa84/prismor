@@ -424,22 +424,54 @@ def _check_feed_signature(repo_root: Path) -> List[AuditFinding]:
 
 
 def _check_egress_allowlist(workspace: Path) -> List[AuditFinding]:
-    """Check if an egress allowlist is configured."""
+    """Report the network egress posture.
+
+    Three levels matter, not two: no policy at all, a policy that only observes,
+    and a policy that actually refuses off-list destinations. A configured but
+    observe-mode egress policy is a common half-finished state — it looks
+    protective in a config file while blocking nothing.
+    """
     findings: List[AuditFinding] = []
 
     engine = PolicyEngine(workspace=workspace)
+    egress = engine.egress
 
-    if engine.egress_allowlist:
+    if not egress.enabled:
+        findings.append(AuditFinding(
+            severity="LOW",
+            category="network",
+            message="No egress policy configured — every outbound destination is permitted "
+                    "(enable with `prismor egress enable`)",
+        ))
+        return findings
+
+    if egress.legacy:
+        findings.append(AuditFinding(
+            severity="LOW",
+            category="network",
+            message=f"Using the deprecated settings.egress_allowlist ({len(egress.allow)} "
+                    "domain(s)) — warn-only, never blocks. Migrate with `prismor egress migrate`",
+        ))
+        return findings
+
+    mode = egress.mode or engine.device_mode or engine.default_mode
+    scope = "strict allowlist" if egress.default == "deny" else "denylist only"
+    detail = (f"{len(egress.allow)} allow / {len(egress.deny)} deny entr(ies), {scope}"
+              + (", org-managed" if egress.source == "remote" else ""))
+
+    if mode == "enforce":
         findings.append(AuditFinding(
             severity="PASS",
             category="network",
-            message=f"Egress allowlist configured with {len(engine.egress_allowlist)} domain(s)",
+            message=f"Egress policy enforcing — {detail}",
         ))
     else:
         findings.append(AuditFinding(
             severity="LOW",
             category="network",
-            message="No egress allowlist configured — all outbound domains are permitted",
+            message=f"Egress policy is in observe mode — off-policy destinations are logged "
+                    f"but not blocked ({detail}). Review `prismor egress report`, then "
+                    "`prismor egress mode enforce`",
         ))
 
     return findings

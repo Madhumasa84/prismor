@@ -63,7 +63,7 @@ Standard OS-level and endpoint security tools monitor the kernel and filesystem.
 
 - 🛡️ [Prismor](docs/prismor-runtime.md) covers the policy engine, session logs, security audit, and CLI reference
 - 📦 [Supply Chain](docs/supply-chain.md) covers install-time enforcement, IOC matching, and risk scoring
-- 🛜 [Network Isolation](docs/network-isolation.md) covers egress allowlists, raw IP detection, and tunnel blocking
+- 🛜 [Network Isolation](docs/network-isolation.md) covers policy-driven egress control, raw IP detection, and tunnel blocking
 - 🔍 [Skill Scanner](docs/skill-scanner.md) covers MCP server and skill risk scanning across supported agents
 - 🚦 [MCP Guardrails](docs/prismor-runtime.md#custom-guardrails-for-mcp-tools) let you block a specific MCP server or tool, or require human approval before the agent calls it, with a policy rule you write yourself
 - 🔐 [Sweep and Cloak](docs/sweep-and-cloak.md) covers secret prevention at tool boundaries, practical setup, best practices, threat model, and cleanup for leaked secrets
@@ -115,7 +115,7 @@ flowchart TD
         subgraph Enforcement["Pre-execution enforcement"]
             Policy["Policy Engine\nYAML rules · observe/enforce"]
             Semantic["Semantic Guard\nhybrid prompt-injection defense"]
-            Network["Network Isolation\negress allowlists · raw IP · tunnel blocking"]
+            Network["Network Isolation\negress policy · raw IP · tunnel blocking"]
             MCP["MCP Guardrails\nallow · block · human approval"]
             IAM["IAM and Agent Controls\nleast privilege · named agents · suspension"]
             Scoped["Scoped Agent\ntask-specific session rules"]

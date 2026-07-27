@@ -2037,6 +2037,42 @@ def main(argv: Optional[List[str]] = None) -> None:
                     print(f"    {t:8s}  {n}")
             return
 
+    # ── egress subcommands ─────────────────────────────────────────────
+    if args.command == "egress":
+        from prismor.runtime import egress_cli
+
+        ec = getattr(args, "egress_command", None)
+        if ec == "show":
+            egress_cli.egress_show(workspace)
+            return
+        if ec == "report":
+            egress_cli.egress_report(workspace, last=args.last,
+                                     fail_on_block=args.fail_on_block)
+            return
+        if ec == "test":
+            egress_cli.egress_test(workspace, args.target, agent=args.agent)
+            return
+        if ec == "allow":
+            egress_cli.egress_allow(workspace, args.host, reason=args.reason)
+            return
+        if ec == "deny":
+            egress_cli.egress_deny(workspace, args.host, reason=args.reason)
+            return
+        if ec == "rm":
+            egress_cli.egress_rm(workspace, args.host)
+            return
+        if ec in ("enable", "disable"):
+            egress_cli.egress_set(workspace, "enabled", ec == "enable")
+            return
+        if ec in ("mode", "default"):
+            egress_cli.egress_set(workspace, ec, args.value)
+            return
+        if ec == "migrate":
+            egress_cli.egress_migrate(workspace)
+            return
+        parser.parse_args(["egress", "--help"])
+        return
+
     # ── tags subcommands ───────────────────────────────────────────────
     if args.command == "tags":
         from prismor.runtime import tags_cli
@@ -2592,6 +2628,62 @@ def build_parser() -> argparse.ArgumentParser:
     policy_test.add_argument("--workspace", help="Workspace path")
 
     # ── tags (tool tags + tag-rule expressions) ────────────────────────
+    egress_parser = subparsers.add_parser(
+        "egress", help="Inspect and manage the network egress policy")
+    egress_sub = egress_parser.add_subparsers(dest="egress_command")
+
+    egress_show_p = egress_sub.add_parser("show", help="Effective egress policy and its source")
+    egress_show_p.add_argument("--workspace", help="Workspace path")
+
+    egress_report_p = egress_sub.add_parser(
+        "report", help="Destinations recorded sessions contacted + current verdicts")
+    egress_report_p.add_argument("--last", type=int, default=20,
+                                 help="How many recent sessions to scan (default 20)")
+    egress_report_p.add_argument("--fail-on-block", action="store_true",
+                                 help="Exit 1 if any recorded destination would be blocked")
+    egress_report_p.add_argument("--workspace", help="Workspace path")
+
+    egress_test_p = egress_sub.add_parser(
+        "test", help="Dry-run a URL, host, or whole shell command against the policy")
+    egress_test_p.add_argument("target", nargs="+",
+                               help='URL/host, or a command in quotes (e.g. "curl https://x.com")')
+    egress_test_p.add_argument("--agent", default="",
+                               help="Evaluate as this registered agent (per-agent overrides)")
+    egress_test_p.add_argument("--workspace", help="Workspace path")
+
+    egress_allow_p = egress_sub.add_parser("allow", help="Add hosts to settings.egress.allow")
+    egress_allow_p.add_argument("host", nargs="+", help="Host, wildcard, IP, or CIDR")
+    egress_allow_p.add_argument("--reason", default="", help="Why this destination is approved")
+    egress_allow_p.add_argument("--workspace", help="Workspace path")
+
+    egress_deny_p = egress_sub.add_parser("deny", help="Add hosts to settings.egress.deny")
+    egress_deny_p.add_argument("host", nargs="+", help="Host, wildcard, IP, or CIDR")
+    egress_deny_p.add_argument("--reason", default="", help="Why this destination is refused")
+    egress_deny_p.add_argument("--workspace", help="Workspace path")
+
+    egress_rm_p = egress_sub.add_parser("rm", help="Remove hosts from both egress lists")
+    egress_rm_p.add_argument("host", nargs="+", help="Host as written in the policy")
+    egress_rm_p.add_argument("--workspace", help="Workspace path")
+
+    egress_enable_p = egress_sub.add_parser("enable", help="Turn on egress screening")
+    egress_enable_p.add_argument("--workspace", help="Workspace path")
+
+    egress_disable_p = egress_sub.add_parser("disable", help="Turn off egress screening")
+    egress_disable_p.add_argument("--workspace", help="Workspace path")
+
+    egress_mode_p = egress_sub.add_parser("mode", help="Set observe or enforce")
+    egress_mode_p.add_argument("value", choices=["observe", "enforce"])
+    egress_mode_p.add_argument("--workspace", help="Workspace path")
+
+    egress_default_p = egress_sub.add_parser(
+        "default", help="Verdict when no entry matches (deny = strict allowlist)")
+    egress_default_p.add_argument("value", choices=["allow", "deny"])
+    egress_default_p.add_argument("--workspace", help="Workspace path")
+
+    egress_migrate_p = egress_sub.add_parser(
+        "migrate", help="Move a legacy settings.egress_allowlist into settings.egress")
+    egress_migrate_p.add_argument("--workspace", help="Workspace path")
+
     tags_parser = subparsers.add_parser(
         "tags", help="Tag tools/MCPs and write tag-rules (policy as code)")
     tags_sub = tags_parser.add_subparsers(dest="tags_command")

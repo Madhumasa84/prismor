@@ -450,7 +450,13 @@ def evaluate_tool_call(
     # not enrolled (local-only dry run). The agent-control kill switch always
     # blocks regardless. This is what lets an admin flip a device to enforce from
     # the console and have it take effect with no local change.
-    if blocking is not None and mode == "observe" and blocking.get("category") != "agent-control":
+    # A finding marked `authoritative` is also exempt: an org-signed decision
+    # the local machine may not opt out of (today: settings.egress in enforce
+    # mode, where a local observe downgrade would otherwise let a developer
+    # step outside the fleet's egress boundary).
+    if (blocking is not None and mode == "observe"
+            and blocking.get("category") != "agent-control"
+            and not blocking.get("authoritative")):
         _org_chose_observe = bool(_control is not None and getattr(_control, "mode", None) == "observe")
         _enrolled = False
         try:
@@ -459,7 +465,14 @@ def evaluate_tool_call(
         except Exception:
             _enrolled = False
         if _org_chose_observe or not _enrolled:
-            blocking = None
+            # Re-scan rather than just dropping: should_block() returns the FIRST
+            # enforce-rated finding, which may be an ordinary detection sitting
+            # ahead of an authoritative one that observe mode must not suppress.
+            blocking = should_block(
+                [f for f in findings
+                 if f.get("category") == "agent-control" or f.get("authoritative")],
+                event,
+            )
 
     # Tamper-evident signed audit trail: one chained + signed record per
     # evaluated call — every verdict, not just findings — so the local trail
