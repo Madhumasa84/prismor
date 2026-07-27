@@ -677,6 +677,9 @@ class Gateway:
 
         # Pre-call evaluation.
         decision = self._evaluate(self._build_call_event(route, arguments))
+        if decision is not None:
+            from prismor.runtime.runtime import log_observe_findings
+            log_observe_findings(decision, mode=self.mode, tool_name=name)
         if decision is not None and decision.blocking is not None:
             self._reply(req_id, _blocked_result("Blocked by Prismor",
                                                 decision.blocking))
@@ -689,6 +692,9 @@ class Gateway:
         # Post-call: the response is untrusted content — scan before the model
         # ever sees it (prompt injection, poisoned tool output, secrets).
         decision = self._evaluate(self._build_result_event(route, result))
+        if decision is not None:
+            from prismor.runtime.runtime import log_observe_findings
+            log_observe_findings(decision, mode=self.mode, tool_name=name)
         if decision is not None and decision.blocking is not None:
             self._reply(req_id, _blocked_result(
                 "[Prismor] response withheld", decision.blocking))
@@ -905,7 +911,7 @@ def run_gateway(args, workspace: Path) -> int:
         specs = load_gateway_config(path)
 
     gateway = Gateway(specs, workspace=workspace,
-                      mode=getattr(args, "mode", "enforce") or "enforce",
+                      mode=getattr(args, "mode", "observe") or "observe",
                       namespace=getattr(args, "namespace", "plain") or "plain",
                       session_id=(getattr(args, "session_id", "") or
                                   os.environ.get("PRISMOR_SESSION_ID", "")))

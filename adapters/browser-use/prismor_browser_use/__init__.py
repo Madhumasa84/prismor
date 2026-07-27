@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from prismor.runtime.principal import Subject, resolve_subject, use_subject
-from prismor.runtime.runtime import Decision, evaluate_tool_call
+from prismor.runtime.runtime import Decision, evaluate_tool_call, log_observe_findings
 
 __all__ = ["guard_controller", "use_subject", "PrismorBlocked"]
 
@@ -132,7 +132,7 @@ def guard_controller(
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "browser-use",
     name: str = "",
-    mode: str = "enforce",
+    mode: str = "observe",
     session_id: Optional[str] = None,
     raise_on_block: bool = False,
     goal: Optional[str] = None,
@@ -186,6 +186,7 @@ def guard_controller(
             session_id=sid,
             subject=resolved,
         )
+        log_observe_findings(decision, mode=mode, tool_name=action_name)
 
         if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             # Headless STEP_UP → post an approval request and block until an admin

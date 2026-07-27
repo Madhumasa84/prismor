@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
 
 from prismor.runtime.principal import Subject, resolve_subject, use_subject
-from prismor.runtime.runtime import Decision, evaluate_tool_call
+from prismor.runtime.runtime import Decision, evaluate_tool_call, log_observe_findings
 
 __all__ = ["prismor_guard", "guard_agent", "use_subject", "PrismorBlocked", "build_event"]
 
@@ -113,7 +113,7 @@ def prismor_guard(
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "openai-agents",
     name: str = "",
-    mode: str = "enforce",
+    mode: str = "observe",
     session_id: Optional[str] = None,
     event_type: str = "shell",
     command_builder: Optional[Callable[[tuple, dict], str]] = None,
@@ -183,6 +183,7 @@ def prismor_guard(
     @functools.wraps(tool)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         decision = _evaluate(args, kwargs)
+        log_observe_findings(decision, mode=mode, tool_name=_tool_name(tool))
         # In observe mode the call is always allowed to proceed — the finding is
         # still recorded and shipped to telemetry, so it is log-only monitoring.
         # Only enforce mode turns a denial into a hard block.
@@ -265,6 +266,7 @@ def _guard_function_tool(
             session_id=sid,
             subject=resolve_subject(subject),
         )
+        log_observe_findings(decision, mode=mode, tool_name=tool_name)
         if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             # Headless STEP_UP: no human at the keyboard for an inline "ask", so
             # post an approval request to the control plane and block until an
@@ -296,7 +298,7 @@ def guard_agent(
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "openai-agents",
     name: str = "",
-    mode: str = "enforce",
+    mode: str = "observe",
     session_id: Optional[str] = None,
     event_type: str = "shell",
     raise_on_block: bool = False,

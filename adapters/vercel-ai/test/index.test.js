@@ -2,10 +2,11 @@
 /**
  * Tests for the Vercel AI SDK adapter. No live eval-server — global fetch is
  * stubbed so these run standalone. Covers:
- *  - failMode semantics: enforce fails CLOSED by default when the eval-server
- *    is unavailable (a suspended user must stay suspended), observe fails open,
- *    and failMode overrides either default. Supersedes the fail-open contract
- *    from PrismorSec/prismor#136, which observe mode keeps.
+ *  - failMode semantics: enforce fails CLOSED when the eval-server is
+ *    unavailable (a suspended user must stay suspended); observe — the
+ *    default mode — fails open, and failMode overrides either default.
+ *    Supersedes the fail-open contract from PrismorSec/prismor#136, which
+ *    observe mode keeps.
  *  - useSubject(): ambient per-request attribution, explicit-option precedence,
  *    PRISMOR_SUBJECT fallback, and no bleed across concurrent requests.
  */
@@ -59,12 +60,12 @@ test("throws PrismorBlocked when the eval-server denies the call", async () => {
 
 // ── failMode ────────────────────────────────────────────────────────────────
 
-test("enforce mode fails CLOSED on a non-2xx response by default", async () => {
+test("enforce mode fails CLOSED on a non-2xx response", async () => {
   await withMockFetch(
     async () => ({ ok: false, status: 503 }),
     async () => {
       const run_shell = { execute: async () => "should not run" };
-      const tools = prismorTools({ run_shell });
+      const tools = prismorTools({ run_shell }, { mode: "enforce" });
       await assert.rejects(
         () => tools.run_shell.execute({ command: "rm -rf /" }),
         PrismorBlocked,
@@ -73,14 +74,14 @@ test("enforce mode fails CLOSED on a non-2xx response by default", async () => {
   );
 });
 
-test("enforce mode fails CLOSED when fetch itself rejects by default", async () => {
+test("enforce mode fails CLOSED when fetch itself rejects", async () => {
   await withMockFetch(
     async () => {
       throw new TypeError("fetch failed");
     },
     async () => {
       const run_shell = { execute: async () => "should not run" };
-      const tools = prismorTools({ run_shell });
+      const tools = prismorTools({ run_shell }, { mode: "enforce" });
       await assert.rejects(
         () => tools.run_shell.execute({ command: "rm -rf /" }),
         PrismorBlocked,
@@ -141,7 +142,7 @@ test("a hung eval-server times out and follows failMode", async () => {
       }),
     async () => {
       const run_shell = { execute: async () => "should not run" };
-      const tools = prismorTools({ run_shell }, { timeoutMs: 30 });
+      const tools = prismorTools({ run_shell }, { mode: "enforce", timeoutMs: 30 });
       await assert.rejects(
         () => tools.run_shell.execute({ command: "echo hi" }),
         PrismorBlocked,

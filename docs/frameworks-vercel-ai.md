@@ -125,7 +125,7 @@ Users without an explicit IAM profile fall through to org-wide defaults.
 |---|---|---|---|
 | `evalUrl` | `string` | `http://127.0.0.1:7071` | Eval-server URL |
 | `subject` | `string` | `""` | End-user identity: `"user:alice"` (overrides `useSubject()`) |
-| `mode` | `"enforce"\|"observe"` | `"enforce"` | Enforce blocks; observe logs only |
+| `mode` | `"enforce"\|"observe"` | `"observe"` | Enforce blocks; observe logs only |
 | `failMode` | `"open"\|"closed"` | `"closed"` in enforce, `"open"` in observe | Behavior when the eval-server is unavailable |
 | `timeoutMs` | `number` | `10000` | Max wait for the eval-server per call |
 | `workspace` | `string` | `process.cwd()` | Project path for policy + IAM lookup |
@@ -215,10 +215,10 @@ to minimise downtime.
 ## Modes
 
 ```typescript
-// Observe: log findings, never block (safe rollout)
+// Observe: log findings, never block (default, safe rollout)
 const tools = prismorTools(myTools, { mode: "observe" });
 
-// Enforce: block denied calls before execution (default)
+// Enforce: block denied calls before execution
 const tools = prismorTools(myTools, { mode: "enforce" });
 ```
 

@@ -523,6 +523,28 @@ def evaluate_tool_call(
     )
 
 
+def log_observe_findings(decision: Decision, *, mode: str, tool_name: str = "") -> None:
+    """Print a one-line stderr note for findings observe mode is hiding.
+
+    ``evaluate_tool_call`` never blocks an enforce-rated finding when the
+    caller's ``mode`` is ``observe`` — that's the whole point of observe mode —
+    but it also means SDK adapters (which don't have a dashboard) give the
+    developer zero visibility into what they'd be blocking if they flipped to
+    enforce. Call this right after ``evaluate_tool_call`` in every adapter so
+    "observe" doesn't mean "silent."
+    """
+    if mode != "observe":
+        return
+    would_block = [f for f in decision.findings if str(f.get("mode", "observe")).lower() == "enforce"]
+    if not would_block:
+        return
+    label = f" ({tool_name})" if tool_name else ""
+    for f in would_block:
+        title = f.get("title", "policy violation")
+        severity = f.get("severity", "high")
+        sys.stderr.write(f"[prismor] observe{label}: would block in enforce mode - [{severity}] {title}\n")
+
+
 def _dispatch_telemetry(
     *,
     engine: PolicyEngine,

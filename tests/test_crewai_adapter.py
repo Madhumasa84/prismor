@@ -46,13 +46,13 @@ def test_structured_tool_safe_call_runs(tmp_path):
 
 def test_structured_tool_blocks_destructive(tmp_path):
     run_shell = _make_structured_tool()
-    guarded = prismor_guard_tool(run_shell, workspace=tmp_path, raise_on_block=True)
+    guarded = prismor_guard_tool(run_shell, workspace=tmp_path, mode="enforce", raise_on_block=True)
     with pytest.raises(PrismorBlocked):
         guarded.run(command="rm -rf /")
 
 
 def test_base_tool_subclass_blocks_destructive(tmp_path):
-    guarded = prismor_guard_tool(_ShellBaseTool(), workspace=tmp_path, raise_on_block=True)
+    guarded = prismor_guard_tool(_ShellBaseTool(), workspace=tmp_path, mode="enforce", raise_on_block=True)
     assert guarded.run(command="echo hi") == "ran: echo hi"
     with pytest.raises(PrismorBlocked):
         guarded.run(command="rm -rf /")
@@ -60,7 +60,7 @@ def test_base_tool_subclass_blocks_destructive(tmp_path):
 
 def test_guard_tools_batch(tmp_path):
     run_shell = _make_structured_tool()
-    guarded = guard_tools([run_shell], workspace=tmp_path, raise_on_block=True)
+    guarded = guard_tools([run_shell], workspace=tmp_path, mode="enforce", raise_on_block=True)
     with pytest.raises(PrismorBlocked):
         guarded[0].run(command="rm -rf /")
 
@@ -85,7 +85,7 @@ def test_use_subject_per_user_iam(tmp_path, monkeypatch):
     monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
     run_shell = _make_structured_tool()
-    guarded = guard_tools([run_shell], workspace=tmp_path, raise_on_block=True)
+    guarded = guard_tools([run_shell], workspace=tmp_path, mode="enforce", raise_on_block=True)
 
     with use_subject("user:alice"):
         assert guarded[0].run(command="ls -la") == "ran: ls -la"

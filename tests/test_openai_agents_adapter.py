@@ -163,7 +163,7 @@ class TestRealAgentSDK:
             return f"ran: {command}"
 
         agent = Agent(name="ops", tools=[run_shell])
-        guard_agent(agent, workspace=tmp_path, raise_on_block=True)
+        guard_agent(agent, workspace=tmp_path, mode="enforce", raise_on_block=True)
         tool = agent.tools[0]
         assert getattr(tool, "__prismor_guarded__", False)
 
@@ -187,7 +187,7 @@ class TestRealAgentSDK:
             return f"ran: {command}"
 
         agent = Agent(name="ops", tools=[run_shell])
-        guard_agent(agent, workspace=tmp_path, raise_on_block=True)
+        guard_agent(agent, workspace=tmp_path, mode="enforce", raise_on_block=True)
         tool = agent.tools[0]
 
         with use_subject("user:alice"):

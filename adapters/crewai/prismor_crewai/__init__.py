@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence, Union
 
 from prismor.runtime.principal import Subject, resolve_subject, use_subject
-from prismor.runtime.runtime import Decision, evaluate_tool_call
+from prismor.runtime.runtime import Decision, evaluate_tool_call, log_observe_findings
 
 __all__ = ["guard_tools", "prismor_guard_tool", "use_subject", "PrismorBlocked"]
 
@@ -84,7 +84,7 @@ def prismor_guard_tool(
     workspace: Optional[Union[str, Path]] = None,
     agent: str = "crewai",
     name: str = "",
-    mode: str = "enforce",
+    mode: str = "observe",
     session_id: Optional[str] = None,
     event_type: str = "shell",
     raise_on_block: bool = False,
@@ -102,6 +102,7 @@ def prismor_guard_tool(
             tool_name=tool_name, args=args, kwargs=kwargs, subject=subject, ws=ws,
             agent=agent, agent_name=_agent_name, mode=mode, sid=sid, event_type=event_type,
         )
+        log_observe_findings(decision, mode=mode, tool_name=tool_name)
         if not decision.allow:  # honor the runtime decision (incl. org kill-switch / forced-enforce), not the app-passed mode
             # Headless STEP_UP → post an approval request and block until an admin
             # decides. Approve → proceed; deny/timeout/not-enrolled → fail closed.

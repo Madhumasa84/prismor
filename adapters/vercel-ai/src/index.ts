@@ -28,7 +28,7 @@ export interface PrismorOptions {
    * mirroring the Python runtime's resolve_subject().
    */
   subject?: string;
-  /** "enforce" blocks denied calls; "observe" logs only. Default: "enforce" */
+  /** "enforce" blocks denied calls; "observe" logs only. Default: "observe" */
   mode?: "enforce" | "observe";
   /**
    * What to do when the eval-server cannot answer (unreachable, non-2xx,
@@ -78,6 +78,26 @@ export class PrismorBlocked extends Error {
 const FAIL_OPEN_DECISION: PrismorDecision = {
   allow: true, reason: null, findings: [], blocking: null, subject: null,
 };
+
+/**
+ * Print a one-line stderr note for findings observe mode is hiding.
+ *
+ * The eval-server never blocks an enforce-rated finding when the caller's
+ * mode is "observe" - that's the whole point of observe mode - but it also
+ * means observe mode gives zero visibility into what would be blocked if the
+ * caller flipped to enforce. Call this after every evaluate() so "observe"
+ * doesn't mean "silent."
+ */
+function logObserveFindings(decision: PrismorDecision, mode: string, toolName: string): void {
+  if (mode !== "observe") return;
+  const findings = (decision.findings ?? []) as Array<Record<string, unknown>>;
+  const wouldBlock = findings.filter((f) => String(f?.mode ?? "observe").toLowerCase() === "enforce");
+  for (const f of wouldBlock) {
+    const severity = f.severity ?? "high";
+    const title = f.title ?? "policy violation";
+    console.warn(`[prismor] observe (${toolName}): would block in enforce mode - [${severity}] ${title}`);
+  }
+}
 
 // ── Ambient subject context ──────────────────────────────────────────────────
 
@@ -214,7 +234,7 @@ async function evaluate(
 
 function resolveOpts(opts: PrismorOptions): Required<PrismorOptions> {
   const agent = opts.agent ?? "vercel-ai";
-  const mode = opts.mode ?? "enforce";
+  const mode = opts.mode ?? "observe";
   return {
     evalUrl: opts.evalUrl ?? "http://127.0.0.1:7071",
     apiKey: opts.apiKey
@@ -253,6 +273,7 @@ export function prismorTool<
 
   const guarded = async (args: Record<string, unknown>, ctx: unknown) => {
     const decision = await evaluate(toolName, args, resolved, sid);
+    logObserveFindings(decision, resolved.mode, toolName);
     if (!decision.allow) {  // honor the runtime decision (incl. org kill-switch), not the app-passed mode
       throw new PrismorBlocked(decision.reason ?? "policy violation", decision);
     }
@@ -323,6 +344,7 @@ export function prismorLangChainTool<T extends LangChainToolLike>(
 
   (tool as any).invoke = async (input: any, config?: any) => {
     const decision = await evaluate(toolName, langChainArgs(input), resolved, sid);
+    logObserveFindings(decision, resolved.mode, toolName);
     if (!decision.allow) {  // honor the runtime decision (incl. org kill-switch), not the app-passed mode
       throw new PrismorBlocked(decision.reason ?? "policy violation", decision);
     }

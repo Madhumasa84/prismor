@@ -49,14 +49,14 @@ def test_guard_tools_safe_call_runs(tmp_path):
 
 def test_guard_tools_blocks_destructive(tmp_path):
     run_shell, _ = _make_tools()
-    guarded = guard_tools([run_shell], workspace=tmp_path, raise_on_block=True)
+    guarded = guard_tools([run_shell], workspace=tmp_path, mode="enforce", raise_on_block=True)
     with pytest.raises(PrismorBlocked):
         guarded[0].run(tool_input={"command": "rm -rf /"})
 
 
 def test_prismor_guard_tool_single(tmp_path):
     run_shell, _ = _make_tools()
-    guarded = prismor_guard_tool(run_shell, workspace=tmp_path, raise_on_block=True)
+    guarded = prismor_guard_tool(run_shell, workspace=tmp_path, mode="enforce", raise_on_block=True)
     assert guarded.run(tool_input={"command": "echo hi"}) == "ran: echo hi"
     with pytest.raises(PrismorBlocked):
         guarded.run(tool_input={"command": "rm -rf /"})
@@ -65,7 +65,7 @@ def test_prismor_guard_tool_single(tmp_path):
 def test_event_type_override_for_path_based_tools(tmp_path):
     _, read_file = _make_tools()
     guarded = prismor_guard_tool(
-        read_file, workspace=tmp_path, event_type="file_read", raise_on_block=True
+        read_file, workspace=tmp_path, event_type="file_read", mode="enforce", raise_on_block=True
     )
     with pytest.raises(PrismorBlocked):
         guarded.run(tool_input={"path": ".env"})
@@ -77,7 +77,7 @@ def test_async_coroutine_path_is_guarded(tmp_path):
         """Execute a shell command asynchronously."""
         return f"ran: {command}"
 
-    guarded = guard_tools([run_shell_async], workspace=tmp_path, raise_on_block=True)
+    guarded = guard_tools([run_shell_async], workspace=tmp_path, mode="enforce", raise_on_block=True)
     assert asyncio.run(guarded[0].arun(tool_input={"command": "echo hi"})) == "ran: echo hi"
     with pytest.raises(PrismorBlocked):
         asyncio.run(guarded[0].arun(tool_input={"command": "rm -rf /"}))
@@ -110,7 +110,7 @@ def test_use_subject_per_user_iam(tmp_path, monkeypatch):
     monkeypatch.delenv("PRISMOR_AGENT_ID", raising=False)
     _write_iam(tmp_path)
     run_shell, _ = _make_tools()
-    guarded = guard_tools([run_shell], workspace=tmp_path, raise_on_block=True)
+    guarded = guard_tools([run_shell], workspace=tmp_path, mode="enforce", raise_on_block=True)
 
     with use_subject("user:alice"):
         assert guarded[0].run(tool_input={"command": "ls -la"}) == "ran: ls -la"
