@@ -240,9 +240,18 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_device_mode is not None
         and str(latest_device_mode) != _current_device_mode()
     )
+    # The egress policy (settings.egress) is served in the resolved policy
+    # without a version bump too — compare its signature so widening or
+    # tightening the fleet's network boundary reaches every device within one
+    # debounce interval instead of waiting for the next profile bump.
+    latest_egress_sig = body.get("egressSig")
+    egress_changed = (
+        latest_egress_sig is not None
+        and str(latest_egress_sig) != str(_current_egress_sig())
+    )
     if (version_changed or profile_changed or capture_changed
             or repos_changed or controls_changed or rule_ex_changed
-            or tool_denies_changed or subject_controls_changed
+            or egress_changed or tool_denies_changed or subject_controls_changed
             or device_mode_changed):
         return fetch(force=True)
     return False
@@ -370,6 +379,33 @@ def _current_device_mode() -> str:
         pol = verify_and_load()
         mode = str(((pol or {}).get("settings") or {}).get("device_mode") or "").lower()
         return mode if mode in ("observe", "enforce") else ""
+    except Exception:
+        return ""
+
+
+def _current_egress_sig() -> str:
+    """Signature of the cached policy's egress config, matching the server's
+    ``egressSig`` format (canonical JSON of settings.egress → sha256 → 16 hex;
+    empty when unset) so the device re-pulls when an admin edits the fleet's
+    network boundary.
+
+    Canonical JSON rather than a line format because egress entries are nested
+    objects (host/ports/schemes/agents), not flat records like tool denies.
+    """
+    try:
+        pol = verify_and_load()
+        settings = (pol or {}).get("settings") or {}
+        egress = settings.get("egress")
+        if not isinstance(egress, dict) or not egress:
+            # Fall back to the legacy flat list so a policy that still uses it
+            # also propagates promptly.
+            legacy = settings.get("egress_allowlist") or []
+            if not legacy:
+                return ""
+            egress = {"egress_allowlist": sorted(str(x) for x in legacy)}
+        import hashlib
+        blob = json.dumps(egress, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     except Exception:
         return ""
 

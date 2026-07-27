@@ -33,12 +33,18 @@ docker run -dit \
 ```yaml
 # .prismor/policy.yaml
 settings:
-  egress_allowlist:
-    - "*.github.com"
-    - "registry.npmjs.org"
-    - "pypi.org"
-    - "api.anthropic.com"
+  egress:
+    enabled: true
+    mode: enforce
+    default: deny
+    allow:
+      - "*.github.com"
+      - "registry.npmjs.org"
+      - "pypi.org"
+      - "api.anthropic.com"
 ```
+
+This is hook-level enforcement — Prismor refuses the call before it executes — which is what makes it work at all inside a container, since Docker has network *modes*, not domain-aware egress policy. See [Network Isolation](network-isolation.md) for the full policy shape, per-agent scoping, and org distribution.
 
 ## Prismor Bash Sandbox
 
@@ -100,7 +106,7 @@ Prismor monitors tool-use events (shell commands, file reads/writes, network cal
 | Symlink reads (after creation)         | File read hook sees the apparent path, not the symlink target                    | Symlink creation is detected; resolve symlinks in your hook scripts                 |
 | Multi-step social engineering          | Each step (read file, encode, send) is individually benign                       | Session-level correlation (roadmap)                                                 |
 | Project-level policy overrides         | `.prismor/policy.yaml` can disable rules                                  | Make policy files read-only: `chmod 444 .prismor/policy.yaml`                |
-| Domain allowlists inside Docker        | Docker has network modes, not domain-aware egress policy                         | `network: none` by default; use proxy/firewall integration in a future backend      |
+| Domain allowlists inside Docker        | Docker has network modes, not domain-aware egress policy                         | Use `settings.egress` — Prismor enforces domain/port/CIDR policy at the hook layer, before the call reaches the container's network |
 | Non-Claude agent command mutation      | Not every agent hook API supports safe input rewriting                           | Use `prismor sandbox run -- <cmd>` directly; hook-based sandboxing starts with Claude Bash |
 
 ## Post-Install Verification

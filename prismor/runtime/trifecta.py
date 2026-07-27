@@ -114,11 +114,36 @@ def normalize_incompatible(raw: Any) -> List[Set[str]]:
     return out
 
 
+# Tags derived from the egress verdict rather than from the tool's identity.
+# They give the tag-rule DSL destination awareness it otherwise cannot express:
+# `untrusted_content then egress.offlist -> block` stops an injected agent from
+# shipping what it just read to somewhere the fleet never approved, which no
+# amount of tool-name tagging can catch (the tool is a perfectly ordinary Bash).
+EGRESS_OFFLIST = "egress.offlist"
+EGRESS_DENIED = "egress.denied"
+
+_EGRESS_RULE_TAGS = {
+    "egress-allowlist": EGRESS_OFFLIST,
+    "egress-deny": EGRESS_DENIED,
+}
+
+
+def egress_tags(findings: Optional[list] = None) -> Set[str]:
+    """Map this event's egress findings to tags. Empty when egress is off."""
+    out: Set[str] = set()
+    for f in findings or []:
+        tag = _EGRESS_RULE_TAGS.get(str((f or {}).get("ruleId") or ""))
+        if tag:
+            out.add(tag)
+    return out
+
+
 def classify_tool_tags(
     event: Dict[str, Any],
     event_type: str,
     finding_categories: Optional[set] = None,
     tt_settings: Optional[Dict[str, Any]] = None,
+    extra_tags: Optional[Set[str]] = None,
 ) -> Set[str]:
     """Return the set of tags for a tool call.
 
@@ -126,7 +151,21 @@ def classify_tool_tags(
     defaults → event/finding inference. Each tier unions all matching entries;
     the first non-empty tier wins (the org admin always beats a server's
     self-declaration, which beats generic globs).
+
+    ``extra_tags`` are unioned onto whichever tier wins rather than competing
+    with it — they describe the call's *destination* (see :func:`egress_tags`),
+    not its identity, so they must not suppress the tool's own tags.
     """
+    base = _classify_base(event, event_type, finding_categories, tt_settings)
+    return base | (extra_tags or set())
+
+
+def _classify_base(
+    event: Dict[str, Any],
+    event_type: str,
+    finding_categories: Optional[set] = None,
+    tt_settings: Optional[Dict[str, Any]] = None,
+) -> Set[str]:
     tt = tt_settings or {}
     tool_name = _tool_name(event)
     tags: Set[str] = set()
