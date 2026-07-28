@@ -45,13 +45,18 @@ class TestPauseState(unittest.TestCase):
         self.assertIsNone(pause.active_state())
         self.assertFalse(pause.is_paused())
 
-    def test_pause_indefinite_roundtrip(self):
+    def test_pause_defaults_to_24h(self):
         rec = pause.set_paused(reason="cloak debug")
         self.assertTrue(pause.is_paused())
         st = pause.active_state()
         self.assertEqual(st["reason"], "cloak debug")
-        self.assertIsNone(st["until"])
+        self.assertAlmostEqual(st["until"], st["at"] + 86400, delta=2)
         self.assertTrue(pause.pause_path().exists())
+
+    def test_pause_hard_is_indefinite(self):
+        rec = pause.set_paused(hard=True)
+        self.assertTrue(rec["hard"])
+        self.assertIsNone(pause.active_state()["until"])
 
     def test_resume_is_idempotent(self):
         pause.set_paused()

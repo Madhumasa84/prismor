@@ -441,9 +441,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         print("Un-enrolled." if had else "This machine was not enrolled.")
         return
 
-    # ── pause / resume: suspend local screening without uninstalling hooks ──
-    if args.command == "pause":
+    # ── pause / pause-hard / resume: suspend local ENFORCEMENT without ──────
+    # uninstalling hooks or touching observe-mode screening/telemetry.
+    if args.command in ("pause", "pause-hard"):
         from prismor.runtime import pause as _pause
+        hard = args.command == "pause-hard"
         duration_s: Optional[int] = None
         raw_duration = getattr(args, "duration", None)
         if raw_duration:
@@ -463,17 +465,17 @@ def main(argv: Optional[List[str]] = None) -> None:
             by = ident.get("user_id") or ident.get("label") or ""
         except Exception:
             pass
-        rec = _pause.set_paused(duration_seconds=duration_s, reason=getattr(args, "reason", "") or "", by=by)
+        rec = _pause.set_paused(duration_seconds=duration_s, reason=getattr(args, "reason", "") or "", by=by, hard=hard)
         # Fire one heartbeat now so the console flips to "paused" within ~30s.
         try:
             _pause.beat(agent="claude", state=rec)
         except Exception:
             pass
         print()
-        print(f"  {_color('⏸  Prismor paused', _YELLOW)} — tool calls are no longer screened and enforcement is off.")
+        print(f"  {_color('⏸  Prismor paused', _YELLOW)} — enforcement is off; observe-mode screening keeps running.")
         if rec.get("until"):
             until_local = datetime.fromtimestamp(float(rec["until"])).strftime("%H:%M")
-            print(f"  {_color('Auto-resumes at ' + until_local, _DIM)} (in {raw_duration}).")
+            print(f"  {_color('Auto-resumes at ' + until_local, _DIM)}" + (f" (in {raw_duration})." if raw_duration else " (24h)."))
         else:
             print(f"  {_color('Stays paused until you run', _DIM)} prismor resume.")
         print(f"  {_color('Resume anytime:', _GREEN)} prismor resume")
@@ -490,7 +492,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 _pause.beat_resumed(agent="claude")
             except Exception:
                 pass
-            print(f"  {_color('▶  Prismor resumed', _GREEN)} — screening and enforcement are active again.")
+            print(f"  {_color('▶  Prismor resumed', _GREEN)} — enforcement is active again.")
         else:
             print("  Prismor was not paused.")
         return
@@ -1083,24 +1085,21 @@ def main(argv: Optional[List[str]] = None) -> None:
         event = normalized["event"]
         _agent_event = str(event.get("agent_event") or "")
 
-        # Locally paused? Don't screen this call — pass it straight through. Emit
-        # the "paused" heartbeat only on a USER-TURN boundary (a prompt submit or
-        # session start), never on every tool call — so a busy paused session
-        # tells the console "still here, still paused" about once per message
-        # instead of flooding the feed with a beat per action. An idle paused
-        # machine simply goes quiet, which is the truth.
+        # Locally paused? Enforcement is suspended but observe-mode screening/
+        # telemetry below still runs as normal — pause only silences blocking.
+        # The heartbeat fires on a USER-TURN boundary (prompt submit or session
+        # start), not every tool call, so a busy paused session tells the
+        # console "still here, still paused" about once per message.
         try:
             from prismor.runtime import pause as _pause
             _pstate = _pause.active_state()
         except Exception:
             _pstate = None
-        if _pstate is not None:
-            if _agent_event in ("UserPromptSubmit", "SessionStart"):
-                try:
-                    _pause.beat(agent=args.agent, state=_pstate)
-                except Exception:
-                    pass
-            return
+        if _pstate is not None and _agent_event in ("UserPromptSubmit", "SessionStart"):
+            try:
+                _pause.beat(agent=args.agent, state=_pstate)
+            except Exception:
+                pass
 
         # Keep org-managed policy fresh on the hot path: a cheap, debounced
         # (~30s) version check that pulls the full signed policy only when the
@@ -1213,7 +1212,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             }) + "\n")
 
         force_observe = args.mode == "observe" and os.environ.get("PRISMOR_LOCAL_DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
-        if blocking is not None and not force_observe:
+        if blocking is not None and not force_observe and _pstate is None:
             # R4 authorization verdict, driven by the surfaced enforce finding's
             # `action`. `block` (or unset) → DENY; `step_up` → inline human
             # approval; `modify` → rewrite the tool input via a named transform.
@@ -2744,11 +2743,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("logout", help="Un-enroll this machine (remove device identity + cached remote policy)")
 
-    pause_p = subparsers.add_parser("pause", help="Pause local screening/enforcement without uninstalling the hooks")
+    pause_p = subparsers.add_parser("pause", help="Pause local ENFORCEMENT for 24h (observe mode stays on); use pause-hard to pause indefinitely")
     pause_p.add_argument("--for", dest="duration", metavar="DURATION",
-                         help="Auto-resume after this long, e.g. 30m, 2h, 1d (default: until you run `prismor resume`)")
+                         help="Auto-resume after this long, e.g. 30m, 2h, 1d (default: 24h)")
     pause_p.add_argument("--reason", help="Why you're pausing — shown in the console next to the device")
-    subparsers.add_parser("resume", help="Resume local screening/enforcement after `prismor pause`")
+    pause_hard_p = subparsers.add_parser("pause-hard", help="Pause local ENFORCEMENT indefinitely, until you run `prismor resume` (observe mode stays on)")
+    pause_hard_p.add_argument("--reason", help="Why you're pausing — shown in the console next to the device")
+    subparsers.add_parser("resume", help="Resume enforcement after `prismor pause` / `prismor pause-hard`")
 
     workspace_p = subparsers.add_parser("workspace", help="Show or set whether this workspace is org-managed or personal")
     workspace_p.add_argument("action", nargs="?", choices=["managed", "personal", "auto"], help="managed = report to org; personal = local-only; auto = let org patterns decide")
@@ -3680,7 +3681,8 @@ def _print_status_overview(workspace: Path) -> None:
     else:
         print(f"  {_color('Hooks:', _GREEN)}       {_color('not installed', _YELLOW)}")
 
-    # Paused? Local screening is suspended without uninstalling the hooks.
+    # Paused? Local enforcement is suspended without uninstalling the hooks
+    # (observe-mode screening/telemetry keeps running).
     try:
         from prismor.runtime import pause as _pause
         _pstate = _pause.active_state()
