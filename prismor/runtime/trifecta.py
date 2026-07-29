@@ -138,6 +138,59 @@ def egress_tags(findings: Optional[list] = None) -> Set[str]:
     return out
 
 
+def tool_tags_for_agent(
+    tt_settings: Optional[Dict[str, Any]],
+    agent_name: str,
+) -> Dict[str, Any]:
+    """Resolve ``settings.tool_tags`` for one agent.
+
+    A policy attached to an agent in the control plane ships as an overlay under
+    ``settings.tool_tags.agents[<agent name>]``, mirroring the shape
+    ``settings.egress.agents`` already uses so the two channels behave the same
+    way.
+
+    TIGHTEN-ONLY, deliberately. The overlay may add tag mappings and rules and
+    raise the mode to enforce; it can never remove a tag, drop a rule, or lower
+    the mode. An agent's name is asserted by its own process — it arrives in the
+    event, not from any credential — so a permissive overlay would be a way for
+    a compromised agent to name itself out of the fleet's policy. Adding
+    restrictions is safe under the same assumption; removing them is not.
+    """
+    tt = tt_settings or {}
+    if not agent_name:
+        return tt
+    agents = tt.get("agents")
+    if not isinstance(agents, dict):
+        return tt
+    sub = agents.get(agent_name)
+    if not isinstance(sub, dict) or not sub:
+        return tt
+
+    merged = dict(tt)
+
+    # Tag mappings union per tool, so an overlay adds tags rather than
+    # replacing whatever the fleet already assigned to that tool.
+    base_map = tt.get("tags") if isinstance(tt.get("tags"), dict) else {}
+    over_map = sub.get("tags") if isinstance(sub.get("tags"), dict) else {}
+    if over_map:
+        combined = {k: list(_as_list(v)) for k, v in base_map.items()}
+        for tool, val in over_map.items():
+            combined[tool] = sorted(set(combined.get(tool, [])) | set(_as_list(val)))
+        merged["tags"] = combined
+
+    # Rules and legacy incompatible sets append; neither list can be shortened.
+    for key in ("rules", "incompatible"):
+        extra = sub.get(key)
+        if isinstance(extra, (list, tuple)) and extra:
+            merged[key] = list(tt.get(key) or []) + list(extra)
+
+    # Mode escalates only. observe -> enforce is a tighten; the reverse is not.
+    if str(sub.get("mode", "")).lower() == "enforce":
+        merged["mode"] = "enforce"
+
+    return merged
+
+
 def classify_tool_tags(
     event: Dict[str, Any],
     event_type: str,

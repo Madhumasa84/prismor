@@ -249,10 +249,19 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_egress_sig is not None
         and str(latest_egress_sig) != str(_current_egress_sig())
     )
+    # Tool-tag governance (settings.tool_tags) is served without a version bump
+    # as well. The server has always sent toolTagsSig; nothing here compared it,
+    # so a new tag rule only reached the device when some OTHER channel happened
+    # to churn — an admin adding a blocking rule would watch it do nothing.
+    latest_tool_tags_sig = body.get("toolTagsSig")
+    tool_tags_changed = (
+        latest_tool_tags_sig is not None
+        and str(latest_tool_tags_sig) != str(_current_tool_tags_sig())
+    )
     if (version_changed or profile_changed or capture_changed
             or repos_changed or controls_changed or rule_ex_changed
             or egress_changed or tool_denies_changed or subject_controls_changed
-            or device_mode_changed):
+            or device_mode_changed or tool_tags_changed):
         return fetch(force=True)
     return False
 
@@ -405,6 +414,30 @@ def _current_egress_sig() -> str:
             egress = {"egress_allowlist": sorted(str(x) for x in legacy)}
         import hashlib
         blob = json.dumps(egress, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _current_tool_tags_sig() -> str:
+    """Signature of the cached policy's tool-tag config, matching the server's
+    ``toolTagsSig`` format (canonical JSON of settings.tool_tags → sha256 → 16
+    hex; empty when unset).
+
+    Canonical JSON for the same reason egress uses it: the block is nested (a
+    tag map, a rule list, and per-agent overlays) and — more importantly — the
+    device only ever holds the RESOLVED block, never the rows behind it. The
+    server originally hashed those rows, which is a signature the device cannot
+    reproduce, so this comparison could not exist at all.
+    """
+    try:
+        pol = verify_and_load()
+        settings = (pol or {}).get("settings") or {}
+        tags = settings.get("tool_tags")
+        if not isinstance(tags, dict) or not tags:
+            return ""
+        import hashlib
+        blob = json.dumps(tags, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     except Exception:
         return ""

@@ -1561,28 +1561,36 @@ class PolicyEngine:
         ):
             try:
                 from prismor.runtime.trifecta import (
-                    classify_tool_tags, egress_tags, TagLedger,
+                    classify_tool_tags, egress_tags, TagLedger, tool_tags_for_agent,
                 )
                 from prismor.runtime.tag_rules import compile_tool_tag_rules
                 _tt_tool = str((event.get("metadata") or {}).get("tool_name") or "")
+                # A policy attached to this agent in the control plane rides in
+                # the bundle as settings.tool_tags.agents[<name>], the same shape
+                # settings.egress.agents uses. Tighten-only — see
+                # trifecta.tool_tags_for_agent for why that is not optional.
+                _tt_cfg = tool_tags_for_agent(
+                    self.tool_tags,
+                    str(event.get("agent_name") or event.get("agent") or ""),
+                )
                 # Destination-derived tags let a tag rule reference where a call
                 # is going, not just which tool it is — the egress verdict for
                 # THIS event is already in `findings` by the time we get here.
                 _extra = (
                     egress_tags(findings)
-                    if self.tool_tags.get("egress_tags_enabled", True) else set()
+                    if _tt_cfg.get("egress_tags_enabled", True) else set()
                 )
                 _tags = classify_tool_tags(
                     event, event_type,
                     {f.get("category") for f in findings},
-                    self.tool_tags,
+                    _tt_cfg,
                     extra_tags=_extra,
                 )
                 if _tags:
-                    _rules = compile_tool_tag_rules(self.tool_tags)
+                    _rules = compile_tool_tag_rules(_tt_cfg)
                     _ledger = TagLedger(self.workspace, session_id)
                     _done = _ledger.completes_rules(_tags, _rules, index)
-                    _tt_mode = self.device_mode or str(self.tool_tags.get("mode", "observe")).lower()
+                    _tt_mode = self.device_mode or str(_tt_cfg.get("mode", "observe")).lower()
                     if _done is not None and _done.get("action") == "warn":
                         # A warn rule observes but never blocks — even under a
                         # device-level enforce override.
@@ -2968,26 +2976,46 @@ def validate_policy(path: Path) -> List[str]:
             except re.error as e:
                 errors.append(f"{prefix}.patterns[{j}]: invalid regex: {e}")
 
-    # settings.tool_tags: lint tag-rule expressions + legacy incompatible sets.
+    # settings.tool_tags: lint tag-rule expressions + legacy incompatible sets,
+    # for the fleet block AND each per-agent overlay under `agents:`. A broken
+    # rule hidden in an overlay is exactly as broken as one in the fleet block,
+    # and considerably harder to notice.
     tt = ((raw.get("settings") or {}).get("tool_tags") or {})
     if isinstance(tt, dict):
         from prismor.runtime.tag_rules import ParseError as _TagParseError, compile_rule as _compile_tag_rule
 
-        for i, entry in enumerate(tt.get("rules") or []):
-            prefix = f"settings.tool_tags.rules[{i}]"
-            expr = entry if isinstance(entry, str) else (
-                entry.get("expr") if isinstance(entry, dict) else None)
-            if not isinstance(expr, str):
-                errors.append(f"{prefix}: must be a string or an {{expr, action}} map")
-                continue
-            try:
-                _compile_tag_rule(expr)
-            except _TagParseError as e:
-                errors.append(f"{prefix}: {e.args[0]} in \"{expr}\"")
-            if isinstance(entry, dict) and entry.get("action") not in (None, "block", "warn"):
-                errors.append(f"{prefix}: invalid action '{entry.get('action')}' (block or warn)")
-        for i, s in enumerate(tt.get("incompatible") or []):
-            if not isinstance(s, (list, tuple)) or len({str(t) for t in s}) < 2:
-                errors.append(f"settings.tool_tags.incompatible[{i}]: needs at least 2 distinct tags")
+        def _lint_tag_block(block: Dict[str, Any], where: str) -> None:
+            for i, entry in enumerate(block.get("rules") or []):
+                prefix = f"{where}.rules[{i}]"
+                expr = entry if isinstance(entry, str) else (
+                    entry.get("expr") if isinstance(entry, dict) else None)
+                if not isinstance(expr, str):
+                    errors.append(f"{prefix}: must be a string or an {{expr, action}} map")
+                    continue
+                try:
+                    _compile_tag_rule(expr)
+                except _TagParseError as e:
+                    errors.append(f"{prefix}: {e.args[0]} in \"{expr}\"")
+                if isinstance(entry, dict) and entry.get("action") not in (None, "block", "warn"):
+                    errors.append(f"{prefix}: invalid action '{entry.get('action')}' (block or warn)")
+            for i, combo in enumerate(block.get("incompatible") or []):
+                if not isinstance(combo, (list, tuple)) or len({str(t) for t in combo}) < 2:
+                    errors.append(f"{where}.incompatible[{i}]: needs at least 2 distinct tags")
+
+        _lint_tag_block(tt, "settings.tool_tags")
+
+        agents = tt.get("agents")
+        if agents is not None and not isinstance(agents, dict):
+            errors.append("settings.tool_tags.agents: must be a map of agent name -> overlay")
+        elif isinstance(agents, dict):
+            for name, sub in agents.items():
+                where = f"settings.tool_tags.agents.{name}"
+                if not isinstance(sub, dict):
+                    errors.append(f"{where}: must be a map")
+                    continue
+                mode = sub.get("mode")
+                if mode is not None and str(mode).lower() not in ("observe", "enforce"):
+                    errors.append(f"{where}.mode: must be observe or enforce")
+                _lint_tag_block(sub, where)
 
     return errors

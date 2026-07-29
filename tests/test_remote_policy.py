@@ -190,3 +190,75 @@ def test_agent_controls_sig_matches_server_format(tmp_path, monkeypatch):
     # No controls → empty signature.
     _write_remote(tmp_path / ".prismor", "settings: {}\nrules: []\n")
     assert remote_policy._current_agent_controls_sig() == ""
+
+
+TOOL_TAGS_POLICY = """
+version: "1.0"
+rules: []
+settings:
+  tool_tags:
+    enabled: true
+    mode: enforce
+    tags:
+      WebFetch: [untrusted_content]
+    rules:
+      - expr: untrusted_content then critical_action
+        action: block
+    agents:
+      scraper:
+        mode: enforce
+        tags:
+          Bash: [critical_action]
+"""
+
+
+def test_tool_tags_sig_matches_server_format(tmp_path, monkeypatch):
+    """_current_tool_tags_sig reproduces the server's toolTagsSig (canonical
+    JSON of settings.tool_tags -> sha256 -> 16 hex).
+
+    This comparison did not exist: the server sent toolTagsSig from the start,
+    nothing on the device read it, and the server hashed the DB ROWS - which the
+    device never sees and so could never reproduce. Both sides now hash the
+    resolved block, the way egressSig already did.
+    """
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
+    from prismor.runtime.enterprise import remote_policy
+
+    _write_remote(tmp_path / ".prismor", TOOL_TAGS_POLICY)
+    _enroll()
+    sig = remote_policy._current_tool_tags_sig()
+    assert sig and len(sig) == 16
+
+    import hashlib
+    import json as _json
+    block = {
+        "enabled": True,
+        "mode": "enforce",
+        "tags": {"WebFetch": ["untrusted_content"]},
+        "rules": [{"expr": "untrusted_content then critical_action", "action": "block"}],
+        "agents": {"scraper": {"mode": "enforce", "tags": {"Bash": ["critical_action"]}}},
+    }
+    blob = _json.dumps(block, sort_keys=True, separators=(",", ":"))
+    assert sig == hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+    # No tool-tag config -> empty signature, so an org that never enabled the
+    # feature does not re-pull on every heartbeat.
+    _write_remote(tmp_path / ".prismor", "version: \"1.0\"\nsettings: {}\nrules: []\n")
+    assert remote_policy._current_tool_tags_sig() == ""
+
+
+def test_tool_tags_sig_changes_when_an_agent_overlay_changes(tmp_path, monkeypatch):
+    """Attaching a policy to an agent alters the bundle without bumping the
+    profile version, so the signature has to move or the device never re-pulls."""
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / ".prismor"))
+    from prismor.runtime.enterprise import remote_policy
+
+    _write_remote(tmp_path / ".prismor", TOOL_TAGS_POLICY)
+    _enroll()
+    before = remote_policy._current_tool_tags_sig()
+
+    _write_remote(tmp_path / ".prismor", TOOL_TAGS_POLICY.replace(
+        "          Bash: [critical_action]",
+        "          Bash: [critical_action, private_data]",
+    ))
+    assert remote_policy._current_tool_tags_sig() != before
