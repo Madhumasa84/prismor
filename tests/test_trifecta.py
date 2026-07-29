@@ -9,7 +9,7 @@ import pytest
 
 from prismor.runtime.trifecta import (
     UNTRUSTED, CRITICAL, classify_tool_tags, TagLedger, normalize_incompatible,
-    TOOL_TAG_DEFAULTS,
+    TOOL_TAG_DEFAULTS, tool_tags_for_agent,
 )
 from prismor.runtime.runtime import evaluate_tool_call
 from prismor.runtime.policy_engine import (
@@ -196,3 +196,124 @@ def test_completed_set_stays_restricted(tmp_path):
     assert UNTRUSTED in ledger.seen and CRITICAL in ledger.seen
     d = _call(ws, sid, "mcp__Gmail__send_email", "network")
     assert any(f.get("category") == "lethal_trifecta" for f in d.findings)
+
+
+# ── per-agent overlays (a policy attached to one agent) ───────────────────────
+#
+# A policy attached to an agent in the control plane ships as
+# settings.tool_tags.agents[<name>], mirroring settings.egress.agents. The
+# invariant worth pinning is that it can only ever TIGHTEN: an agent's name
+# arrives in the event, asserted by its own process, so a permissive overlay
+# would let a compromised agent name itself out of the fleet's policy.
+
+def _base_tt():
+    return {
+        "enabled": True,
+        "mode": "observe",
+        "tags": {"WebFetch": ["untrusted_content"]},
+        "rules": [{"expr": "untrusted_content then critical_action", "action": "block"}],
+        "agents": {
+            "scraper": {
+                "mode": "enforce",
+                "tags": {"Bash": ["critical_action"]},
+                "rules": [{"expr": "private_data with external_comms", "action": "block"}],
+            }
+        },
+    }
+
+
+def test_overlay_untouched_for_other_agents():
+    tt = _base_tt()
+    for name in ("", "some-other-agent"):
+        got = tool_tags_for_agent(tt, name)
+        assert got["mode"] == "observe"
+        assert sorted(got["tags"]) == ["WebFetch"]
+        assert len(got["rules"]) == 1
+
+
+def test_overlay_adds_tags_rules_and_escalates_mode():
+    got = tool_tags_for_agent(_base_tt(), "scraper")
+    assert got["mode"] == "enforce"
+    assert sorted(got["tags"]) == ["Bash", "WebFetch"]
+    assert len(got["rules"]) == 2
+
+
+def test_overlay_cannot_lower_the_mode():
+    tt = _base_tt()
+    tt["mode"] = "enforce"
+    tt["agents"] = {"scraper": {"mode": "observe"}}
+    assert tool_tags_for_agent(tt, "scraper")["mode"] == "enforce"
+
+
+def test_overlay_cannot_remove_a_tag():
+    tt = _base_tt()
+    tt["agents"] = {"scraper": {"tags": {"WebFetch": []}}}
+    assert tool_tags_for_agent(tt, "scraper")["tags"]["WebFetch"] == ["untrusted_content"]
+
+
+def test_overlay_cannot_drop_a_rule():
+    tt = _base_tt()
+    tt["agents"] = {"scraper": {"rules": []}}
+    assert len(tool_tags_for_agent(tt, "scraper")["rules"]) == 1
+
+
+def test_overlay_unions_tags_for_the_same_tool():
+    tt = _base_tt()
+    tt["agents"] = {"scraper": {"tags": {"WebFetch": ["private_data"]}}}
+    assert tool_tags_for_agent(tt, "scraper")["tags"]["WebFetch"] == [
+        "private_data", "untrusted_content",
+    ]
+
+
+def test_malformed_overlay_is_ignored_not_fatal():
+    for agents in (None, [], "nope", {"scraper": "nope"}, {"scraper": {}}):
+        tt = _base_tt()
+        tt["agents"] = agents
+        got = tool_tags_for_agent(tt, "scraper")
+        assert got["mode"] == "observe"
+        assert sorted(got["tags"]) == ["WebFetch"]
+
+
+def _validate(tmp_path, tool_tags):
+    """Lint a minimally-valid policy carrying this settings.tool_tags block."""
+    import yaml
+    from prismor.runtime.policy_engine import validate_policy
+    f = tmp_path / "policy.yaml"
+    f.write_text(yaml.safe_dump({"version": "1.0", "rules": [], "settings": {"tool_tags": tool_tags}}))
+    return validate_policy(f)
+
+
+def test_lint_walks_agent_overlays(tmp_path):
+    # A broken rule hidden inside an overlay is exactly as broken as one in the
+    # fleet block, and much easier to miss.
+    errs = _validate(tmp_path, {
+        "agents": {
+            "scraper": {
+                "mode": "sometimes",
+                "rules": ["untrusted_content then then"],
+                "incompatible": [["only_one"]],
+            }
+        }
+    })
+    joined = "\n".join(errs)
+    assert "settings.tool_tags.agents.scraper.mode" in joined
+    assert "settings.tool_tags.agents.scraper.rules[0]" in joined
+    assert "settings.tool_tags.agents.scraper.incompatible[0]" in joined
+
+
+def test_lint_rejects_a_non_map_agents_block(tmp_path):
+    errs = _validate(tmp_path, {"agents": ["nope"]})
+    assert any("settings.tool_tags.agents" in e for e in errs)
+
+
+def test_lint_accepts_a_valid_overlay(tmp_path):
+    errs = _validate(tmp_path, {
+        "agents": {
+            "scraper": {
+                "mode": "enforce",
+                "rules": ["untrusted_content then critical_action"],
+                "incompatible": [["private_data", "external_comms"]],
+            }
+        }
+    })
+    assert [e for e in errs if "tool_tags" in e] == []
