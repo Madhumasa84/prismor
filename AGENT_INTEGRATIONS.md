@@ -2,7 +2,7 @@
 
 How Prismor integrates with each major AI coding agent — what ships today, what's planned, and what mechanism each agent exposes for runtime security monitoring.
 
-_Last updated: 2026-07-13._
+_Last updated: 2026-07-30._
 
 ---
 
@@ -70,7 +70,13 @@ _Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by 
 | HTTP Eval-Server (any language) | framework | http | ✅ | `client-side` |
 | MCP Gateway (any MCP-speaking agent) | framework | mcp | ✅ | `proxy-deny` |
 
-Legend: ✅ shipped · 🟡 roadmap · — sweep-only / not applicable. Surfaces: `hook-config` (config-file hooks) · `sdk` (in-process adapter) · `mcp` (proxy) · `http` (eval-server sidecar) · `rules-only` (static guardrails).
+**Multiplexers**
+
+| Tool | Kind | Surface | Status | Blocking |
+|---|---|---|---|---|
+| Herdr | multiplexer | pass-through | — | — |
+
+Legend: ✅ shipped · 🟡 roadmap · — sweep-only / not applicable. Surfaces: `hook-config` (config-file hooks) · `sdk` (in-process adapter) · `mcp` (proxy) · `http` (eval-server sidecar) · `rules-only` (static guardrails) · `pass-through` (spawns other agents; no interception surface of its own).
 
 <!-- END GENERATED: coverage-matrix -->
 
@@ -552,6 +558,69 @@ Each agent below exposes a blocking pre-tool hook. An adapter requires (1) confi
 
 ---
 
+## Multiplexers / session wrappers — pass-through, no dedicated adapter
+
+### Herdr
+
+[Herdr](https://herdr.dev/) is a terminal multiplexer (Rust, single binary) that runs and
+tracks multiple coding agents from one session, including over SSH — it spawns each agent
+in a **real PTY pane**, not a sandboxed or proxied environment. It also ships a socket API
+(`herdr` agents can spawn panes and coordinate with each other) and a community plugin
+marketplace.
+
+- **No dedicated adapter needed.** Herdr doesn't call tools itself and doesn't sit between
+  an agent and its config files — it just launches the agent binary in a pane. An agent
+  already integrated above (Claude Code, Codex, Cursor, etc.) keeps reading its own
+  `~/.claude/settings.json` / `~/.codex/hooks.json` / etc. and firing Prismor's existing
+  hooks identically whether it's run directly or inside a Herdr pane.
+
+**Verified live** (Herdr `0.7.5`, `prismor` `1.32.1`, 2026-07-30): installed Claude Code
+enforcement hooks (`prismor install-hooks --agent claude --mode enforce`) in a scratch git
+repo, started a headless `herdr server`, created a workspace/pane over the socket API
+(`herdr workspace create`), and drove a real Claude Code session inside that pane via
+`herdr pane run` / `send-text` / `send-keys` — no direct terminal, purely through Herdr's
+API.
+
+- **Hook dispatch:** confirmed firing on every tool call from inside the Herdr pane.
+  `prismor status` for the workspace showed the same `hook-dispatch` findings
+  (`lethal_trifecta`, `dependency_risk` on a `package-lock.json` deletion) that the same
+  prompts produce running Claude Code directly — dispatch, rule evaluation, and session
+  logging are unaffected by running inside Herdr.
+- **Cloaking:** installed `prismor cloak install --agent claude` in the same pane and had
+  the agent run `echo "@@SECRET:DEMO_API_KEY@@"` (a non-sensitive test secret) via the Bash
+  tool. The `PreToolUse:Bash` hook decloaked the placeholder to the real value to execute
+  the command, and the `PostToolUse` scrub restored the placeholder before the result
+  reached the model — the agent's own follow-up message confirmed it only ever saw
+  `@@SECRET:DEMO_API_KEY@@`, never the raw value. This part of the pipeline is agent-side
+  (same code path Prismor already uses outside Herdr) and worked identically inside a pane.
+- **New finding — transient exposure in the pane, not Herdr-specific:** Claude Code's own
+  permission-approval prompt renders the *post-decloak* command line (i.e., the real secret
+  value) before the command runs, since approval happens after `PreToolUse` decloaks but
+  before `PostToolUse` scrubs the result. That frame is visible in the PTY Herdr owns for
+  that pane. In this test, `herdr pane read --source recent --lines 1000` afterward did
+  **not** return that frame — Claude Code's TUI redraws over it rather than appending to
+  scrollback, so it wasn't retrievable after the fact via the socket API in this test. This
+  is a pre-existing Claude Code UI behavior (identical outside Herdr too), not something
+  Herdr introduces — but Herdr's persistence and remote-attach/socket-read model (a pane can
+  be watched live by another SSH-attached client, or its live frame captured with different
+  `--source`/timing) mean the exposure window is reachable by more potential viewers than a
+  single local terminal. **Not fully closed out:** whether Herdr persists a fuller raw
+  scrollback/session recording to disk beyond what `pane read` exposed here was not checked.
+  Recommend re-testing with `--source visible` immediately after the approval prompt renders
+  (before advancing the pane) if cloaking is deployed on a shared/remote Herdr session.
+- **Sweep target:** `~/.config/herdr/` — registered in `prismor/runtime/integrations/registry.yaml`
+  (`id: herdr`) and `TOOL_DIRS` in `prismor/runtime/sweep.py`, so `prismor sweep` now scans
+  it alongside every other agent's config dir. No secrets were found there in this test; the
+  directory mainly held `config.toml` and logs, but registering it means a future auth
+  token or socket credential Herdr starts persisting there gets swept automatically.
+- **Registry:** `kind: multiplexer` / `surface: pass-through` are new enum values added to
+  `registry.schema.json` and `registry.py`'s `KINDS`/`SURFACES` — the first entry that isn't
+  a `coding-agent` or `framework`. `scripts/gen_integration_matrix.py` gained a third
+  generated table ("Multiplexers") to render it; run `scripts/verify_registry.sh` after
+  editing `registry.yaml` to confirm the schema and generated doc stay in sync.
+
+---
+
 ## Sweep / rules-only — no runtime enforcement
 
 These agents don't expose a programmable pre-tool hook. Integration is limited to:
@@ -626,3 +695,7 @@ Internal code is authoritative for the five supported agents.
 - [Aider — options](https://aider.chat/docs/config/options.html)
 - [Trae — rules docs](https://docs.trae.ai/ide/rules?_lang=en)
 - [Kilocode — tool filtering & permissions (DeepWiki)](https://deepwiki.com/Kilo-Org/kilocode/6.3-tool-filtering-and-permissions)
+
+**Multiplexers:**
+
+- Herdr — [herdr.dev](https://herdr.dev/) · pass-through behavior and cloaking scrub verified live against a real Claude Code session run entirely through Herdr's socket API (`herdr` `0.7.5`, `prismor` `1.32.1`), 2026-07-30. Not from docs alone — see the Herdr section above for the test setup.
