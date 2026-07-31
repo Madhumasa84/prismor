@@ -57,6 +57,16 @@ Standard OS-level and endpoint security tools monitor the kernel and filesystem.
 
 ---
 
+## Quick Start (30s)<a name="quick-start" />
+
+```bash
+pip install prismor
+```
+
+For the Skill, curl, and git-clone alternatives, plus PEP 668 systems and secret-cloaking setup, see the [full installation guide](docs/installation.md).
+
+---
+
 ## Capabilities<a name="capabilities" />
 
 ![Prismor Architecture](assets/immunity-highlevel.png)
@@ -90,30 +100,7 @@ These capabilities map to the [OWASP Top 10 for LLM Applications](https://genai.
 
 ---
 
-
-## Quick Start<a name="quick-start" />
-
-### Install
-
-- **Option A: pip**
-  ```bash
-  pip install prismor
-  ```
-- **Option B: Skill** — point your agent at [`SKILL.md`](SKILL.md); it installs itself at session start, no interruption to your workflow
-  ```markdown
-  Read `SKILL.md` and follow its instructions for runtime security.
-  ```
-- **Option C: curl**
-  ```bash
-  curl -sSL https://prismor.dev/install | sh
-  ```
-- **Option D: git clone**
-  ```bash
-  git clone https://github.com/PrismorSec/prismor.git ~/.prismor
-  bash ~/.prismor/scripts/init.sh .
-  ```
-
-Full install guide (PEP 668 systems, source-checkout testing, secret cloaking setup): [docs/installation.md](docs/installation.md)
+## Configuration<a name="configuration" />
 
 ### Command Reference
 
@@ -150,7 +137,9 @@ prismor install-hooks --agent all --mode enforce    # honor policy enforce rules
 
 > **Upgrading from a pre-`mode` release?** Backward compatibility is preserved: a policy that predates per-rule modes (it sets `settings.block_categories` but no `default_mode` and no rule-level `mode`) keeps its original behavior — those categories still block when installed with `--mode enforce`. The moment your policy adopts the per-rule model (any `mode`/`default_mode`), it becomes fully policy-authoritative as described above.
 
-### Architecture<a name="how-it-works" />
+---
+
+## Architecture<a name="how-it-works" />
 
 How Prismor's local protections, evidence controls, and optional enterprise
 services fit together:
