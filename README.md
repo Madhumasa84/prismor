@@ -61,6 +61,7 @@ Standard OS-level and endpoint security tools monitor the kernel and filesystem.
 
 ```bash
 pip install prismor
+prismor setup
 ```
 
 For the Skill, curl, and git-clone alternatives, plus PEP 668 systems and secret-cloaking setup, see the [full installation guide](docs/installation.md).
