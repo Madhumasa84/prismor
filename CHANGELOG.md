@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.37.0] — 2026-08-03
 
 ### Added
 
@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- **`prismor enroll-status` leads with the verified state.** It printed the headline "Enrolled" from the local file even when the very next line reported the control plane had refused the key. It now says `Enrolled and verified`, `Enrolled — control plane unreachable, could not verify`, or `NOT usable — the control plane refused this key` with the remedy.
 - **`prismor enroll-status` and `prismor doctor` now verify against the control plane instead of trusting the local file.** Both reported "Enrolled" from `identity.json` alone, so a revoked, mistyped, or wrong-org key still read as healthy — and a `PRISMOR_AGENT_KEY` identity carries no org/device/label fields, so a perfectly working deployed agent printed `org: None / device id: None / label: None`. Both commands now make one authenticated call to `/api/policy/version` and print what the server resolved, or the reason it refused. `doctor`'s telemetry-sink check moved off the unauthenticated `/api/health` (up for anyone, so it passed with an invalid key) onto the same authenticated probe, and reports the org's capture mode alongside it.
 - **`prismor doctor` fails on a `local` workspace scope**, the quietest way to see nothing at all, and names the fix for both the deployed and the dev-machine case.
 

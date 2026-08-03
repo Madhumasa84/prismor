@@ -348,17 +348,27 @@ def main(argv: Optional[List[str]] = None) -> None:
             print("Not enrolled. Run `prismor enroll <token>` to link this machine to an org.")
             return
         revoked = _identity.revoked_info()
+        # An env key (PRISMOR_AGENT_KEY) carries no org/device/label, so the
+        # local view alone prints "org: None" on a perfectly healthy deployed
+        # agent - and prints "Enrolled" for a revoked one. Ask the server first,
+        # so the HEADLINE reflects what the control plane says, not what a file
+        # on this machine claims.
+        verified = _identity.verify_remote()
         if revoked:
             print("Enrolled — but the control plane REJECTED this device's key")
             print(f"  reason:     {revoked.get('reason') or 'rejected (401/403)'}")
             print("  This device was likely revoked by an org admin. Local protection")
             print("  still applies (last good policy). Re-link with: prismor enroll <token>")
+        elif verified.get("ok"):
+            print("Enrolled and verified")
+        elif "unreachable" in str(verified.get("error", "")):
+            print("Enrolled — control plane unreachable, could not verify")
+            print("  Local protection continues on the last good policy; events spool.")
         else:
-            print("Enrolled")
-        # An env key (PRISMOR_AGENT_KEY) carries no org/device/label, so the
-        # local view alone prints "org: None" on a perfectly healthy deployed
-        # agent - and prints "Enrolled" for a revoked one. Ask the server.
-        verified = _identity.verify_remote()
+            print("NOT usable — the control plane refused this key")
+            print(f"  reason:     {verified.get('error')}")
+            print("  Nothing this machine does will reach the console. Re-mint the agent")
+            print("  key (console → Connections) or re-enroll with: prismor enroll <token>")
         if verified.get("ok"):
             print(f"  org:        {ident.get('org_name') or verified.get('org') or ident.get('org_id')}")
             print(f"  device id:  {ident.get('device_id') or verified.get('device_id')}")
