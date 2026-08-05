@@ -1,9 +1,4 @@
 <h1 align="center">Prismor</h1>
-
-<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.</h3>
-
-<h5 align="center">Blocks dangerous commands, prompt injection, prevents secret leaks and recommends safe supply chain packages <br><br>Prismor can also be used in observe mode to see agent session activity and dangerous actions in a local self-serve dashboard which grows by time</h4>
-
 <p align="center">
   <a href="https://pypi.org/project/prismor/"><img src="https://img.shields.io/pypi/v/prismor" alt="PyPI"/></a>
   <a href="https://github.com/PrismorSec/prismor/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
@@ -12,6 +7,10 @@
   <a href="https://deepwiki.com/PrismorSec/prismor"><img src="https://img.shields.io/badge/DeepWiki-prismor-blue?logo=bookstack&logoColor=white" alt="DeepWiki" /></a>
   <a href="https://discord.gg/FH2PRX754c"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
+<h3 align="center">Runtime security hooks for Claude Code, Codex, and other AI coding agents.</h3>
+Prismor can also be used in observe mode to see agent session activity and dangerous actions in a local self-serve dashboard</h4>
+
+
 
 <h3 align="center">
   <a href="https://prismor.dev"><b>Website</b></a> &bull;
