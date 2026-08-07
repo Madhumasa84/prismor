@@ -1,3 +1,9 @@
+## [1.38.1] — 2026-08-06
+
+### Fixed
+
+- **Cleared all five open Dependabot alerts.** Bumped the `vercel-ai` adapter's dev dependency on `ai` from `^4.0.0` to `^7.0.51` and `pipeline/requirements.txt`'s `requests` pin from `2.31.0` to `2.34.2`. (#243)
+
 ## [1.38.0] — 2026-08-03
 
 ### Added
