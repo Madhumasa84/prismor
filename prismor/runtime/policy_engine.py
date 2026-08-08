@@ -52,6 +52,10 @@ _NON_OVERRIDABLE_RULE_IDS = frozenset({
     # this rule would let an agent erase its own history undetected.
     "audit-trail-tampering",
     "tool-category-crossover",
+    # An override that disables memory-integrity checking would let a
+    # poisoned .prismor/policy.yaml also disable detection of itself.
+    # See FIX_PLAN.md §3.5.
+    "memory-integrity-mismatch",
 })
 
 # Categories that must stay in settings.block_categories no matter what an
@@ -126,6 +130,7 @@ _EVENT_SOURCE: Dict[str, str] = {
     "prompt": "user_prompt",
     "tool_result": "tool_output",
     "memory": "project_memory",
+    "memory_integrity": "memory_integrity",
 }
 
 # Provenance stamped on a finding raised from the body of a script the agent
@@ -2472,6 +2477,29 @@ _CONFUSABLE_FOLD = {
     0x200B: None, 0x200C: None, 0x200D: None, 0x200E: None, 0x200F: None,
     0x2060: None, 0x2061: None, 0x2062: None, 0x2063: None, 0x2064: None,
     0xFEFF: None, 0x00AD: None,
+    # Bidi embedding/override controls (Trojan Source, CVE-2021-42574). These
+    # reorder how a line RENDERS without changing the codepoint sequence the
+    # model reads, so a directive can display as innocuous prose and still
+    # match nothing until folded.
+    0x202A: None,  # LRE
+    0x202B: None,  # RLE
+    0x202C: None,  # PDF
+    0x202D: None,  # LRO
+    0x202E: None,  # RLO
+    # Bidi isolates — same trick, newer mechanism.
+    0x2066: None,  # LRI
+    0x2067: None,  # RLI
+    0x2068: None,  # FSI
+    0x2069: None,  # PDI
+    # Line/paragraph separators fold to a real newline: patterns bounded by
+    # [^\n] must see a line break here, or a payload split on U+2028 reads as
+    # one long line and evades the bound.
+    0x2028: "\n",  # LINE SEPARATOR
+    0x2029: "\n",  # PARAGRAPH SEPARATOR
+    # Invisible fillers that render as nothing despite living in text blocks.
+    0x115F: None,  # HANGUL CHOSEONG FILLER
+    0x1160: None,  # HANGUL JUNGSEONG FILLER
+    0x180E: None,  # MONGOLIAN VOWEL SEPARATOR
 }
 
 
@@ -2710,6 +2738,13 @@ def _extract_fields(event: Dict[str, Any]) -> Dict[str, str]:
         "content": str(event.get("content", "")),
         "stdout": str(event.get("stdout", "")),
         "stderr": str(event.get("stderr", "")),
+        # Structural facts about a project-memory scan (see hooks._read_project_memory),
+        # surfaced as "true"/"false" so a rule can match them with a plain
+        # pattern (`^true$`) like any other field. Without these the
+        # memory-invisible-text / memory-oversized-instruction-file rules would
+        # look up a missing key, get "", and never fire.
+        "has_invisible_controls": _bool_field(event, "has_invisible_controls"),
+        "truncated": _bool_field(event, "truncated"),
         # GUI-agent surface (event type ui_action). Populated only on ui_action
         # events; empty elsewhere, which is what keeps a ui_action rule inert
         # against shell/file/network traffic without any extra gating.
@@ -2718,6 +2753,25 @@ def _extract_fields(event: Dict[str, Any]) -> Dict[str, str]:
         "app_name": str(event.get("app_name", "")),
         "typed_text": str(event.get("typed_text", "")),
     }
+
+
+def _bool_field(event: Dict[str, Any], key: str) -> str:
+    """Read a boolean event fact as "true"/"false", or "" when absent.
+
+    Checked at the event's top level first, then in ``metadata`` (where the hook
+    normalizers put scan facts). Absent stays "" rather than "false" so a rule
+    that matches ``^true$`` is inert on event types that never set the field.
+    """
+    value = event.get(key)
+    if value is None:
+        meta = event.get("metadata")
+        if isinstance(meta, dict):
+            value = meta.get(key)
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip().lower()
+    return "true" if value else "false"
 
 
 def _extract_mcp_args(event: Dict[str, Any]) -> str:
