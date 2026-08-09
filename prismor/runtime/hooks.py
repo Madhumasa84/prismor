@@ -13,7 +13,7 @@ from prismor.runtime.store import append_session_event
 
 _SUPPORTED_AGENTS = [
     "claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro",
-    "crush", "openhands", "qwen", "continue", "goose", "opencode",
+    "crush", "openhands", "qwen", "continue", "goose", "opencode", "gemini",
 ]
 
 
@@ -47,6 +47,8 @@ def _strip_for_agent(agent: str, config: Dict[str, Any], marker: str) -> Tuple[D
         return _strip_goose(config, marker)
     if agent == "opencode":
         return _strip_opencode(config, marker)
+    if agent == "gemini":
+        return _strip_gemini(config, marker)
     return _strip_windsurf(config, marker)
 
 
@@ -92,6 +94,8 @@ def install_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str, m
             config = _merge_goose(config, command, config_path.parent.parent)
         elif current_agent == "opencode":
             config = _merge_opencode(config, command, repo_root)
+        elif current_agent == "gemini":
+            config = _merge_gemini(config, command)
         else:
             config = _merge_windsurf(config, command, workspace)
 
@@ -332,6 +336,8 @@ def normalize_payload(*, agent: str, payload: Dict[str, Any], workspace: Path) -
         event = _normalize_goose(payload, session_id)
     elif agent == "opencode":
         event = _normalize_opencode(payload, session_id)
+    elif agent == "gemini":
+        event = _normalize_gemini(payload, session_id, workspace)
     else:
         event = _normalize_cursor(payload, session_id)
     if isinstance(event, dict) and event.get("type") == "shell" and event.get("command"):
@@ -460,6 +466,8 @@ def _config_path(agent: str, scope: str, workspace: Path) -> Path:
             return workspace / ".agents" / "plugins" / "prismor" / "hooks" / "hooks.json"
         if agent == "opencode":
             return workspace / ".opencode" / "plugins.json"
+        if agent == "gemini":
+            return workspace / ".gemini" / "settings.json"
         return workspace / ".windsurf" / "hooks.json"
 
     if agent == "claude":
@@ -494,6 +502,8 @@ def _config_path(agent: str, scope: str, workspace: Path) -> Path:
         return home / ".agents" / "plugins" / "prismor" / "hooks" / "hooks.json"
     if agent == "opencode":
         return home / ".config" / "opencode" / "plugins.json"
+    if agent == "gemini":
+        return home / ".gemini" / "settings.json"
     return home / ".codeium" / "windsurf" / "hooks.json"
 
 
@@ -1893,81 +1903,274 @@ def _classify_mcp_event(
     return {**base, "type": "tool_result", "response": args_text, **mcp_meta}
 
 
-# Project-memory files auto-loaded by the agent at session start. Their
-# directives are trusted implicitly by the model, so Prismor treats them as an
-# untrusted content source (issue #155).
+import re as _re
+
+# Project-memory / agent-instruction files auto-loaded by the agent at session
+# start. Their directives are trusted implicitly by the model, so Prismor treats
+# them as an untrusted content source (issue #155). CLAUDE.md/AGENTS.md were the
+# original two; every entry below is an equally auto-loaded instruction surface
+# for *some* agent, so scanning only the first two left the rest unguarded (#153).
 #
-# This set is deliberately kept in sync with the paths guarded by the
-# `agent-instruction-tampering` and `memory-directive-on-write` rules. It used
-# to hold only CLAUDE.md/AGENTS.md, which meant Prismor warned on *writes* to
-# .cursorrules / GEMINI.md / copilot-instructions.md but never read what was
-# already in them — the door was locked without ever checking who was inside.
-# Entries may be nested relative paths; `directory / name` joins them fine.
-_MEMORY_FILENAMES = (
+# Two shapes, handled differently by _discover_memory_files:
+#   - bare basenames, looked up directly in each search directory
+#   - globs, expanded relative to a search directory (rule/agent directories
+#     hold many files, and the set is not known ahead of time)
+_MEMORY_BASENAMES: Tuple[str, ...] = (
     "CLAUDE.md",
     "CLAUDE.local.md",
     "AGENTS.md",
     "GEMINI.md",
     ".cursorrules",
     ".windsurfrules",
-    ".github/copilot-instructions.md",
+    ".clinerules",
 )
+_MEMORY_GLOBS: Tuple[str, ...] = (
+    ".claude/rules/*.md",
+    ".claude/agents/*.md",
+    ".cursor/rules/*.mdc",
+    ".github/copilot-instructions.md",
+    ".devin/rules/*.md",
+    ".windsurf/rules/*.md",
+    ".roo/rules/*.md",
+    ".augment/rules/*.md",
+    "**/.github/copilot-instructions.md",
+)
+_MEMORY_PATH_PATTERNS: Tuple[str, ...] = _MEMORY_BASENAMES + _MEMORY_GLOBS
 # Cap total scanned memory content so a huge memory file can't blow the OS
 # argument limit / telemetry payload. Detection patterns fire on the leading
-# directive-shaped text; a truncated tail is acceptable.
+# directive-shaped text; a truncated tail is acceptable — and now flagged, via
+# the `truncated` metadata field, so an oversized file is itself a signal.
 _MEMORY_SCAN_LIMIT = 64_000
+_MEMORY_SCAN_LIMIT_MIN = 4_096
+_MEMORY_SCAN_LIMIT_MAX = 4_194_304
+# Cap the number of files a single scan opens. The rule/agent globs can expand
+# without bound in a large repo, and SessionStart is on the interactive path.
+_MEMORY_MAX_FILES = 64
+
+# Invisible / formatting codepoints that carry no meaning in an instruction file
+# but do hide text from a human reviewer — the TrapDoor technique. Structural
+# signal only: presence is reported as metadata, the content is still scanned
+# normally (and _fold_confusables strips these before the rescan).
+#
+# Deliberately EXCLUDES U+200D (ZWJ), which is load-bearing in emoji sequences,
+# and every CJK/Hangul codepoint that renders as real text. The Hangul fillers
+# (U+115F/U+1160), Braille blank (U+2800), Hangul filler (U+3164) and halfwidth
+# Hangul filler (U+FFA0) ARE included: they live in CJK blocks but render as
+# nothing, which is exactly what makes them useful for hiding a directive.
+_INVISIBLE_CONTROL_RE = _re.compile(
+    "[\u202a-\u202e"    # bidi embedding/override controls (Trojan Source)
+    "\u2066-\u2069"    # bidi isolates
+    "\u200b\u200c\u200e\u200f"  # ZWSP, ZWNJ, LRM, RLM -- NOT U+200D (ZWJ),
+                                  # which is load-bearing in emoji sequences
+    "\u2060-\u2064"    # word joiner + invisible operators
+    "\ufeff\u00ad\u180e"  # BOM, soft hyphen, Mongolian vowel separator
+    "\ufff0-\ufffb"    # unassigned + interlinear annotation controls
+    "\u115f\u1160\u2800\u3164\uffa0"  # blank-rendering CJK/Braille fillers
+    "]"
+)
 
 
-def _read_project_memory(workspace: Path) -> Dict[str, Any]:
-    """Collect CLAUDE.md/AGENTS.md content the agent loads at session start.
+def _memory_scan_limit() -> int:
+    """Byte cap for a single project-memory scan.
 
-    Searches the workspace and its ancestors (project-scoped memory) plus the
-    user's ~/.claude directory (global memory). Returns the concatenated text,
-    the list of files it came from, and a per-file content fingerprint used by
-    the drift check (scanner.check_memory_drift). Best-effort: unreadable files
-    are skipped rather than failing the hook.
+    Defaults to ``_MEMORY_SCAN_LIMIT`` and is overridable with
+    ``PRISMOR_MEMORY_SCAN_LIMIT`` for repos whose instruction files legitimately
+    run long. Clamped to [4KiB, 4MiB]; an unparseable value falls back to the
+    default rather than failing the hook.
     """
-    seen: set[Path] = set()
-    parts: List[str] = []
-    files: List[str] = []
-    digests: Dict[str, str] = {}
+    raw = os.environ.get("PRISMOR_MEMORY_SCAN_LIMIT")
+    if not raw:
+        return _MEMORY_SCAN_LIMIT
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        return _MEMORY_SCAN_LIMIT
+    return max(_MEMORY_SCAN_LIMIT_MIN, min(_MEMORY_SCAN_LIMIT_MAX, value))
 
+
+def _instructions_loaded_paths() -> set:
+    """Instruction-file paths the agent itself reported loading, if it tells us.
+
+    Claude Code's InstructionsLoaded hook data names the files actually pulled
+    into context, which is authoritative in a way glob discovery can never be —
+    it covers imports, user-level config and any location Prismor doesn't know
+    to look. Feature-detected and purely ADDITIVE: this is unioned with glob
+    discovery, and an environment that doesn't publish the data yields an empty
+    set, leaving behaviour exactly as it was.
+
+    Read from ``PRISMOR_INSTRUCTIONS_LOADED`` (a JSON array of paths, or an
+    os.pathsep-separated list) or from a JSON file named by
+    ``PRISMOR_INSTRUCTIONS_LOADED_FILE``. Best-effort; never raises.
+    """
+    raw = os.environ.get("PRISMOR_INSTRUCTIONS_LOADED", "")
+    if not raw:
+        path_env = os.environ.get("PRISMOR_INSTRUCTIONS_LOADED_FILE", "")
+        if not path_env:
+            return set()
+        try:
+            raw = Path(path_env).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return set()
+
+    raw = raw.strip()
+    if not raw:
+        return set()
+
+    entries: List[Any] = []
+    if raw[0] in "[{":
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return set()
+        if isinstance(parsed, dict):
+            parsed = parsed.get("paths") or parsed.get("files") or []
+        if isinstance(parsed, list):
+            entries = parsed
+    else:
+        entries = [p for p in raw.split(os.pathsep) if p]
+
+    out: set = set()
+    for entry in entries:
+        if isinstance(entry, dict):
+            entry = entry.get("path") or entry.get("file") or ""
+        if isinstance(entry, str) and entry.strip():
+            out.add(entry.strip())
+    return out
+
+
+def _discover_memory_files(workspace: Path) -> List[Path]:
+    """Enumerate the instruction files an agent auto-loads for ``workspace``.
+
+    Searches the workspace and its three nearest ancestors (project-scoped
+    memory) plus the user's ~/.claude directory (global memory), matching every
+    entry in ``_MEMORY_PATH_PATTERNS``, and unions in anything the agent
+    reported loading itself (see ``_instructions_loaded_paths``).
+
+    Recursive (``**``) globs are expanded ONLY under the workspace itself —
+    running one against an ancestor would walk large parts of the filesystem on
+    the interactive SessionStart path. Returns at most ``_MEMORY_MAX_FILES``
+    paths, de-duplicated by resolved target and stable in search order.
+    """
     search_dirs: List[Path] = []
     try:
         ws = workspace.resolve()
         search_dirs.append(ws)
         search_dirs.extend(ws.parents[:3])
     except Exception:
+        ws = workspace
         search_dirs.append(workspace)
     search_dirs.append(Path.home() / ".claude")
 
-    for directory in search_dirs:
-        for name in _MEMORY_FILENAMES:
-            candidate = directory / name
-            try:
-                resolved = candidate.resolve()
-            except Exception:
-                resolved = candidate
-            if resolved in seen or not candidate.is_file():
-                continue
-            seen.add(resolved)
-            try:
-                text = candidate.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                continue
-            files.append(str(candidate))
-            parts.append(f"# {candidate}\n{text}")
-            # Fingerprint the untruncated per-file text: the drift check must
-            # notice a change past _MEMORY_SCAN_LIMIT, which the concatenated
-            # (and truncated) scan content would miss.
-            try:
-                from prismor.runtime.scanner import text_fingerprint
-                digests[str(candidate)] = text_fingerprint(text)
-            except Exception:
-                pass
+    seen: set = set()
+    found: List[Path] = []
 
-    content = "\n\n".join(parts)[:_MEMORY_SCAN_LIMIT]
-    return {"content": content, "files": files, "digests": digests}
+    def _add(candidate: Path) -> bool:
+        """Record ``candidate`` if it's a new, readable file. False when full."""
+        if len(found) >= _MEMORY_MAX_FILES:
+            return False
+        try:
+            if not candidate.is_file():
+                return True
+            resolved = candidate.resolve()
+        except Exception:
+            return True
+        if resolved in seen:
+            return True
+        seen.add(resolved)
+        found.append(candidate)
+        return len(found) < _MEMORY_MAX_FILES
+
+    for directory in search_dirs:
+        for pattern in _MEMORY_PATH_PATTERNS:
+            if "*" not in pattern:
+                if not _add(directory / pattern):
+                    return found
+                continue
+            if pattern.startswith("**") and directory != ws:
+                continue
+            try:
+                matches = directory.glob(pattern)
+            except Exception:
+                continue
+            try:
+                for match in matches:
+                    if not _add(match):
+                        return found
+            except Exception:
+                # A permission error mid-walk must not lose the files already
+                # discovered, nor abort the remaining patterns.
+                continue
+
+    for reported in _instructions_loaded_paths():
+        if not _add(Path(reported)):
+            return found
+
+    return found
+
+
+def _read_memory_file(path: Path) -> Optional[str]:
+    """Read one instruction file, or None if it can't be read.
+
+    Decoding is lossy-but-total (``errors="replace"``) so a file with a stray
+    non-UTF-8 byte is still scanned rather than silently skipped — a scan that
+    drops a file is a detection gap, which is worse than imperfect bytes.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def _read_project_memory(workspace: Path) -> Dict[str, Any]:
+    """Collect the instruction-file content the agent loads at session start.
+
+    Returns the concatenated text, the list of files it came from, and:
+
+    ``truncated``
+        the combined content hit the scan limit, so a tail went unscanned
+    ``has_invisible_controls``
+        some file contains invisible/zero-width codepoints (computed over each
+        file's FULL text, before truncation, so a payload hidden past the limit
+        still raises the flag)
+    ``digests``
+        per-file content fingerprint (``scanner.text_fingerprint``), used by
+        the drift check in ``runtime.evaluate_tool_call``
+        (``scanner.check_memory_drift``) — computed over the untruncated
+        per-file text so a change past the scan limit is still caught.
+
+    Best-effort throughout: unreadable files are skipped rather than failing the
+    hook.
+    """
+    parts: List[str] = []
+    files: List[str] = []
+    digests: Dict[str, str] = {}
+    has_invisible = False
+
+    discovered = _discover_memory_files(workspace)
+    for candidate in discovered:
+        text = _read_memory_file(candidate)
+        if text is None:
+            continue
+        if not has_invisible and _INVISIBLE_CONTROL_RE.search(text):
+            has_invisible = True
+        files.append(str(candidate))
+        parts.append(f"# {candidate}\n{text}")
+        try:
+            from prismor.runtime.scanner import text_fingerprint
+            digests[str(candidate)] = text_fingerprint(text)
+        except Exception:
+            pass
+
+    limit = _memory_scan_limit()
+    joined = "\n\n".join(parts)
+    content = joined[:limit]
+    return {
+        "content": content,
+        "files": files,
+        "digests": digests,
+        "truncated": len(joined) > limit or len(discovered) >= _MEMORY_MAX_FILES,
+        "has_invisible_controls": has_invisible,
+    }
 
 
 def _normalize_claude(payload: Dict[str, Any], session_id: str, workspace: Path) -> Dict[str, Any]:
@@ -2005,9 +2208,22 @@ def _normalize_claude(payload: Dict[str, Any], session_id: str, workspace: Path)
         memory_root = Path(raw_cwd) if raw_cwd else workspace
         memory = _read_project_memory(memory_root)
         base["metadata"]["memory_files"] = memory["files"]
+        # Structural facts about the scan itself, matched directly by the
+        # memory-invisible-text / memory-oversized-instruction-file rules (#153).
+        base["metadata"]["truncated"] = memory["truncated"]
+        base["metadata"]["has_invisible_controls"] = memory["has_invisible_controls"]
         # Per-file content fingerprints for the drift check in
         # runtime.evaluate_tool_call (scanner.check_memory_drift).
         base["metadata"]["memory_digests"] = memory["digests"]
+        # Integrity check (#154): verify instruction files against TOFU baseline.
+        # Runs after content scanning — integrity findings supplement, never
+        # replace, the content-based rules above. All integrity actions are
+        # warn-level; mismatches feed the counter-instruction in cli.py.
+        _read_entries = [{"path": p} for p in memory.get("files", [])]
+        if _read_entries:
+            from prismor.runtime.memory_guard import verify_memory_files
+            _integrity_findings = verify_memory_files(_read_entries, memory_root)
+            base.setdefault("integrity_findings", []).extend(_integrity_findings)
         return {**base, "type": "memory", "content": memory["content"]}
     if hook_event == "UserPromptSubmit":
         return {**base, "type": "prompt", "prompt": payload.get("prompt", "")}
@@ -2200,11 +2416,208 @@ def _normalize_opencode(payload: Dict[str, Any], session_id: str) -> Dict[str, A
     return {**base, "type": "tool_result", "response": json.dumps(payload)}
 
 
+# ── Gemini CLI adapter ────────────────────────────────────────────────────────
+#
+# Gemini CLI (google-gemini/gemini-cli) uses the same Claude-style nested hook
+# config shape:
+#
+#   settings.json -> {"hooks": {"BeforeTool": [{"matcher": "...", "hooks":
+#                       [{"type": "command", "name": "prismor", "command": "..."}]}]}}
+#
+# Config locations:
+#   project:  <workspace>/.gemini/settings.json
+#   global:   ~/.gemini/settings.json
+#
+# Blocking: exit 2 blocks the tool call; stderr is surfaced to the user as the
+# rejection reason. Same convention as Claude Code / Codex / Grok.
+#
+# Not yet verified against a live `gemini` binary. Built from the public
+# Gemini CLI hooks documentation at https://geminicli.com/docs/hooks/reference/
+# and the Google Developers Blog launch post. Before relying on this in
+# `enforce` mode, run `gemini` and confirm a deliberately blocked command is
+# actually denied end-to-end.
+
+
+def _strip_gemini(config: Dict[str, Any], marker: str) -> tuple[Dict[str, Any], bool]:
+    """Remove Prismor hook entries from a Gemini CLI settings.json config.
+
+    Gemini CLI uses the same nested Claude-shape hook entries
+    (list of {matcher, hooks:[{type, command}]} per event), so the
+    strip logic mirrors _strip_claude but operates on Gemini's event names.
+    """
+    hooks = dict(config.get("hooks", {}))
+    removed = False
+    for event_name in list(hooks.keys()):
+        entries = hooks[event_name]
+        if not isinstance(entries, list):
+            continue
+        cleaned = []
+        for entry in entries:
+            inner_hooks = entry.get("hooks", [])
+            filtered = [h for h in inner_hooks if marker not in h.get("command", "")]
+            if len(filtered) < len(inner_hooks):
+                removed = True
+            if filtered:
+                cleaned.append({**entry, "hooks": filtered})
+        hooks[event_name] = cleaned
+    return {**config, "hooks": hooks}, removed
+
+
+def _merge_gemini(config: Dict[str, Any], command: str) -> Dict[str, Any]:
+    """Inject Prismor hooks into a Gemini CLI settings.json config.
+
+    Hooks three event types:
+      BeforeTool   -- pre-action; exit-2 blocks the tool call.
+      AfterTool    -- post-action; recorded for session audit.
+      SessionStart -- scans project-memory files (GEMINI.md / AGENTS.md) on
+                      session open, same as the Claude Code SessionStart hook.
+
+    Matcher covers all built-in Gemini CLI tools plus MCP tools
+    (mcp__<server>__<tool> namespace).
+    """
+    hooks = dict(config.get("hooks", {}))
+    # BeforeTool is the only blocking event: exit-2 from the hook stops
+    # the tool call before execution. AfterTool fires after and is
+    # recorded for audit only.
+    for event_name in ["BeforeTool", "AfterTool"]:
+        hooks[event_name] = _merge_claude_entries(
+            hooks.get(event_name, []),
+            {
+                "matcher": "run_shell_command|read_file|write_file|replace_in_file|web_fetch|web_search|mcp__.*",
+                "hooks": [{"type": "command", "name": "prismor", "command": command}],
+            },
+        )
+    # SessionStart: scan project-memory files (GEMINI.md / AGENTS.md) for
+    # injected directives at the start of every session, same rationale as
+    # the Claude Code SessionStart hook (see PrismorSec/prismor#155).
+    hooks["SessionStart"] = _merge_claude_entries(
+        hooks.get("SessionStart", []),
+        {
+            "matcher": "*",
+            "hooks": [{"type": "command", "name": "prismor", "command": command}],
+        },
+    )
+    return {**config, "hooks": hooks}
+
+
+def _normalize_gemini(payload: Dict[str, Any], session_id: str, workspace: Path) -> Dict[str, Any]:
+    """Translate a Gemini CLI hook stdin payload into a Prismor event.
+
+    Gemini CLI sends JSON on stdin with these fields:
+      hook_event_name  -- "BeforeTool" | "AfterTool" | "SessionStart" | ...
+      tool_name        -- built-in tool name or mcp__<server>__<tool>
+      tool_input       -- dict of tool arguments
+      session_id       -- stable session identifier
+      transcript_path  -- path to the session transcript file
+      cwd              -- working directory at hook-dispatch time
+      timestamp        -- ISO-8601 string
+
+    Built-in tool names and their Prismor event-type mappings:
+      run_shell_command  -> shell     (field: command)
+      read_file          -> file_read (fields: absolute_path, file_path, path)
+      write_file         -> file_write (fields: file_path, content)
+      replace_in_file    -> file_write (fields: file_path, diff)
+      web_fetch          -> network   (field: url)
+      web_search         -> network   (field: query)
+    """
+    hook_event = payload.get("hook_event_name", "unknown")
+    tool_name = payload.get("tool_name", "")
+    tool_input = payload.get("tool_input", {})
+    base = {
+        "ts": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "agent": "gemini",
+        "agent_event": hook_event,
+        "metadata": {
+            "cwd": payload.get("cwd"),
+            "tool_name": tool_name,
+            "transcript_path": payload.get("transcript_path"),
+            "raw": payload,
+        },
+    }
+
+    if hook_event == "SessionStart":
+        # Scan project-memory files (GEMINI.md / AGENTS.md) for injected
+        # directives, same as the Claude Code SessionStart hook.
+        raw_cwd = payload.get("cwd")
+        memory_root = Path(raw_cwd) if raw_cwd else workspace
+        memory = _read_project_memory(memory_root)
+        base["metadata"]["memory_files"] = memory["files"]
+        base["metadata"]["memory_digests"] = memory["digests"]
+        return {**base, "type": "memory", "content": memory["content"]}
+
+    if hook_event in {"BeforeAgent", "AfterAgent"}:
+        return {**base, "type": "prompt", "prompt": payload.get("prompt", "")}
+
+    if tool_name == "run_shell_command":
+        return {
+            **base,
+            "type": "shell",
+            "command": tool_input.get("command", ""),
+            "stdout": payload.get("stdout", ""),
+            "stderr": payload.get("stderr", ""),
+        }
+
+    if tool_name == "read_file":
+        return {
+            **base,
+            "type": "file_read",
+            # Gemini CLI exposes the path as "absolute_path" on read_file
+            # and falls back to "file_path" / generic "path" for consistency.
+            "path": (
+                tool_input.get("absolute_path")
+                or tool_input.get("file_path")
+                or tool_input.get("path", "")
+            ),
+        }
+
+    if tool_name in {"write_file", "replace_in_file"}:
+        return {
+            **base,
+            "type": "file_write",
+            "path": (
+                tool_input.get("file_path")
+                or tool_input.get("absolute_path")
+                or tool_input.get("path", "")
+            ),
+            # replace_in_file sends a unified diff in "diff"; write_file
+            # sends the full file body in "content".
+            "content": tool_input.get("content") or tool_input.get("diff", ""),
+        }
+
+    if tool_name == "web_fetch":
+        return {
+            **base,
+            "type": "network",
+            "url": tool_input.get("url", ""),
+            "response": payload.get("response", ""),
+        }
+
+    if tool_name == "web_search":
+        return {
+            **base,
+            "type": "network",
+            # web_search has no URL; use the query string so policy rules
+            # that match on `url` can still inspect the search terms.
+            "url": tool_input.get("query", ""),
+        }
+
+    mcp_event = _classify_mcp_event(
+        base=base,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        response=payload.get("tool_response", payload.get("response")),
+        is_post=(hook_event == "AfterTool"),
+        workspace=workspace,
+    )
+    if mcp_event is not None:
+        return mcp_event
+
+    return {**base, "type": "tool_result", "response": json.dumps(payload)}
 
 def _ephemeral_session_id(agent: str, workspace: Path) -> str:
     digest = hashlib.sha1(f"{agent}:{workspace}:{os.getpid()}".encode("utf-8")).hexdigest()[:12]
     return f"{agent}-{digest}"
-
 
 def _join_edits(edits: List[Dict[str, Any]]) -> str:
     return "\n".join(edit.get("new_string") or edit.get("newText") or "" for edit in edits if isinstance(edit, dict))
