@@ -215,7 +215,7 @@ agents:
     name: OpenCode
     kind: coding-agent
     surface: sdk
-    status: supported
+    status: shipped
     config_paths: { project: ".opencode/plugins/", user: "~/.config/opencode/plugins/" }
     events: ["tool.execute.before", "tool.execute.after"]
     blocking: throw
