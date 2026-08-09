@@ -215,11 +215,11 @@ agents:
     name: OpenCode
     kind: coding-agent
     surface: sdk
-    status: roadmap
+    status: shipped
     config_paths: { project: ".opencode/plugins/", user: "~/.config/opencode/plugins/" }
     events: ["tool.execute.before", "tool.execute.after"]
     blocking: throw
-    normalizer: null
+    normalizer: _normalize_opencode
     sources: ["https://opencode.ai/docs/plugins/"]
 
   - id: factory-droid

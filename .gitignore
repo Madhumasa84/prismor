@@ -35,9 +35,10 @@ temp/
 .cursor/hooks.json
 .windsurf/hooks.json
 
-# Scaffolded plugin packages (created by install-hooks --agent openclaw/hermes)
+# Scaffolded plugin packages (created by install-hooks --agent openclaw/hermes/opencode)
 prismor/runtime/openclaw-plugin/
 prismor/runtime/hermes-plugin/
+prismor/runtime/opencode-plugin/
 
 # IDEs and OS files
 .vscode/

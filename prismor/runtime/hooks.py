@@ -13,7 +13,7 @@ from prismor.runtime.store import append_session_event
 
 _SUPPORTED_AGENTS = [
     "claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro",
-    "crush", "openhands", "qwen", "continue", "goose", "gemini",
+    "crush", "openhands", "qwen", "continue", "goose", "opencode", "gemini",
 ]
 
 
@@ -45,6 +45,8 @@ def _strip_for_agent(agent: str, config: Dict[str, Any], marker: str) -> Tuple[D
         return _strip_continue(config, marker)
     if agent == "goose":
         return _strip_goose(config, marker)
+    if agent == "opencode":
+        return _strip_opencode(config, marker)
     if agent == "gemini":
         return _strip_gemini(config, marker)
     return _strip_windsurf(config, marker)
@@ -90,6 +92,8 @@ def install_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str, m
             # containing hooks/hooks.json — the plugin dir is config_path's
             # grandparent (.../plugins/prismor/hooks/hooks.json -> .../plugins/prismor/).
             config = _merge_goose(config, command, config_path.parent.parent)
+        elif current_agent == "opencode":
+            config = _merge_opencode(config, command, repo_root)
         elif current_agent == "gemini":
             config = _merge_gemini(config, command)
         else:
@@ -330,6 +334,8 @@ def normalize_payload(*, agent: str, payload: Dict[str, Any], workspace: Path) -
         event = _normalize_continue(payload, session_id, workspace)
     elif agent == "goose":
         event = _normalize_goose(payload, session_id)
+    elif agent == "opencode":
+        event = _normalize_opencode(payload, session_id)
     elif agent == "gemini":
         event = _normalize_gemini(payload, session_id, workspace)
     else:
@@ -458,6 +464,8 @@ def _config_path(agent: str, scope: str, workspace: Path) -> Path:
             return workspace / ".continue" / "settings.json"
         if agent == "goose":
             return workspace / ".agents" / "plugins" / "prismor" / "hooks" / "hooks.json"
+        if agent == "opencode":
+            return workspace / ".opencode" / "plugins.json"
         if agent == "gemini":
             return workspace / ".gemini" / "settings.json"
         return workspace / ".windsurf" / "hooks.json"
@@ -492,6 +500,8 @@ def _config_path(agent: str, scope: str, workspace: Path) -> Path:
         return home / ".continue" / "settings.json"
     if agent == "goose":
         return home / ".agents" / "plugins" / "prismor" / "hooks" / "hooks.json"
+    if agent == "opencode":
+        return home / ".config" / "opencode" / "plugins.json"
     if agent == "gemini":
         return home / ".gemini" / "settings.json"
     return home / ".codeium" / "windsurf" / "hooks.json"
@@ -655,6 +665,88 @@ def _strip_openclaw(config: Dict[str, Any], marker: str) -> tuple[Dict[str, Any]
     filtered = [p for p in plugins if "warden" not in p.lower() and "prismor" not in p.lower()]
     removed = len(filtered) < len(plugins)
     return {**config, "plugins": filtered}, removed
+
+
+def _merge_opencode(config: Dict[str, Any], command: str, repo_root: Path) -> Dict[str, Any]:
+    # 1. Scaffold the opencode plugin
+    plugin_dir = repo_root / "prismor" / "runtime" / "opencode-plugin"
+    _scaffold_opencode_plugin(plugin_dir, command)
+
+    # 2. Register plugin path in opencode.json config
+    plugins = list(config.get("plugins", []))
+    plugin_path = str(plugin_dir)
+    if plugin_path not in plugins:
+        plugins.append(plugin_path)
+
+    return {**config, "plugins": plugins}
+
+
+def _strip_opencode(config: Dict[str, Any], marker: str) -> tuple[Dict[str, Any], bool]:
+    plugins = list(config.get("plugins", []))
+    filtered = [p for p in plugins if "prismor" not in p.lower() and "warden" not in p.lower()]
+    removed = len(filtered) < len(plugins)
+    return {**config, "plugins": filtered}, removed
+
+
+_OPENCODE_PLUGIN_JS = """\
+"use strict";
+
+const { execSync } = require("child_process");
+
+const PRISMOR_COMMAND = "__PRISMOR_COMMAND__";
+
+function dispatch(payload) {
+  try {
+    execSync(PRISMOR_COMMAND, {
+      input: JSON.stringify(payload),
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10000,
+    });
+  } catch (err) {
+    if (err.status === 2) {
+      const stderr = (err.stderr || "").toString().trim();
+      throw new Error(stderr || "Blocked by Prismor");
+    }
+  }
+}
+
+module.exports = function ({ project, client, $, directory, worktree }) {
+  return {
+    "tool.execute.before": async function (input, output) {
+      dispatch({
+        hookEvent: "tool.execute.before",
+        toolName: (input && input.tool) || "",
+        toolInput: (input && (input.args || input.input)) || {},
+        sessionId: (input && input.sessionId) || "",
+        timestamp: Date.now(),
+      });
+    },
+    "tool.execute.after": async function (input, output) {
+      dispatch({
+        hookEvent: "tool.execute.after",
+        toolName: (input && input.tool) || "",
+        toolInput: (input && (input.args || input.input)) || {},
+        sessionId: (input && input.sessionId) || "",
+        timestamp: Date.now(),
+      });
+    },
+  };
+};
+"""
+
+
+def _scaffold_opencode_plugin(plugin_dir: Path, command: str) -> None:
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    pkg = {
+        "name": "@prismor/opencode-prismor",
+        "version": "0.1.0",
+        "description": "Prismor security hooks for OpenCode",
+        "main": "index.js",
+    }
+    (plugin_dir / "package.json").write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
+    js = _OPENCODE_PLUGIN_JS.replace("__PRISMOR_COMMAND__", command)
+    (plugin_dir / "index.js").write_text(js, encoding="utf-8")
+
 
 
 _OPENCLAW_PLUGIN_JS = """\
@@ -2348,6 +2440,28 @@ def _normalize_openclaw(payload: Dict[str, Any], session_id: str) -> Dict[str, A
     return _unmapped_tool_event(base, payload)
 
 
+def _normalize_opencode(payload: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    hook_event = payload.get("hookEvent", "tool.execute.before")
+    tool_name = payload.get("toolName", "")
+    tool_input = payload.get("toolInput", {})
+    base = {
+        "ts": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "agent": "opencode",
+        "agent_event": hook_event,
+        "metadata": {"raw": payload},
+    }
+    if tool_name in {"bash", "shell", "exec", "terminal", "Bash"}:
+        return {**base, "type": "shell", "command": tool_input.get("command", "")}
+    if tool_name in {"read", "file_read", "FileRead", "Read"}:
+        return {**base, "type": "file_read", "path": tool_input.get("file_path") or tool_input.get("path", "")}
+    if tool_name in {"write", "edit", "file_write", "FileWrite", "Write", "Edit"}:
+        return {**base, "type": "file_write", "path": tool_input.get("file_path") or tool_input.get("path", ""), "content": tool_input.get("content", "")}
+    if tool_name in {"fetch", "search", "web_fetch", "web_search", "browser"}:
+        return {**base, "type": "network", "url": tool_input.get("url", "")}
+    return {**base, "type": "tool_result", "response": json.dumps(payload)}
+
+
 # ── Gemini CLI adapter ────────────────────────────────────────────────────────
 #
 # Gemini CLI (google-gemini/gemini-cli) uses the same Claude-style nested hook
@@ -2546,7 +2660,6 @@ def _normalize_gemini(payload: Dict[str, Any], session_id: str, workspace: Path)
         return mcp_event
 
     return _unmapped_tool_event(base, payload)
-
 
 def _ephemeral_session_id(agent: str, workspace: Path) -> str:
     digest = hashlib.sha1(f"{agent}:{workspace}:{os.getpid()}".encode("utf-8")).hexdigest()[:12]

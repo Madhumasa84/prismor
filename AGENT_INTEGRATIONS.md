@@ -36,7 +36,7 @@ _Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by 
 | Continue CLI | coding-agent | hook-config | ✅ | `exit-2` |
 | Goose (Agentic AI Foundation) | coding-agent | hook-config | ✅ | `exit-2` |
 | Gemini CLI (Google) | coding-agent | hook-config | 🟡 | `exit-2` |
-| OpenCode | coding-agent | sdk | 🟡 | `throw` |
+| OpenCode | coding-agent | sdk | ✅ | `throw` |
 | Factory Droid | coding-agent | hook-config | 🟡 | `json-permission` |
 | Pi Coding Agent | coding-agent | hook-config | 🟡 | `exit-2` |
 | Amazon Q Developer CLI (AWS) | coding-agent | hook-config | 🟡 | `exit-2` |
