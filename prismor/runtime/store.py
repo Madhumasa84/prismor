@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -2720,6 +2721,12 @@ def get_policy_precedence(workspace: Optional[Path] = None, scoped: Optional[Dic
     return {"winner": winner, "chain": chain}
 
 
+# How long a cached org policy keeps the local editors read-only without a
+# refresh. Long enough to cover a holiday offline, short enough that a device
+# deleted server-side stops locking its owner out of their own policy.
+_ORG_POLICY_STALE_DAYS = 14.0
+
+
 def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Whether local policy edits are worth offering here.
 
@@ -2728,12 +2735,25 @@ def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
     beats letting someone edit a file that gets overwritten — the dashboard
     greys its controls on this and the CLI writers refuse on it.
 
-    Both halves are required: the workspace is org-managed *and* a signed
-    policy actually exists to govern it. Enrollment alone is not enough —
-    an org that has not configured repo scoping manages every workspace by
-    default (workspace_scope.resolve_scope, reason "default_all"), so keying
-    on management alone would take local policy away from an enrolled solo
-    developer in their own side project, for an org policy that does not exist.
+    This is a usability guard, not a security control — the org overlay merges
+    after the local layers either way, so it still wins on anything it
+    specifies. That is why every uncertain case below resolves to *editable*:
+    refusing is only worth it when we can positively show an org policy is
+    live, and a read-only screen nobody can explain is worse than an edit that
+    a later pull overwrites.
+
+    Three things must hold. The workspace is org-managed; a cached signed
+    policy exists; and that policy is still current. Enrollment alone is not
+    enough — an org that has not configured repo scoping manages every
+    workspace by default (workspace_scope.resolve_scope, reason "default_all"),
+    so keying on management would take local policy away from an enrolled solo
+    developer in their own side project for an org policy that does not exist.
+
+    ``is_managed`` already returns False once the device is revoked, so a
+    device removed from its org unlocks as soon as any authenticated call has
+    seen the 401. The staleness check below covers the window before that:
+    otherwise a machine whose device was deleted server-side, and which has not
+    run an agent since, stays locked against its owner indefinitely.
     """
     try:
         from prismor.runtime.enterprise import workspace_scope as _scope
@@ -2744,17 +2764,33 @@ def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
 
     try:
         from prismor.runtime.enterprise import remote_policy as _remote
-        if not _remote.cached_policy_path().exists():
+        cached = _remote.cached_policy_path()
+        if not cached.exists():
             return {"editable": True, "reason": "", "error": ""}
+        age_days = (time.time() - cached.stat().st_mtime) / 86400.0
     except Exception:
         return {"editable": True, "reason": "", "error": ""}
+
+    if age_days > _ORG_POLICY_STALE_DAYS:
+        return {
+            "editable": True,
+            "reason": "stale_org_policy",
+            "error": "",
+            "note": (
+                f"This workspace is org-managed, but its policy has not refreshed in "
+                f"{int(age_days)} days. Local edits are allowed; run `prismor enroll-status` "
+                "to check whether this device is still linked."
+            ),
+        }
 
     return {
         "editable": False,
         "reason": "org_managed",
         "error": "This workspace's policy is managed by your organization — "
                  "edit it in the Prismor console, or request an exemption "
-                 'with `prismor exempt request --reason "<why>"`.',
+                 'with `prismor exempt request --reason "<why>"`.\n'
+                 "If this device was removed from the org, run `prismor enroll-status` "
+                 "to confirm, or `prismor workspace personal` to detach this workspace.",
     }
 
 

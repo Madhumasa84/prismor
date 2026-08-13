@@ -445,8 +445,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         if revoked:
             print("Enrolled — but the control plane REJECTED this device's key")
             print(f"  reason:     {revoked.get('reason') or 'rejected (401/403)'}")
-            print("  This device was likely revoked by an org admin. Local protection")
-            print("  still applies (last good policy). Re-link with: prismor enroll <token>")
+            # Be precise about what stops: once the revocation marker is set,
+            # workspace_scope resolves every workspace to local, so the engine
+            # no longer merges the org overlay at all. Saying "last good policy
+            # still applies" describes the unreachable-control-plane case, not
+            # this one, and overstates what is still protecting the machine.
+            print("  This device was removed or revoked by an org admin. Org policy no")
+            print("  longer applies here and nothing is reported to the org; the built-in")
+            print("  and project rules still run. Re-link with: prismor enroll <token>")
         elif verified.get("ok"):
             print("Enrolled and verified")
         elif "unreachable" in str(verified.get("error", "")):

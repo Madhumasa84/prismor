@@ -88,6 +88,57 @@ class TestLadder(unittest.TestCase):
         self.assertEqual(remaining, [second["id"]])
 
 
+class TestPolicyEditability(unittest.TestCase):
+    """Refusing local edits is a usability guard, not a security control — the
+    org overlay merges last either way. So it fires only on positive, current
+    evidence of org governance, and every uncertain case stays editable rather
+    than leaving someone with a read-only screen they cannot explain."""
+
+    def _check(self, *, managed, cached_age_days=None):
+        import os
+        import time
+        from prismor.runtime.store import is_policy_editable
+        d = Path(tempfile.mkdtemp())
+        cached = d / "remote-policy.yaml"
+        if cached_age_days is not None:
+            cached.write_text("version: '1.0'\n")
+            stamp = time.time() - cached_age_days * 86400
+            os.utime(cached, (stamp, stamp))
+        with mock.patch(
+            "prismor.runtime.enterprise.workspace_scope.is_managed", return_value=managed
+        ), mock.patch(
+            "prismor.runtime.enterprise.remote_policy.cached_policy_path", return_value=cached
+        ):
+            return is_policy_editable(Path(tempfile.mkdtemp()))
+
+    def test_managed_with_a_current_org_policy_is_read_only(self):
+        result = self._check(managed=True, cached_age_days=1)
+        self.assertFalse(result["editable"])
+        self.assertEqual(result["reason"], "org_managed")
+
+    def test_revoked_device_can_edit_again(self):
+        # is_managed already resolves to local once the revocation marker is
+        # set, which is what unlocks a device removed from its org.
+        self.assertTrue(self._check(managed=False, cached_age_days=1)["editable"])
+
+    def test_managed_without_a_pushed_policy_is_editable(self):
+        self.assertTrue(self._check(managed=True, cached_age_days=None)["editable"])
+
+    def test_stale_org_policy_stops_locking_the_owner_out(self):
+        # The window before any authenticated call has seen the 401: a device
+        # deleted server-side, on a machine that has not run an agent since,
+        # must not stay read-only forever.
+        result = self._check(managed=True, cached_age_days=30)
+        self.assertTrue(result["editable"])
+        self.assertEqual(result["reason"], "stale_org_policy")
+        self.assertIn("enroll-status", result["note"])
+
+    def test_refusal_says_how_to_get_out_of_it(self):
+        error = self._check(managed=True, cached_age_days=1)["error"]
+        self.assertIn("enroll-status", error)
+        self.assertIn("workspace personal", error)
+
+
 class TestRefusals(unittest.TestCase):
     def _check(self, rule_id, scope, **kw):
         ws = kw.pop("workspace", None) or _workspace()

@@ -71,6 +71,18 @@ _CORS_HEADERS = {
 _SERVER_WORKSPACE: Optional[Path] = None
 
 
+def _revocation_state() -> Optional[dict]:
+    """The device-revoked marker, or None. Never raises."""
+    try:
+        from prismor.runtime.enterprise import identity as _identity
+        info = _identity.revoked_info()
+        if not info:
+            return None
+        return {"at": info.get("at"), "reason": str(info.get("reason") or "")[:200]}
+    except Exception:
+        return None
+
+
 def _effective_policy_state(workspace: Optional[Path]) -> dict:
     """What the merged policy actually does, for the header chip and badges.
 
@@ -212,6 +224,11 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 # so reading the default alone reports "observe" for a machine
                 # that is blocking.
                 "effective": _effective_policy_state(workspace),
+                # A device whose key the control plane rejected still has its
+                # identity and its last org policy on disk, so without this the
+                # page can only say "not enrolled" and leave the reader to
+                # guess why the org policy it can see does not apply.
+                "revoked": _revocation_state(),
             }
             self._send_json(result)
             return

@@ -4429,6 +4429,17 @@ function renderPolicyTab(data) {
     enText.innerHTML = '<strong>Enterprise enrolled</strong>' +
       'Org: <code>' + safeAttr((data.enrollment||{}).org_id||'') + '</code> · Device: <code>' + safeAttr((data.enrollment||{}).device_id||'') + '</code>. ' +
       'This policy is pushed by your org admin. To change it, go to <a href="https://prismor.dev/admin" target="_blank" style="color:inherit">prismor.dev/admin</a>.';
+  } else if (data.revoked) {
+    // "Not enrolled" is the wrong story for a device that WAS enrolled and got
+    // rejected: the identity is still on disk, the cached org policy is still
+    // in this list, and the reader is left wondering why neither works.
+    enBanner.className = 'banner banner-warn';
+    enText.innerHTML = '<strong>Removed from its organization</strong>' +
+      'The control plane rejected this device\'s key' +
+      (data.revoked.reason ? ' (' + safe(data.revoked.reason) + ')' : '') +
+      ', so org policy no longer applies here and nothing is reported to the org. ' +
+      'Local rules still run. Re-link with <code>prismor enroll &lt;token&gt;</code>, ' +
+      'or check with <code>prismor enroll-status</code>.';
   } else {
     enBanner.className = 'banner banner-warn';
     enText.innerHTML = '<strong>Not enrolled</strong>' +
