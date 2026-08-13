@@ -309,6 +309,14 @@ def _sev_color(s: str) -> str:
     return DIM
 
 
+def _sev_short(s: str) -> str:
+    """Four-column severity tag. Spelled out rather than truncated — slicing
+    MEDIUM to four characters gives "MEDI", which reads as a typo."""
+    return {"CRITICAL": "CRIT", "HIGH": "HIGH", "MEDIUM": "MED ", "LOW": "LOW "}.get(
+        s.upper(), (s[:4].upper() + "    ")[:4]
+    )
+
+
 # ── Shared UI pieces ─────────────────────────────────────────────────────────
 
 def _header_lines(step: Optional[int] = None, total: Optional[int] = None, label: Optional[str] = None) -> List[str]:
@@ -331,7 +339,7 @@ def _control_line(items: List[tuple]) -> str:
 
 # ── Step 1: Enforcement Mode ─────────────────────────────────────────────────
 
-def _step_mode(current: str = "observe", total: int = 4) -> str:
+def _step_mode(current: str = "observe", total: int = 4, extra_steps: int = 0) -> str:
     opts = [
         ("observe", "Log and warn, never block"),
         ("enforce", "Block dangerous actions in real time"),
@@ -339,6 +347,10 @@ def _step_mode(current: str = "observe", total: int = 4) -> str:
     sel = 0 if current == "observe" else 1
 
     while True:
+        # Choosing enforce adds the rule-selection step, so the count has to
+        # follow the highlighted option — otherwise this screen says "1/5" and
+        # the next one says "2/6", which reads like a bug.
+        total = (5 if opts[sel][0] == "enforce" else 4) + extra_steps
         lines = _header_lines(1, total, "ENFORCEMENT MODE")
         for i, (name, desc) in enumerate(opts):
             arrow = _w("▸ ", CYAN) if i == sel else "  "
@@ -437,7 +449,7 @@ def _step_policy_select(rules: List[dict], step: int = 2, total: int = 5):
             r = row["rule"]
             arrow = _w("▸ ", CYAN) if i == cur_row else "  "
             dot = _w("●", GRN) if r["on"] else _w("○", DIM)
-            sev = _w(f"{r['severity'][:4]:<4}", _sev_color(r["severity"]))
+            sev = _w(_sev_short(r["severity"]), _sev_color(r["severity"]))
             name = _pad(_w(r["id"], BOLD) if i == cur_row else r["id"], 30)
             tag = _w(" recommended", YEL) if r.get("recommended") else ""
             lines.append(f"  {arrow}{dot} {sev} {name}{tag}")
@@ -1129,7 +1141,7 @@ def run_wizard(target: Path) -> None:
             enforcing = mode == "enforce"
             total = (5 if enforcing else 4) + (1 if offer_unlock else 0)
             if step == 1:
-                mode = _step_mode(mode, total=total)
+                mode = _step_mode(mode, total=total, extra_steps=1 if offer_unlock else 0)
                 step = 2 if mode == "enforce" else 3
             elif step == 2:
                 result = _step_policy_select(rules, step=2, total=total)
