@@ -124,15 +124,6 @@ class TestPolicyEditability(unittest.TestCase):
     def test_managed_without_a_pushed_policy_is_editable(self):
         self.assertTrue(self._check(managed=True, cached_age_days=None)["editable"])
 
-    def test_stale_org_policy_stops_locking_the_owner_out(self):
-        # The window before any authenticated call has seen the 401: a device
-        # deleted server-side, on a machine that has not run an agent since,
-        # must not stay read-only forever.
-        result = self._check(managed=True, cached_age_days=30)
-        self.assertTrue(result["editable"])
-        self.assertEqual(result["reason"], "stale_org_policy")
-        self.assertIn("enroll-status", result["note"])
-
     def test_refusal_says_how_to_get_out_of_it(self):
         error = self._check(managed=True, cached_age_days=1)["error"]
         self.assertIn("enroll-status", error)

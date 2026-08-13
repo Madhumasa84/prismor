@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import sqlite3
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -2721,12 +2720,6 @@ def get_policy_precedence(workspace: Optional[Path] = None, scoped: Optional[Dic
     return {"winner": winner, "chain": chain}
 
 
-# How long a cached org policy keeps the local editors read-only without a
-# refresh. Long enough to cover a holiday offline, short enough that a device
-# deleted server-side stops locking its owner out of their own policy.
-_ORG_POLICY_STALE_DAYS = 14.0
-
-
 def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Whether local policy edits are worth offering here.
 
@@ -2742,18 +2735,17 @@ def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
     live, and a read-only screen nobody can explain is worse than an edit that
     a later pull overwrites.
 
-    Three things must hold. The workspace is org-managed; a cached signed
-    policy exists; and that policy is still current. Enrollment alone is not
-    enough — an org that has not configured repo scoping manages every
-    workspace by default (workspace_scope.resolve_scope, reason "default_all"),
-    so keying on management would take local policy away from an enrolled solo
-    developer in their own side project for an org policy that does not exist.
+    Two things must hold: the workspace is org-managed, and a cached signed
+    policy exists to govern it. Enrollment alone is not enough — an org that
+    has not configured repo scoping manages every workspace by default
+    (workspace_scope.resolve_scope, reason "default_all"), so keying on
+    management would take local policy away from an enrolled solo developer in
+    their own side project for an org policy that does not exist.
 
     ``is_managed`` already returns False once the device is revoked, so a
     device removed from its org unlocks as soon as any authenticated call has
-    seen the 401. The staleness check below covers the window before that:
-    otherwise a machine whose device was deleted server-side, and which has not
-    run an agent since, stays locked against its owner indefinitely.
+    seen the 401 — which is also what the refusal message points at, for the
+    window before that has happened.
     """
     try:
         from prismor.runtime.enterprise import workspace_scope as _scope
@@ -2764,24 +2756,10 @@ def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
 
     try:
         from prismor.runtime.enterprise import remote_policy as _remote
-        cached = _remote.cached_policy_path()
-        if not cached.exists():
+        if not _remote.cached_policy_path().exists():
             return {"editable": True, "reason": "", "error": ""}
-        age_days = (time.time() - cached.stat().st_mtime) / 86400.0
     except Exception:
         return {"editable": True, "reason": "", "error": ""}
-
-    if age_days > _ORG_POLICY_STALE_DAYS:
-        return {
-            "editable": True,
-            "reason": "stale_org_policy",
-            "error": "",
-            "note": (
-                f"This workspace is org-managed, but its policy has not refreshed in "
-                f"{int(age_days)} days. Local edits are allowed; run `prismor enroll-status` "
-                "to check whether this device is still linked."
-            ),
-        }
 
     return {
         "editable": False,
