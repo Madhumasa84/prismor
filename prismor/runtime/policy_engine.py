@@ -56,9 +56,12 @@ _NON_OVERRIDABLE_RULE_IDS = frozenset({
     # poisoned .prismor/policy.yaml also disable detection of itself.
     # See FIX_PLAN.md §3.5.
     "memory-integrity-mismatch",
-    # Prismor's self-protection rules (see _SELF_PROTECTION_RULE_IDS below).
-    # Listed here so no overlay can disable or weaken them; listed there so the
-    # opt-in floor of an explicit-selection policy cannot leave them observing.
+    # Self-protection rules; see _SELF_PROTECTION_RULE_IDS below. Listed here so
+    # no overlay can disable or weaken them, and listed there so the opt-in
+    # floor of an explicit-selection policy cannot leave them observing.
+    # (Keep apostrophes out of comments inside this literal: prismor-web
+    # generates its copy of the floor by parsing this frozenset, and a quote
+    # character splits the parse — see scripts/generate-default-policy-rules.js.)
     "agent-config-tampering",
     "prismor-self-edit",
 })
