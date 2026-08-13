@@ -2576,7 +2576,17 @@ def read_policy_layer(scope: str, workspace: Optional[Path] = None) -> Dict[str,
 
 
 def _policy_default_mode(yaml_text: str) -> str:
-    match = re.search(r"^\s*default_mode\s*:\s*([A-Za-z0-9_-]+)\s*$", yaml_text or "", re.MULTILINE)
+    """The mode badge for a policy layer.
+
+    `default_mode` is the fallback for rules that do not set their own, so on a
+    policy that names its blocking set rule by rule it describes the rules
+    nobody selected — reading "observe" beside a summary saying three rules
+    enforce. Any rule pinned to enforce makes the layer an enforcing one.
+    """
+    text = yaml_text or ""
+    if re.search(r"^\s*mode\s*:\s*enforce\s*$", text, re.MULTILINE):
+        return "enforce"
+    match = re.search(r"^\s*default_mode\s*:\s*([A-Za-z0-9_-]+)\s*$", text, re.MULTILINE)
     return (match.group(1).strip().lower() if match else "observe")
 
 
@@ -2619,19 +2629,32 @@ def _policy_layer_summary(scope: str, layer: Dict[str, Any]) -> str:
         return "No enterprise policy. Enroll this device to receive org-managed controls."
     if scope == "project":
         if layer.get("exists"):
+            text = layer.get("yaml") or ""
+            # An explicit-selection policy names its blocking set rule by rule,
+            # so quoting `default_mode` alone would describe it as "observe"
+            # while it blocks — the same confusion the header chip had.
+            if re.search(r"^\s*selection\s*:\s*explicit\s*$", text, re.MULTILINE):
+                enforcing = len(re.findall(r"^\s*mode\s*:\s*enforce\s*$", text, re.MULTILINE))
+                return (
+                    f"Project policy names its blocking set: {enforcing} rule(s) enforce, "
+                    "everything else is reported. Written by `prismor setup --mode enforce`."
+                )
             return (
                 f"Project overrides are active for this workspace. Default mode: "
-                f"{_policy_default_mode(layer.get('yaml') or '')}. "
-                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+                f"{_policy_default_mode(text)}. "
+                f"{_policy_rule_override_count(text)} explicit rule override(s)."
             )
         return "No project override file for this workspace."
     if scope == "global":
+        # The engine merges defaults → project → org; it never reads this file
+        # (grep prismor_home in policy_engine.py). Listing it in the chain
+        # without saying so implies a layer that does not take part.
         if layer.get("exists"):
             return (
-                f"Machine-wide policy is active. Default mode: {_policy_default_mode(layer.get('yaml') or '')}. "
-                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+                "This file exists but the policy engine does not currently merge it — "
+                "it changes nothing on its own. Use the project policy instead."
             )
-        return "No custom global policy on this machine."
+        return "No custom global policy on this machine (this layer is not applied by the runtime)."
     return ""
 
 
@@ -2762,11 +2785,21 @@ def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = Non
 
 
 def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Return every rule from the bundled default policy with its current
-    enabled state — the data behind the dashboard's per-rule toggle list.
-    A rule is "off" when the project override lists it with enabled: false.
+    """Return every rule from the bundled default policy with its current state
+    — the data behind the dashboard's per-rule list.
+
+    Two different states, and the difference matters: a rule is *off* when the
+    project override lists it with ``enabled: false``, and separately it either
+    *blocks* or only *reports*, which is what the merged policy's resolved mode
+    decides. Reporting only the first would show 78 identical green toggles for
+    a policy where three rules actually stop anything.
     """
-    from prismor.runtime.policy_engine import _load_yaml, is_floor_protected_rule
+    from prismor.runtime.policy_engine import (
+        PolicyEngine,
+        _load_yaml,
+        is_floor_protected_rule,
+        is_self_protection_rule,
+    )
 
     disabled: set = set()
     if workspace:
@@ -2780,6 +2813,17 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
             except Exception:
                 pass
 
+    # Effective mode per rule, straight from the engine that decides it at
+    # dispatch — never recomputed here, or the dashboard would drift from
+    # enforcement the first time the resolution rules change.
+    modes: Dict[str, str] = {}
+    try:
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        for compiled in engine.rules:
+            modes[compiled.id] = engine._resolve_mode(compiled)
+    except Exception:
+        modes = {}
+
     default_path = Path(__file__).resolve().parent / "default_policy.yaml"
     rules: List[Dict[str, Any]] = []
     try:
@@ -2789,17 +2833,26 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
             if not rid:
                 continue
             locked = is_floor_protected_rule(rid, r)
+            self_protect = is_self_protection_rule(rid)
             requested_enabled = rid not in disabled
+            enabled = True if locked else requested_enabled
+            mode = modes.get(rid, "")
             rules.append({
                 "id": rid,
                 "severity": r.get("severity", "MEDIUM"),
                 "category": r.get("category", ""),
                 "title": r.get("title", rid),
                 "action": r.get("action", ""),
-                "enabled": True if locked else requested_enabled,
+                "enabled": enabled,
                 "locked": locked,
+                "selfProtect": self_protect,
                 "requestedEnabled": requested_enabled,
+                # What this rule does right now: stop the call, or report it.
+                "mode": mode,
+                "blocks": bool(enabled and mode == "enforce"),
                 "lockReason": (
+                    "Prismor guards its own configuration with this rule — it always blocks."
+                    if self_protect else
                     "Pinned by Prismor's core safety floor and cannot be disabled at the project level."
                     if locked else ""
                 ),

@@ -524,6 +524,13 @@
     color:#475569; background:#f8fafc;
   }
   .rule-lock .icon { width:10px; height:10px; }
+  /* What a rule does when it fires: stop the call, or record it. */
+  .rule-verdict {
+    display:inline-flex; align-items:center; padding:2px 7px; border-radius:999px;
+    font-size:10px; font-weight:700; letter-spacing:.02em; border:1px solid transparent;
+  }
+  .rule-verdict.blocks  { color:#b91c1c; background:#fef2f2; border-color:#fecaca; }
+  .rule-verdict.reports { color:#92400e; background:#fffbeb; border-color:#fde68a; }
   .rule-sev {
     font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
     border-radius:4px; white-space:nowrap;
@@ -2107,7 +2114,10 @@
       <span class="banner-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
       <div class="banner-text">
         <strong>Detection rules</strong>
-        Toggle individual rules for <strong>this project</strong>. Core safety-floor rules stay pinned on even if
+        Turning a rule <em>off</em> stops it being evaluated at all. A rule that is on either
+        <span class="rule-verdict blocks">blocks</span> — it stops the call — or
+        <span class="rule-verdict reports">reports</span> it and lets it through; which one is decided by
+        the policy's enforce selection, not by these toggles. Core safety-floor rules stay pinned on even if
         a project tries to disable them. Saved to <code>.prismor/policy.yaml</code>; live agents pick it up within
         30&nbsp;s.
       </div>
@@ -2129,11 +2139,14 @@
 
   <!-- Global policy -->
   <div id="pscope-global" class="policy-scope-pane">
-    <div class="banner banner-info">
+    <div class="banner banner-warn">
       <span class="banner-icon"><svg class="icon"><use href="#i-globe"/></svg></span>
       <div class="banner-text">
-        <strong>Global policy</strong>
-        Applies to every project on this machine unless overridden at the project level.
+        <strong>Global policy — not applied by the runtime yet</strong>
+        This file is read and written here, but the policy engine merges only the built-in
+        defaults, the project file, and any org policy — so edits below do not currently change
+        what agents are allowed to do. Use the <strong>Project</strong> tab, or
+        <code>prismor setup</code>, to change enforcement.
         Path: <code id="globalPolicyPath">~/.prismor/policy.yaml</code>
       </div>
     </div>
@@ -2601,16 +2614,26 @@ function updateModeChip(data) {
   const chip = document.getElementById('modeChip');
   const label = document.getElementById('modeChipLabel');
   if (!chip || !label) return;
-  // Effective precedence: enterprise > project > global > built-in default (observe)
-  const mode = _modeIn((data.enterprise || {}).yaml)
+  // Ask the server what the merged policy actually does. Reading default_mode
+  // out of the YAML answers a different question: a policy written by
+  // `prismor setup --mode enforce` sets default_mode: observe and flips its
+  // chosen rules to enforce, so the text said "observe" on a machine that was
+  // blocking. The regex remains as the fallback for an older server.
+  const eff = data.effective || {};
+  const mode = eff.mode
+            || _modeIn((data.enterprise || {}).yaml)
             || _modeIn((data.project || {}).yaml)
             || _modeIn((data.global || {}).yaml)
             || 'observe';
   chip.className = 'mode-chip ' + (mode === 'enforce' ? 'enforce' : 'observe');
   label.textContent = mode;
-  chip.title = mode === 'enforce'
-    ? 'Enforce — threats are blocked in real time. Click to manage.'
-    : 'Observe — threats are logged but NOT blocked. Click to switch to enforce.';
+  if (mode === 'enforce') {
+    chip.title = eff.blocking
+      ? 'Enforce — ' + eff.blocking + ' of ' + eff.total + ' rules block in real time. Click to manage.'
+      : 'Enforce — threats are blocked in real time. Click to manage.';
+  } else {
+    chip.title = 'Observe — threats are logged but NOT blocked. Click to switch to enforce.';
+  }
 }
 function openUpgradeModal() {
   document.getElementById('upModalOverlay')?.classList.add('open');
@@ -4333,14 +4356,20 @@ function _syncModeToggle(scope, yaml) {
   if (!obs) return;
   obs.className = 'mode-btn' + (mode === 'observe' ? ' active-observe' : '');
   enf.className = 'mode-btn' + (mode === 'enforce' ? ' active-enforce' : '');
-  // Per-rule `mode:` wins over this default, so a policy written by
-  // `prismor setup --mode enforce` keeps blocking exactly what was selected
-  // regardless of which button is lit here.
-  const perRule = /^\s*mode\s*:/m.test(yaml || '');
-  const suffix = perRule ? ' · rules with their own mode: keep it' : '';
-  if (hint) hint.textContent = (mode === 'enforce'
-    ? 'enforce — threats are blocked in real time'
-    : 'observe — threats are logged but not blocked') + suffix;
+  // Per-rule `mode:` wins over this default, so a policy that names its
+  // blocking set keeps blocking exactly what was selected regardless of which
+  // button is lit here. Saying "observe — threats are logged but not blocked"
+  // over such a policy is simply false, so it gets its own sentence.
+  const perRule = (yaml || '').match(/^\s*mode\s*:\s*enforce\s*$/gm);
+  if (!hint) return;
+  if (perRule && perRule.length) {
+    hint.textContent = perRule.length + ' rule(s) block; this default covers the rest ('
+      + mode + ')';
+  } else {
+    hint.textContent = mode === 'enforce'
+      ? 'enforce — threats are blocked in real time'
+      : 'observe — threats are logged but not blocked';
+  }
 }
 
 function setMode(scope, mode) {
@@ -4441,9 +4470,12 @@ function renderPolicyTab(data) {
 // On an org-managed workspace the signed bundle merges after the local layers,
 // so an edit here either does nothing or reverts on the next policy pull. Say
 // that and disable the controls, rather than accepting edits that vanish.
+let _policyLocked = false;
+
 function applyPolicyEditable(data) {
   const editable = (data || {}).editable || { editable: true };
   const locked = editable.editable === false;
+  _policyLocked = locked;
   const ids = ['globalPolicyEditor', 'projectPolicyEditor'];
   ids.forEach(id => {
     const el = document.getElementById(id);
@@ -4455,6 +4487,21 @@ function applyPolicyEditable(data) {
       if (btn) btn.disabled = locked;
     });
   });
+  // Every control that would POST. Leaving these live means the only feedback
+  // is a 403 after the click, which reads as a bug rather than as policy.
+  ['rulesSave', 'rulesAll', 'rulesNone', 'globalPolicySave', 'projectPolicySave'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.disabled = locked;
+      btn.title = locked ? 'Managed by your organization — edit it in the Prismor console.' : '';
+    }
+  });
+  // The rules list may not be loaded yet — it reads _policyLocked when it does.
+  // Guarded because _rulesCatalog is declared further down this file, so a
+  // bare reference here throws before the rules tab has ever been opened.
+  try {
+    if (Array.isArray(_rulesCatalog) && _rulesCatalog.length) renderRules();
+  } catch (e) { /* rules list not initialised yet */ }
   const wsBanner = document.getElementById('workspaceBanner');
   if (wsBanner && locked) {
     wsBanner.innerHTML = '<div class="banner banner-warn"><span>' +
@@ -4508,8 +4555,15 @@ function renderRules() {
        || (r.category || '').toLowerCase().includes(q));
   const onCount = _rulesCatalog.filter(r => _rulesState[r.id]).length;
   const lockedCount = _rulesCatalog.filter(r => r.locked).length;
+  // "78/78 on" is true and useless when only seven of them stop anything.
+  // Lead with what blocks; keep the on/off count second, since that is the
+  // thing these toggles actually change.
+  const blockCount = _rulesCatalog.filter(r => r.blocks && _rulesState[r.id]).length;
+  const knowsMode = _rulesCatalog.some(r => r.mode);
   document.getElementById('rulesCount').innerHTML =
-    onCount + '/' + _rulesCatalog.length + ' on'
+    (knowsMode
+      ? '<strong>' + blockCount + ' blocking</strong> · ' + (onCount - blockCount) + ' reporting'
+      : onCount + '/' + _rulesCatalog.length + ' on')
     + (lockedCount ? ' · ' + lockedCount + ' pinned' : '')
     + (_rulesDirty() ? ' <span class="rules-dirty">• unsaved</span>' : '');
   if (!vis.length) { list.innerHTML = '<div class="empty">No rules match.</div>'; return; }
@@ -4517,14 +4571,23 @@ function renderRules() {
     const on = _rulesState[r.id];
     const locked = !!r.locked;
     const lockBadge = locked
-      ? '<span class="rule-lock" title="' + safeAttr(r.lockReason || 'Pinned rule') + '"><svg class="icon"><use href="#i-lock"/></svg> Pinned</span>'
+      ? '<span class="rule-lock" title="' + safeAttr(r.lockReason || 'Pinned rule') + '"><svg class="icon"><use href="#i-lock"/></svg> '
+        + (r.selfProtect ? 'Always on' : 'Pinned') + '</span>'
       : '';
+    // What this rule does right now. Without it every row is an identical
+    // green toggle whether it stops a call or merely notes it.
+    const verdict = !on ? ''
+      : r.blocks
+        ? '<span class="rule-verdict blocks" title="Stops the call">blocks</span>'
+        : r.mode
+          ? '<span class="rule-verdict reports" title="Detected and recorded, but the call proceeds">reports</span>'
+          : '';
     return '<div class="rule-row ' + (on ? '' : 'off') + (locked ? ' locked' : '') + '">'
       + '<span class="rule-sev ' + safeAttr(r.severity) + '">' + safe(r.severity) + '</span>'
-      + '<div class="rule-main"><div class="rule-meta"><div class="rule-id">' + safe(r.id) + '</div>' + lockBadge + '</div>'
+      + '<div class="rule-main"><div class="rule-meta"><div class="rule-id">' + safe(r.id) + '</div>' + verdict + lockBadge + '</div>'
       + '<div class="rule-title">' + safe(r.title) + '</div></div>'
-      + '<label class="rule-toggle' + (locked ? ' locked' : '') + '"><input type="checkbox" data-rid="' + safeAttr(r.id) + '"'
-      + (on ? ' checked' : '') + (locked ? ' disabled' : '') + '><span class="rule-track"></span></label>'
+      + '<label class="rule-toggle' + (locked || _policyLocked ? ' locked' : '') + '"><input type="checkbox" data-rid="' + safeAttr(r.id) + '"'
+      + (on ? ' checked' : '') + (locked || _policyLocked ? ' disabled' : '') + '><span class="rule-track"></span></label>'
       + '</div>';
   }).join('');
   list.querySelectorAll('input[data-rid]').forEach(cb => {

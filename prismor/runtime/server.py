@@ -71,6 +71,29 @@ _CORS_HEADERS = {
 _SERVER_WORKSPACE: Optional[Path] = None
 
 
+def _effective_policy_state(workspace: Optional[Path]) -> dict:
+    """What the merged policy actually does, for the header chip and badges.
+
+    ``mode`` is "enforce" when anything blocks at all, regardless of what
+    ``settings.default_mode`` says — that field is the fallback for unlisted
+    rules, not a description of the policy.
+    """
+    try:
+        from prismor.runtime.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        blocking = sum(1 for r in engine.rules if engine._resolve_mode(r) == "enforce")
+        return {
+            "mode": "enforce" if blocking else "observe",
+            "blocking": blocking,
+            "total": len(engine.rules),
+            "defaultMode": engine.default_mode,
+            "explicitSelection": bool(getattr(engine, "explicit_selection", False)),
+            "legacyBridge": bool(getattr(engine, "is_legacy_policy", False)),
+        }
+    except Exception:
+        return {}
+
+
 def _policy_write_status(result: dict) -> int:
     """HTTP status for a policy write result.
 
@@ -183,6 +206,12 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 # signed bundle merges last, so the UI greys its controls rather
                 # than accepting edits the next policy pull would revert.
                 "editable": is_policy_editable(workspace),
+                # What is actually in force, as opposed to what `default_mode`
+                # says. A policy written by `prismor setup --mode enforce` sets
+                # default_mode: observe and flips its chosen rules to enforce,
+                # so reading the default alone reports "observe" for a machine
+                # that is blocking.
+                "effective": _effective_policy_state(workspace),
             }
             self._send_json(result)
             return
@@ -197,6 +226,15 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "rules": rules,
                 "workspace": str(workspace) if workspace else None,
+                # "How many rules are on" is the wrong headline for a policy
+                # that names its blocking set: what a reader wants is how many
+                # actually stop a call.
+                "summary": {
+                    "total": len(rules),
+                    "blocking": sum(1 for r in rules if r.get("blocks")),
+                    "reporting": sum(1 for r in rules if r.get("enabled") and not r.get("blocks")),
+                    "off": sum(1 for r in rules if not r.get("enabled")),
+                },
             })
             return
 
