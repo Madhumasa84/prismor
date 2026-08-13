@@ -2307,6 +2307,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         parser.parse_args(["tags", "--help"])
         return
 
+    # ── allow ──────────────────────────────────────────────────────────
+    if args.command == "allow":
+        raise SystemExit(_allow_cmd(args, workspace))
+
     # ── policy subcommands ─────────────────────────────────────────────
     if args.command == "policy":
         if args.policy_command == "init":
@@ -2890,6 +2894,38 @@ def build_parser() -> argparse.ArgumentParser:
     hook_dispatch.add_argument("--mode", choices=["observe", "enforce"], default="observe")
 
     # ── policy ─────────────────────────────────────────────────────────
+    allow_parser = subparsers.add_parser(
+        "allow",
+        help="Make an exception to a rule that blocked you (narrowest by default)",
+    )
+    allow_parser.add_argument(
+        "rule_id", nargs="?",
+        help="Rule to make an exception for (shown in the block message)",
+    )
+    allow_parser.add_argument(
+        "--pattern",
+        help="Allow only what matches this literal/regex. Defaults to the text "
+             "of the most recent block for this rule",
+    )
+    allow_parser.add_argument(
+        "--expires", metavar="DURATION",
+        help="Make it temporary: 30m, 2h, 7d. Without this the exception is permanent",
+    )
+    allow_parser.add_argument(
+        "--observe", action="store_true",
+        help="Broader: keep the rule but stop it blocking (still reported)",
+    )
+    allow_parser.add_argument(
+        "--off", action="store_true",
+        help="Broadest: turn the rule off in this workspace (not even reported)",
+    )
+    allow_parser.add_argument("--reason", help="Why this exception is safe (recorded in the file)")
+    allow_parser.add_argument("--yes", action="store_true", help="Confirm a broad or floor-rule change")
+    allow_parser.add_argument("--list", action="store_true", dest="list_allows",
+                              help="Show the exceptions in this workspace")
+    allow_parser.add_argument("--undo", metavar="ALLOW_ID", help="Remove an exception by id")
+    allow_parser.add_argument("--workspace", help="Workspace path")
+
     policy_parser = subparsers.add_parser("policy", help="Manage Prismor policies")
     policy_sub = policy_parser.add_subparsers(dest="policy_command")
 
@@ -4270,6 +4306,101 @@ def _policy_test(workspace: Path, test_file: Optional[str] = None) -> None:
     print()
     if result["failed"]:
         raise SystemExit(1)
+
+
+def _allow_cmd(args, workspace: Path) -> int:
+    """`prismor allow` — write a policy exception, narrowest rung by default."""
+    from prismor.runtime import allow as _allow
+
+    if getattr(args, "list_allows", False):
+        entries = _allow.list_allows(workspace)
+        if not entries:
+            print("No exceptions in this workspace.")
+            return 0
+        print(f"Exceptions in {_allow.policy_path(workspace)}:\n")
+        for e in entries:
+            expiry = f"  (expires {e['expires']})" if e.get("expires") else ""
+            print(f"  {e['id']}{expiry}")
+            print(f"    rules:    {', '.join(e.get('rule_ids') or [])}")
+            print(f"    patterns: {', '.join(e.get('patterns') or [])}")
+            if e.get("reason"):
+                print(f"    reason:   {e['reason']}")
+        print("\nRemove one with: prismor allow --undo <id>")
+        return 0
+
+    if getattr(args, "undo", None):
+        if _allow.undo(workspace, args.undo):
+            print(f"Removed {args.undo}.")
+            return 0
+        print(f"No exception with id '{args.undo}'. See: prismor allow --list")
+        return 1
+
+    rule_id = (getattr(args, "rule_id", None) or "").strip()
+    if not rule_id:
+        print("Which rule? The block message names it, e.g:")
+        print("  prismor allow secret-exfiltration --pattern '<literal>'")
+        print("  prismor allow --list")
+        return 2
+
+    if args.off:
+        scope = "off"
+    elif args.observe:
+        scope = "observe"
+    else:
+        scope = "pattern"
+
+    engine = PolicyEngine(workspace=workspace)
+    refusal = _allow.check_allowed(
+        rule_id,
+        scope=scope,
+        workspace=workspace,
+        confirmed=bool(args.yes),
+        explicit_selection=bool(getattr(engine, "explicit_selection", False)),
+    )
+    if refusal:
+        print(refusal)
+        return 1
+
+    if scope == "observe":
+        _allow.set_rule_mode(workspace, rule_id, "observe")
+        print(f"{rule_id} will report but not block in this workspace.")
+        return 0
+
+    if scope == "off":
+        _allow.set_rule_enabled(workspace, rule_id, False)
+        print(f"{rule_id} is off in this workspace — it will not be reported either.")
+        return 0
+
+    pattern = args.pattern
+    if not pattern:
+        # Fill in from the block that just happened, so the user does not have
+        # to retype the command that failed.
+        evidence = _allow.last_evidence_for_rule(workspace, rule_id)
+        pattern = _allow.literal_pattern(evidence or "")
+        if not pattern:
+            print(f"No recent {rule_id} block to copy a pattern from.")
+            print(f"Say what to allow:  prismor allow {rule_id} --pattern '<literal>'")
+            return 2
+        print(f"Using the last {rule_id} block as the pattern:  {pattern}")
+
+    expires_seconds = None
+    if getattr(args, "expires", None):
+        expires_seconds = _allow.parse_duration(args.expires)
+        if expires_seconds is None:
+            print(f"Could not read --expires '{args.expires}'. Use 30m, 2h or 7d.")
+            return 2
+
+    entry = _allow.add_allowlist(
+        workspace, rule_id, pattern,
+        reason=getattr(args, "reason", "") or "",
+        expires_seconds=expires_seconds,
+    )
+    window = f" until {entry['expires']}" if entry.get("expires") else ""
+    print(f"Added {entry['id']}{window} — {rule_id} will not block what matches:")
+    print(f"  {pattern}")
+    print("\nCheck it:   prismor check '<your command>'")
+    print(f"Undo it:    prismor allow --undo {entry['id']}")
+    return 0
 
 
 def _policy_show(workspace: Path) -> None:

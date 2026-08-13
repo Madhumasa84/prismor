@@ -2697,10 +2697,52 @@ def get_policy_precedence(workspace: Optional[Path] = None, scoped: Optional[Dic
     return {"winner": winner, "chain": chain}
 
 
+def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
+    """Whether local policy edits are worth offering here.
+
+    Where an org's signed policy governs, it merges after the project layer, so
+    a local edit either does nothing or reverts on the next pull. Saying so
+    beats letting someone edit a file that gets overwritten — the dashboard
+    greys its controls on this and the CLI writers refuse on it.
+
+    Both halves are required: the workspace is org-managed *and* a signed
+    policy actually exists to govern it. Enrollment alone is not enough —
+    an org that has not configured repo scoping manages every workspace by
+    default (workspace_scope.resolve_scope, reason "default_all"), so keying
+    on management alone would take local policy away from an enrolled solo
+    developer in their own side project, for an org policy that does not exist.
+    """
+    try:
+        from prismor.runtime.enterprise import workspace_scope as _scope
+        if not _scope.is_managed(workspace):
+            return {"editable": True, "reason": "", "error": ""}
+    except Exception:
+        return {"editable": True, "reason": "", "error": ""}
+
+    try:
+        from prismor.runtime.enterprise import remote_policy as _remote
+        if not _remote.cached_policy_path().exists():
+            return {"editable": True, "reason": "", "error": ""}
+    except Exception:
+        return {"editable": True, "reason": "", "error": ""}
+
+    return {
+        "editable": False,
+        "reason": "org_managed",
+        "error": "This workspace's policy is managed by your organization — "
+                 "edit it in the Prismor console, or request an exemption "
+                 'with `prismor exempt request --reason "<why>"`.',
+    }
+
+
 def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Write a policy layer.  Returns {ok, path?, error?}"""
     if scope == "enterprise":
         return {"ok": False, "error": "Enterprise policy is managed by org admin — edit it in the Prismor web dashboard."}
+
+    editable = is_policy_editable(workspace)
+    if not editable["editable"]:
+        return {"ok": False, "error": editable["error"], "reason": editable["reason"]}
 
     if scope == "global":
         path = _global_policy_path()
@@ -2799,8 +2841,8 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
 
     data.setdefault("version", "1.0")
     seen: List[str] = []
-    rules_block: List[Dict[str, Any]] = []
     ignored: List[str] = []
+    wanted_off: List[str] = []
     for rid in disabled_ids or []:
         if not rid or rid in seen:
             continue
@@ -2808,7 +2850,23 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
         if is_floor_protected_rule(rid, default_rules_by_id.get(rid)):
             ignored.append(rid)
             continue
-        rules_block.append({"id": rid, "enabled": False})
+        wanted_off.append(rid)
+
+    # Merge into the existing entries rather than replacing them. The rules
+    # block also carries the per-rule `mode` that `prismor setup --mode enforce`
+    # writes to record which rules were chosen to block, and rewriting the block
+    # from the enable/disable list alone would silently discard that selection.
+    existing: List[Dict[str, Any]] = [
+        dict(r) for r in (data.get("rules") or []) if isinstance(r, dict) and r.get("id")
+    ]
+    by_id = {str(r["id"]): r for r in existing}
+    for rid in wanted_off:
+        by_id.setdefault(rid, {"id": rid})
+        by_id[rid]["enabled"] = False
+    for rid, rule in by_id.items():
+        if rid not in wanted_off:
+            rule.pop("enabled", None)  # re-enabled: drop the override, keep mode
+    rules_block = [r for r in by_id.values() if len(r) > 1]
     data["rules"] = rules_block
 
     try:

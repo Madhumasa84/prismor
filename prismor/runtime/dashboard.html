@@ -4333,9 +4333,14 @@ function _syncModeToggle(scope, yaml) {
   if (!obs) return;
   obs.className = 'mode-btn' + (mode === 'observe' ? ' active-observe' : '');
   enf.className = 'mode-btn' + (mode === 'enforce' ? ' active-enforce' : '');
-  if (hint) hint.textContent = mode === 'enforce'
+  // Per-rule `mode:` wins over this default, so a policy written by
+  // `prismor setup --mode enforce` keeps blocking exactly what was selected
+  // regardless of which button is lit here.
+  const perRule = /^\s*mode\s*:/m.test(yaml || '');
+  const suffix = perRule ? ' · rules with their own mode: keep it' : '';
+  if (hint) hint.textContent = (mode === 'enforce'
     ? 'enforce — threats are blocked in real time'
-    : 'observe — threats are logged but not blocked';
+    : 'observe — threats are logged but not blocked') + suffix;
 }
 
 function setMode(scope, mode) {
@@ -4429,6 +4434,36 @@ function renderPolicyTab(data) {
   // a project selector; workspace paths are internal metadata on sessions.
   const wsBanner = document.getElementById('workspaceBanner');
   if (wsBanner) wsBanner.innerHTML = '';
+
+  applyPolicyEditable(data);
+}
+
+// On an org-managed workspace the signed bundle merges after the local layers,
+// so an edit here either does nothing or reverts on the next policy pull. Say
+// that and disable the controls, rather than accepting edits that vanish.
+function applyPolicyEditable(data) {
+  const editable = (data || {}).editable || { editable: true };
+  const locked = editable.editable === false;
+  const ids = ['globalPolicyEditor', 'projectPolicyEditor'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.readOnly = locked;
+  });
+  ['global', 'project'].forEach(scope => {
+    ['ModeObserve', 'ModeEnforce'].forEach(suffix => {
+      const btn = document.getElementById(scope + suffix);
+      if (btn) btn.disabled = locked;
+    });
+  });
+  const wsBanner = document.getElementById('workspaceBanner');
+  if (wsBanner && locked) {
+    wsBanner.innerHTML = '<div class="banner banner-warn"><span>' +
+      '<strong>Policy managed by your organization</strong>' +
+      'Local edits to this workspace would be overwritten by the next signed policy pull. ' +
+      'Change it in the Prismor console, or request an exemption: ' +
+      '<code>prismor exempt request --reason "&lt;why&gt;"</code>' +
+      '</span></div>';
+  }
 }
 
 function setPolicySaveStatus(elId, msg, cls) {

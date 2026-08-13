@@ -41,6 +41,14 @@
           ],
           "description": "Global observe/enforce default for rules that don't set their own `mode`. Defaults to observe (nothing blocks until a rule is flipped to enforce)."
         },
+        "selection": {
+          "type": "string",
+          "enum": [
+            "explicit"
+          ],
+          "description": "`explicit` means the rules listed in this file are the complete blocking set, as chosen rule by rule in `prismor setup`. A safety-floor rule that is not listed reports instead of blocking. Honored only for a locally-authored policy on an unmanaged workspace — it is ignored from a signed org bundle, and never applies to Prismor's self-protection rules.",
+          "$comment": "Opt-in floor. The floor is otherwise unconditional, so this is deliberately not something an org policy can set."
+        },
         "block_categories": {
           "type": "array",
           "description": "Legacy: finding categories eligible to block. Enforcement is now decided per-rule via `mode`/`default_mode`; this is retained for compatibility.",
@@ -686,6 +694,10 @@
         "reason": {
           "type": "string",
           "description": "Human-readable reason for this allowlist entry"
+        },
+        "expires": {
+          "type": "string",
+          "description": "Optional ISO-8601 timestamp after which this entry stops applying, so a temporary exception (`prismor allow --expires 30m`) lapses instead of quietly becoming permanent policy."
         }
       },
       "additionalProperties": false

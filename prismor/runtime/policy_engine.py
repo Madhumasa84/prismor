@@ -581,12 +581,17 @@ class AllowlistEntry:
     carve-out visible in the same list.
     """
 
-    __slots__ = ("id", "rule_ids", "patterns", "raw_patterns", "reason", "type")
+    __slots__ = ("id", "rule_ids", "patterns", "raw_patterns", "reason", "type", "expires")
 
     def __init__(self, raw: Dict[str, Any]) -> None:
         self.id: str = raw["id"]
         self.rule_ids: set[str] = set(raw["rule_ids"])
         self.reason: str = raw.get("reason", "")
+        # Optional ISO-8601 expiry, so a "just this once" exception written by
+        # `prismor allow --expires` lapses on its own instead of quietly
+        # becoming permanent policy.
+        _exp = raw.get("expires")
+        self.expires: Optional[str] = str(_exp) if _exp else None
         # Absent means allow, so every pre-existing entry keeps its behaviour.
         _t = str(raw.get("type", "allow")).lower()
         self.type: str = _t if _t in ("allow", "veto") else "allow"
@@ -595,6 +600,8 @@ class AllowlistEntry:
         self.patterns: re.Pattern[str] = re.compile(joined, re.IGNORECASE)
 
     def applies_to(self, rule_id: str) -> bool:
+        if self.expires and self.expires < _now_iso_z():
+            return False
         return "*" in self.rule_ids or rule_id in self.rule_ids
 
 

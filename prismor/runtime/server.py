@@ -48,6 +48,7 @@ from prismor.runtime.store import (
     get_enrollment,
     read_policy_layer,
     get_policy_precedence,
+    is_policy_editable,
     write_policy_layer,
     get_policy_rule_catalog,
     set_project_rule_states,
@@ -68,6 +69,18 @@ _CORS_HEADERS = {
 
 # The workspace where the server was launched (set by run_server).
 _SERVER_WORKSPACE: Optional[Path] = None
+
+
+def _policy_write_status(result: dict) -> int:
+    """HTTP status for a policy write result.
+
+    An org-managed refusal is 403, not 400: the request was well-formed and the
+    answer is "not from here", which is what lets the UI show the right banner
+    instead of a validation error.
+    """
+    if result.get("ok"):
+        return 200
+    return 403 if result.get("reason") == "org_managed" else 400
 
 
 class PrismorRequestHandler(BaseHTTPRequestHandler):
@@ -166,6 +179,10 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 "enrollment": enrollment,
                 "workspace": str(workspace) if workspace else None,
                 "enterprise_enrolled": enrollment is not None,
+                # Whether local edits survive: on an org-managed workspace the
+                # signed bundle merges last, so the UI greys its controls rather
+                # than accepting edits the next policy pull would revert.
+                "editable": is_policy_editable(workspace),
             }
             self._send_json(result)
             return
@@ -402,7 +419,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 content = body.get("yaml", "")
                 result = write_policy_layer("global", content)
-                self._send_json(result, status=200 if result["ok"] else 400)
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -417,7 +434,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "workspace required"}, status=400)
                     return
                 result = write_policy_layer("project", content, workspace)
-                self._send_json(result, status=200 if result["ok"] else 400)
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -435,7 +452,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "disabled must be a list"}, status=400)
                     return
                 result = set_project_rule_states(workspace, [str(x) for x in disabled])
-                self._send_json(result, status=200 if result.get("ok") else 400)
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return

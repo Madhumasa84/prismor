@@ -932,6 +932,44 @@ rules:
       - '(^|/)\.prismor(-warden)?/policy\.yaml$'
     action: block
 
+  # ── CRITICAL: Prismor self-edit ────────────────────────────────────
+  # agent-config-tampering above covers writes to the policy file itself.
+  # This covers every *other* way an agent could relax its own governance:
+  # the CLI subcommands that edit policy, the local dashboard's write API,
+  # and the unlock credential that gates all of it.
+  #
+  # A human at their own terminal is unaffected — Prismor sees agent tool
+  # calls, not the person typing. An agent gets past this only inside a
+  # password-verified unlock window (`prismor unlock`), which is checked at
+  # dispatch. Non-overridable and always enforcing: see
+  # _SELF_PROTECTION_RULE_IDS in policy_engine.py.
+  - id: prismor-self-edit
+    severity: CRITICAL
+    category: security_bypass
+    title: Blocks an agent editing Prismor's own policy or unlock credential
+    event_types: [shell, file_write, file_read]
+    fields: [command, path]
+    patterns:
+      # Policy-mutating CLI surface. `prismor check`/`status`/`sessions` and
+      # every other read-only subcommand stay available to the agent.
+      - '\bprismor\b[^\n]*\b(allow|unlock|lock|pause|resume|uninstall)\b'
+      - '\bprismor\b[^\n]*\bpolicy\b[^\n]*\b(edit|set|write)\b'
+      - '\bprismor\b[^\n]*\begress\b[^\n]*\b(allow|disable)\b'
+      - '\bprismor\b[^\n]*\b(setup|install-hooks|workspace)\b'
+      # The unlock credential and grant. Reads matter as much as writes: the
+      # credential file is what a brute-force attempt would need.
+      - '\.prismor/unlock(-grant)?\.json\b'
+      - '(^|/)\.prismor/unlock(-grant)?\.json$'
+      # Other Prismor state an agent has no legitimate reason to rewrite.
+      - '(>|rm|mv|cp|truncate|tee)[^\n]*\.prismor/(pause|identity|workspace-scopes)\.json'
+      - '(^|/)\.prismor/(pause|identity|workspace-scopes)\.json$'
+      # The local dashboard's write API (loopback, unauthenticated by design
+      # — it assumes only the human reaches it).
+      - '(curl|wget|http|nc)[^\n]*(127\.0\.0\.1|localhost)[^\n]*/api/(policy|tool-policy|agents|sessions)'
+      # Wrappers whose only purpose here is to disguise one of the above.
+      - '\b(script|unbuffer|expect)\b[^\n]*\bprismor\b[^\n]*\b(allow|unlock|policy|setup)\b'
+    action: block
+
   # ── CRITICAL: Audit-trail tampering ────────────────────────────────
   # The signed audit trail (~/.prismor/audit/) is only trustworthy if the
   # agent cannot rewrite it, reset its chain state, or read the Ed25519
