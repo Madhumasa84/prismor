@@ -734,7 +734,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 return
             _print_findings(total_findings, engine=engine,
                             explain=args.explain, suggest=args.suggest_allowlist)
-            if any(f.get("action") == "block" for f in total_findings):
+            if any(_blocks(f) for f in total_findings):
                 raise SystemExit(2)
             raise SystemExit(1)
 
@@ -760,10 +760,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                         explain=args.explain, suggest=args.suggest_allowlist,
                         input_value=args.value)
 
-        # Exit 2 if any finding has action=block, 1 for warn-only, 0 for log-only.
-        if any(f.get("action") == "block" for f in findings):
+        # Exit 2 if a finding would actually block, 1 for warn-only, 0 for
+        # log-only — keyed on the effective verdict, so a CI gate reflects what
+        # this policy does rather than what its rules would like to do.
+        if any(_blocks(f) for f in findings):
             raise SystemExit(2)
-        if any(f.get("action") == "warn" for f in findings):
+        if any(_effective_verdict(f) == "WARN" for f in findings):
             raise SystemExit(1)
         return
 
@@ -3459,6 +3461,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _effective_verdict(finding: Dict[str, Any]) -> str:
+    """What this finding would actually do, as `check` should report it.
+
+    A rule's `action` is what it asks for; the finding's resolved `mode` is what
+    it gets. Those used to be the same thing in practice, so reporting `action`
+    was fine. They are not the same once a policy names its blocking set
+    explicitly (`prismor setup --mode enforce`): an unselected rule still
+    carries `action: block` while resolving to observe, and reporting BLOCK for
+    something that will only warn makes `prismor check` useless for the exact
+    question it exists to answer.
+    """
+    action = str(finding.get("action") or "warn").lower()
+    if action == "block" and str(finding.get("mode") or "").lower() != "enforce":
+        return "WARN"
+    return action.upper()
+
+
+def _blocks(finding: Dict[str, Any]) -> bool:
+    return _effective_verdict(finding) == "BLOCK"
+
+
 def _print_findings(
     findings: List[Dict[str, Any]],
     *,
@@ -3471,7 +3494,7 @@ def _print_findings(
     for f in findings:
         sev = f["severity"]
         color = _RED if sev == "CRITICAL" else _YELLOW if sev == "HIGH" else _DIM
-        action_label = f.get("action", "warn").upper()
+        action_label = _effective_verdict(f)
         print(_color(f"[{sev}]", color) + f" {f['title']}  " + _color(f"({action_label})", color))
         evidence = str(f.get("evidence", "")).split("\n", 1)[0]
         print(f"  rule: {f.get('ruleId', '?')}  evidence: {evidence}")
