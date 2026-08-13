@@ -30,9 +30,17 @@ except Exception:
 _VERSION = f"v{_PKG_VERSION}"
 _BACK = object()  # sentinel for "go back"
 
-# repo_root for passing to install_hooks — parent of the prismor/runtime/ package
 _PKG_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _PKG_DIR.parent
+# repo_root for install_hooks: the directory CONTAINING the `prismor` package,
+# i.e. two levels up from prismor/runtime/ — matching what hooks.py expects when
+# it builds `repo_root / "prismor" / "runtime" / "<agent>-plugin"` and what the
+# rest of the runtime uses (see discover_cli). This pointed at the package dir
+# itself, one level too deep, which silently cost three things: the hook's
+# PYTHONPATH fallback resolved to a directory with no importable `prismor` in
+# it, the openclaw/hermes/opencode plugin paths pointed at a directory that
+# does not exist, and a git-clone install never detected its own checkout, so
+# it printed "run pip install --upgrade" instead of updating itself.
+_REPO_ROOT = _PKG_DIR.parent.parent
 
 # ── ANSI ─────────────────────────────────────────────────────────────────────
 
@@ -800,6 +808,20 @@ def _write_agent_context(target: Path, agents: List[str]) -> None:
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
+def _print_banner(text: str, pad: int = 3, color: str = GRN) -> None:
+    """Print `text` in a box sized to the text.
+
+    Drawing the border as a literal string is how it drifts: the rule is one
+    character wide per column, and nothing checks that against the line inside
+    it. Deriving both from the same width keeps the right edge where the box
+    ends.
+    """
+    inner = _visible_len(text) + pad * 2
+    print(_w("  ╭" + "─" * inner + "╮", DIM))
+    print(_w("  │", DIM) + _w(" " * pad + text + " " * pad, color, BOLD) + _w("│", DIM))
+    print(_w("  ╰" + "─" * inner + "╯", DIM))
+
+
 def _render_selection_policy(selected: List[str]) -> str:
     """The `.prismor/policy.yaml` an enforce install writes.
 
@@ -896,6 +918,22 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
 
     if git_root is not None:
         def _update():
+            # A clone install updates itself; a working checkout does not. Now
+            # that the repo root resolves correctly, `prismor setup` run from a
+            # development checkout would otherwise pull on top of whatever the
+            # developer has in progress.
+            dirty = subprocess.run(
+                ["git", "-C", str(git_root), "status", "--porcelain"],
+                capture_output=True, timeout=15,
+            )
+            if dirty.returncode == 0 and dirty.stdout.strip():
+                return True, "skipped (local changes)"
+            upstream = subprocess.run(
+                ["git", "-C", str(git_root), "rev-parse", "--abbrev-ref", "@{u}"],
+                capture_output=True, timeout=15,
+            )
+            if upstream.returncode != 0:
+                return True, "skipped (no upstream branch)"
             r = subprocess.run(
                 ["git", "-C", str(git_root), "pull", "--quiet"],
                 capture_output=True, timeout=15,
@@ -904,8 +942,10 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
         _spinner_run("Updating Prismor", _update)
     else:
         def _pip_note():
-            return True, "run `pip install --upgrade prismor` to update"
-        _spinner_run("Prismor (pip install)", _pip_note)
+            # `pip install --upgrade` is wrong for the pipx and uv installs the
+            # README recommends; `prismor update` works whichever was used.
+            return True, "run `prismor update` to upgrade"
+        _spinner_run("Prismor (installed package)", _pip_note)
 
     # 2. Persist the rule selection.
     #
@@ -1038,9 +1078,7 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     # Done — success banner
     home = str(Path.home())
     print()
-    print(_w("  ╭───────────────────────────────────────────╮", DIM))
-    print(_w("  │", DIM) + _w("  Prismor installed successfully!    ", GRN, BOLD) + _w("│", DIM))
-    print(_w("  ╰───────────────────────────────────────────╯", DIM))
+    _print_banner("Prismor installed successfully!")
     print()
 
     def _info(k: str, v: str) -> None:
