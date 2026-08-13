@@ -531,6 +531,10 @@
   }
   .rule-verdict.blocks  { color:#b91c1c; background:#fef2f2; border-color:#fecaca; }
   .rule-verdict.reports { color:#92400e; background:#fffbeb; border-color:#fde68a; }
+  .rules-head {
+    font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--gray-500); margin:0 0 6px 2px;
+  }
   .rule-sev {
     font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
     border-radius:4px; white-space:nowrap;
@@ -1290,6 +1294,15 @@
   .fsel, .finput, .agent-switch, .yaml-editor, .rules-search {
     border: 1px solid rgba(16,24,40,.23); border-radius: var(--md-radius-sm);
     background: #fff; transition: border-color .15s, box-shadow .15s;
+  }
+  /* This repainted the editor white without touching its text colour, which is
+     set dark-on-light further up (#e5e7eb on #111827). The result was near-white
+     text on white — a contrast ratio of about 1.05:1, i.e. an invisible policy.
+     The editors follow the theme like every other surface now. */
+  .yaml-editor { color: var(--gray-800); }
+  html[data-theme="dark"] .yaml-editor {
+    background: var(--surface-muted);
+    color: var(--gray-700);
   }
   .fsel:hover, .finput:hover, .agent-switch:hover, .rules-search:hover { border-color: rgba(16,24,40,.5); }
   .fsel:focus, .finput:focus, .agent-switch:focus, .yaml-editor:focus, .rules-search:focus {
@@ -2102,6 +2115,7 @@
 
   <div class="policy-scope-nav">
     <button class="policy-scope-btn active" data-pscope="rules">Rules</button>
+    <button class="policy-scope-btn" data-pscope="egress">Network egress</button>
     <button class="policy-scope-btn" data-pscope="global">Global</button>
     <button class="policy-scope-btn" data-pscope="project">Project</button>
     <button class="policy-scope-btn" data-pscope="enterprise">Enterprise</button>
@@ -2135,6 +2149,66 @@
       <button class="btn-ghost" id="rulesDiscard">Discard changes</button>
       <span id="rulesSaveStatus" class="policy-status"></span>
     </div>
+  </div>
+
+  <!-- Network egress -->
+  <div id="pscope-egress" class="policy-scope-pane">
+    <div class="banner banner-info">
+      <span class="banner-icon"><svg class="icon"><use href="#i-globe"/></svg></span>
+      <div class="banner-text">
+        <strong>Where agents may connect</strong>
+        Off by default. Turn it on in <em>observe</em> first and read
+        <code>prismor egress report</code> — it lists every destination your recorded sessions
+        actually contacted, so you can see what enforcing would have broken before it breaks it.
+        Saved to <code>.prismor/policy.yaml</code> under <code>settings.egress</code>.
+      </div>
+    </div>
+
+    <div class="policy-header">
+      <div class="policy-meta">
+        <span id="egressStatus">Loading…</span>
+        <span class="path" id="egressSource"></span>
+      </div>
+    </div>
+
+    <div class="mode-toggle-row">
+      <span class="mode-toggle-label">Screening</span>
+      <div class="mode-toggle-btns">
+        <button class="mode-btn" id="egressOff" onclick="setEgress('enabled', false)">Off</button>
+        <button class="mode-btn" id="egressOn" onclick="setEgress('enabled', true)">On</button>
+      </div>
+      <span class="mode-hint" id="egressEnabledHint"></span>
+    </div>
+
+    <div class="mode-toggle-row">
+      <span class="mode-toggle-label">Enforcement mode</span>
+      <div class="mode-toggle-btns">
+        <button class="mode-btn" id="egressModeObserve" onclick="setEgress('mode','observe')">Observe</button>
+        <button class="mode-btn" id="egressModeEnforce" onclick="setEgress('mode','enforce')">Enforce</button>
+      </div>
+      <span class="mode-hint" id="egressModeHint"></span>
+    </div>
+
+    <div class="mode-toggle-row">
+      <span class="mode-toggle-label">Unlisted destinations</span>
+      <div class="mode-toggle-btns">
+        <button class="mode-btn" id="egressDefaultAllow" onclick="setEgress('default','allow')">Allow</button>
+        <button class="mode-btn" id="egressDefaultDeny" onclick="setEgress('default','deny')">Deny</button>
+      </div>
+      <span class="mode-hint" id="egressDefaultHint"></span>
+    </div>
+
+    <div class="rules-toolbar" style="margin-top:14px">
+      <input id="egressHost" class="rules-search" type="text" spellcheck="false"
+             placeholder="api.github.com · *.githubusercontent.com · 10.0.0.0/8" />
+      <input id="egressReason" class="rules-search" type="text" spellcheck="false"
+             style="max-width:240px" placeholder="reason (optional)" />
+      <button class="btn-ghost" id="egressAddAllow">Allow</button>
+      <button class="btn-ghost" id="egressAddDeny">Deny</button>
+    </div>
+    <div id="egressAddStatus" class="policy-status"></div>
+
+    <div id="egressLists"></div>
   </div>
 
   <!-- Global policy -->
@@ -4620,6 +4694,130 @@ document.getElementById('rulesDiscard').addEventListener('click', () => {
   _rulesCatalog.forEach(r => { _rulesState[r.id] = r.enabled; }); renderRules();
 });
 document.querySelector('.policy-scope-btn[data-pscope="rules"]')?.addEventListener('click', loadRules);
+
+// ── Network egress ─────────────────────────────────────────────────────────
+// settings.egress used to be editable only by hand-writing YAML here or running
+// `prismor egress` in a terminal, which is a lot of ceremony for "let this agent
+// reach api.github.com".
+let _egress = null;
+
+async function loadEgress() {
+  const ws = activeWorkspace();
+  const params = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+  try {
+    _egress = await apiFetch('/api/policy/egress' + params);
+    renderEgress();
+  } catch (e) {
+    document.getElementById('egressLists').innerHTML =
+      '<div class="empty">Failed to load the egress policy.</div>';
+  }
+}
+
+function _egressBtn(id, on, disabled) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.className = 'mode-btn' + (on ? (id.includes('Enforce') || id.includes('Deny') ? ' active-enforce' : ' active-observe') : '');
+  btn.disabled = !!disabled;
+}
+
+function renderEgress() {
+  if (!_egress) return;
+  const eff = _egress.effective || {};
+  const locked = (_egress.editable || {}).editable === false;
+  const on = !!eff.enabled;
+
+  document.getElementById('egressStatus').textContent = on
+    ? `Screening ${eff.mode === 'enforce' ? 'and blocking' : 'in observe mode'}`
+    : 'Not screening network destinations';
+  document.getElementById('egressSource').textContent = on ? `set by the ${eff.source} policy` : '';
+
+  _egressBtn('egressOff', !on, locked);
+  _egressBtn('egressOn', on, locked);
+  _egressBtn('egressModeObserve', on && eff.mode !== 'enforce', locked || !on);
+  _egressBtn('egressModeEnforce', on && eff.mode === 'enforce', locked || !on);
+  _egressBtn('egressDefaultAllow', on && eff.default !== 'deny', locked || !on);
+  _egressBtn('egressDefaultDeny', on && eff.default === 'deny', locked || !on);
+
+  document.getElementById('egressEnabledHint').textContent = on
+    ? '' : 'nothing below applies until this is on';
+  document.getElementById('egressModeHint').textContent = !on ? ''
+    : eff.modeInherited ? 'inherited from the policy default'
+    : eff.mode === 'enforce' ? 'calls outside the policy are blocked'
+    : 'calls outside the policy are recorded, not blocked';
+  document.getElementById('egressDefaultHint').textContent = !on ? ''
+    : eff.default === 'deny'
+      ? 'anything not in Allowed is refused — start from `prismor egress report`'
+      : 'anything not in Denied is permitted';
+
+  ['egressHost', 'egressReason'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = locked;
+  });
+  ['egressAddAllow', 'egressAddDeny'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = locked;
+  });
+
+  const list = (entries, kind) => !entries.length
+    ? `<div class="empty">No ${kind} destinations.</div>`
+    : entries.map(e =>
+        '<div class="rule-row">'
+        + '<span class="rule-verdict ' + (kind === 'denied' ? 'blocks' : 'reports') + '">' + kind + '</span>'
+        + '<div class="rule-main"><div class="rule-id">' + safe(e.host) + '</div>'
+        + (e.reason ? '<div class="rule-title">' + safe(e.reason) + '</div>' : '')
+        + '</div>'
+        + (locked ? '' : '<button class="btn-ghost" data-egress-rm="' + safeAttr(e.host) + '">Remove</button>')
+        + '</div>').join('');
+
+  document.getElementById('egressLists').innerHTML =
+    '<div class="rules-head">Allowed</div>' + list(eff.allow || [], 'allowed')
+    + '<div class="rules-head" style="margin-top:12px">Denied</div>' + list(eff.deny || [], 'denied');
+
+  document.getElementById('egressLists').querySelectorAll('[data-egress-rm]').forEach(btn => {
+    btn.addEventListener('click', () => egressAction({ action: 'remove', host: btn.dataset.egressRm }));
+  });
+}
+
+async function egressAction(payload) {
+  const ws = activeWorkspace();
+  if (!ws) { setPolicySaveStatus('egressAddStatus', 'No project workspace detected', 'status-err'); return; }
+  setPolicySaveStatus('egressAddStatus', 'Saving…', 'status-saving');
+  try {
+    // PUT, like every other policy write on this page (/api/policy/rules,
+    // /api/policy/project). The server routes it in do_PUT.
+    const result = await apiFetch('/api/policy/egress', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, workspace: ws }),
+    });
+    if (result && result.ok) {
+      _egress = result.egress || _egress;
+      renderEgress();
+      setPolicySaveStatus('egressAddStatus', '✓ Saved · live agents pick it up within 30 s', 'status-ok');
+    } else {
+      setPolicySaveStatus('egressAddStatus', (result && result.error) || 'Save failed', 'status-err');
+    }
+  } catch (e) {
+    setPolicySaveStatus('egressAddStatus', String(e).slice(0, 160), 'status-err');
+  }
+}
+
+function setEgress(field, value) { egressAction({ action: 'set', field, value }); }
+
+function _addEgress(listName) {
+  const host = (document.getElementById('egressHost').value || '').trim();
+  const reason = (document.getElementById('egressReason').value || '').trim();
+  if (!host) { setPolicySaveStatus('egressAddStatus', 'Enter a host first', 'status-err'); return; }
+  egressAction({ action: 'add', host, list: listName, reason }).then(() => {
+    document.getElementById('egressHost').value = '';
+    document.getElementById('egressReason').value = '';
+  });
+}
+
+document.getElementById('egressAddAllow')?.addEventListener('click', () => _addEgress('allow'));
+document.getElementById('egressAddDeny')?.addEventListener('click', () => _addEgress('deny'));
+document.getElementById('egressHost')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') _addEgress('allow');
+});
+document.querySelector('.policy-scope-btn[data-pscope="egress"]')?.addEventListener('click', loadEgress);
 document.getElementById('rulesSave').addEventListener('click', async () => {
   const ws = activeWorkspace();
   if (!ws) { setPolicySaveStatus('rulesSaveStatus', 'No project workspace detected', 'status-err'); return; }

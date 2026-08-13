@@ -2634,7 +2634,19 @@ def _policy_layer_summary(scope: str, layer: Dict[str, Any]) -> str:
             # so quoting `default_mode` alone would describe it as "observe"
             # while it blocks — the same confusion the header chip had.
             if re.search(r"^\s*selection\s*:\s*explicit\s*$", text, re.MULTILINE):
-                enforcing = len(re.findall(r"^\s*mode\s*:\s*enforce\s*$", text, re.MULTILINE))
+                # Count rules, not every `mode: enforce` in the file —
+                # settings.egress has one too, and counting it reported one
+                # more blocking rule than the policy has.
+                enforcing = 0
+                try:
+                    import yaml as _yaml
+                    parsed = _yaml.safe_load(text) or {}
+                    enforcing = sum(
+                        1 for r in (parsed.get("rules") or [])
+                        if isinstance(r, dict) and str(r.get("mode") or "").lower() == "enforce"
+                    )
+                except Exception:
+                    enforcing = len(re.findall(r"^\s{2,}mode\s*:\s*enforce\s*$", text, re.MULTILINE))
                 return (
                     f"Project policy names its blocking set: {enforcing} rule(s) enforce, "
                     "everything else is reported. Written by `prismor setup --mode enforce`."
@@ -2796,6 +2808,237 @@ def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = Non
         return {"ok": True, "path": str(path)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ── network egress config ────────────────────────────────────────────────────
+#
+# `prismor egress ...` edits settings.egress in the project policy, but its
+# helpers print and sys.exit, so they cannot be called from the dashboard. These
+# are the same operations as data: they validate with the same EgressEntry the
+# runtime compiles with, and they save through write_policy_layer, which is what
+# makes the org-managed refusal apply here too.
+
+def _egress_settings_block(data: Dict[str, Any]) -> Dict[str, Any]:
+    settings = data.setdefault("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+        data["settings"] = settings
+    block = settings.setdefault("egress", {})
+    if not isinstance(block, dict):
+        block = {}
+        settings["egress"] = block
+    return block
+
+
+def _entry_to_dict(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        return {"host": entry, "reason": ""}
+    if isinstance(entry, dict):
+        return {
+            "host": str(entry.get("host") or entry.get("domain") or entry.get("cidr") or ""),
+            "reason": str(entry.get("reason") or ""),
+        }
+    return {"host": str(entry), "reason": ""}
+
+
+def get_egress_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
+    """The effective egress policy plus the project-local block that edits write.
+
+    Two views because they can differ: the effective one is what devices apply
+    after the org layer merges, and the editable one is this workspace's file.
+    Showing only the first would invite edits that appear to do nothing.
+    """
+    effective: Dict[str, Any] = {}
+    try:
+        from prismor.runtime.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        pol = engine.egress
+        effective = {
+            "enabled": bool(pol.enabled),
+            # None means "inherit the policy's default_mode", which is what the
+            # runtime does; spell it out rather than showing a blank.
+            "mode": pol.mode or engine.default_mode,
+            "modeInherited": pol.mode is None,
+            "default": pol.default,
+            "allowPrivate": bool(pol.allow_private),
+            "allow": [_entry_to_dict(e.raw) for e in pol.allow],
+            "deny": [_entry_to_dict(e.raw) for e in pol.deny],
+            "source": pol.source or "default",
+            "legacy": bool(pol.legacy),
+            "errors": list(pol.errors or []),
+        }
+    except Exception as exc:
+        effective = {"error": str(exc)}
+
+    local: Dict[str, Any] = {}
+    if workspace:
+        try:
+            from prismor.runtime.policy_engine import _load_yaml
+            ppath = _project_policy_path(workspace)
+            if ppath.exists():
+                raw = _load_yaml(ppath) or {}
+                block = ((raw.get("settings") or {}).get("egress") or {})
+                if isinstance(block, dict):
+                    local = {
+                        "enabled": bool(block.get("enabled", False)),
+                        "mode": block.get("mode"),
+                        "default": block.get("default", "allow"),
+                        "allowPrivate": bool(block.get("allow_private", True)),
+                        "allow": [_entry_to_dict(e) for e in (block.get("allow") or [])],
+                        "deny": [_entry_to_dict(e) for e in (block.get("deny") or [])],
+                    }
+        except Exception:
+            local = {}
+
+    return {
+        "effective": effective,
+        "project": local,
+        "editable": is_policy_editable(workspace),
+        "path": str(_project_policy_path(workspace)) if workspace else "",
+    }
+
+
+def _save_egress(workspace: Path, data: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import yaml
+        content = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    except ImportError:
+        return {"ok": False, "error": "PyYAML is required to edit the egress policy"}
+    return write_policy_layer("project", content, workspace)
+
+
+def _load_project_policy(workspace: Path) -> Dict[str, Any]:
+    from prismor.runtime.policy_engine import _load_yaml
+    ppath = _project_policy_path(workspace)
+    if not ppath.exists():
+        return {"version": "1.0"}
+    loaded = _load_yaml(ppath)
+    return loaded if isinstance(loaded, dict) else {"version": "1.0"}
+
+
+def set_egress_option(workspace: Path, field: str, value: Any) -> Dict[str, Any]:
+    """Set enabled / mode / default / allow_private on the project egress block."""
+    allowed = {"enabled", "mode", "default", "allow_private"}
+    if field not in allowed:
+        return {"ok": False, "error": f"unknown egress field '{field}'"}
+    if field == "mode" and str(value) not in ("observe", "enforce"):
+        return {"ok": False, "error": "mode must be observe or enforce"}
+    if field == "default" and str(value) not in ("allow", "deny"):
+        return {"ok": False, "error": "default must be allow or deny"}
+
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    block[field] = value
+    # Setting anything other than the switch itself on a disabled policy is a
+    # silent no-op, which is how `prismor egress` behaves too.
+    if field != "enabled":
+        block.setdefault("enabled", True)
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["egress"] = get_egress_config(workspace)
+    return result
+
+
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+    r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$",
+    re.IGNORECASE,
+)
+
+
+def validate_egress_host(host: str) -> Optional[str]:
+    """Why this is not a usable egress entry, or None if it is.
+
+    EgressEntry accepts any non-empty string, because to the matcher an
+    unparseable host is simply one that never matches — harmless at evaluation
+    time, useless as an entry. Typed into a form that is a silent mistake: the
+    rule saves, looks right, and never fires. So the shape is checked here.
+    """
+    host = (host or "").strip()
+    if not host:
+        return "host required"
+    if host == "*":
+        return None
+    if "://" in host:
+        return "enter a host, not a URL — e.g. api.github.com"
+    candidate = host[2:] if host.startswith("*.") else host
+    if host.startswith("*.") and not candidate:
+        return "wildcard needs a domain, e.g. *.example.com"
+    if "/" in host:
+        import ipaddress
+        try:
+            ipaddress.ip_network(host, strict=False)
+            return None
+        except ValueError as exc:
+            return f"not a valid CIDR: {exc}"
+    import ipaddress
+    try:
+        ipaddress.ip_address(candidate)
+        return None
+    except ValueError:
+        pass
+    if not _HOSTNAME_RE.match(candidate):
+        return "not a hostname, wildcard (*.example.com), IP, or CIDR"
+    return None
+
+
+def add_egress_host(workspace: Path, host: str, list_name: str = "allow",
+                    reason: str = "") -> Dict[str, Any]:
+    """Add a host/wildcard/CIDR to settings.egress.allow or .deny."""
+    if list_name not in ("allow", "deny"):
+        return {"ok": False, "error": "list must be allow or deny"}
+    host = (host or "").strip()
+    problem = validate_egress_host(host)
+    if problem:
+        return {"ok": False, "error": f"{host!r}: {problem}" if host else problem}
+    try:
+        from prismor.runtime.egress import EgressEntry
+        EgressEntry(host, list_name)  # compile it the way the runtime will
+    except Exception as exc:
+        return {"ok": False, "error": f"invalid host {host!r}: {exc}"}
+
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    current = block.setdefault(list_name, [])
+    if not isinstance(current, list):
+        current = []
+        block[list_name] = current
+    existing = {_entry_to_dict(e)["host"] for e in current}
+    if host in existing:
+        return {"ok": False, "error": f"{host} is already in {list_name}"}
+    current.append({"host": host, "reason": reason} if reason else host)
+    if not block.get("enabled"):
+        block["enabled"] = True
+        block.setdefault("mode", "observe")
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["egress"] = get_egress_config(workspace)
+    return result
+
+
+def remove_egress_host(workspace: Path, host: str) -> Dict[str, Any]:
+    """Remove a host from both egress lists."""
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    removed: List[str] = []
+    for key in ("allow", "deny"):
+        current = block.get(key)
+        if not isinstance(current, list):
+            continue
+        kept = []
+        for item in current:
+            if _entry_to_dict(item)["host"] == host:
+                removed.append(f"{key}:{host}")
+            else:
+                kept.append(item)
+        block[key] = kept
+    if not removed:
+        return {"ok": False, "error": f"no entry for {host}"}
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["removed"] = removed
+        result["egress"] = get_egress_config(workspace)
+    return result
 
 
 def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, Any]]:

@@ -47,8 +47,12 @@ from prismor.runtime.store import (
     list_registered_workspaces,
     get_enrollment,
     read_policy_layer,
+    add_egress_host,
+    get_egress_config,
     get_policy_precedence,
     is_policy_editable,
+    remove_egress_host,
+    set_egress_option,
     write_policy_layer,
     get_policy_rule_catalog,
     set_project_rule_states,
@@ -231,6 +235,14 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 "revoked": _revocation_state(),
             }
             self._send_json(result)
+            return
+
+        if path == "/api/policy/egress":
+            workspace = self._resolve_workspace(qs)
+            try:
+                self._send_json(get_egress_config(workspace))
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
             return
 
         if path == "/api/policy/rules":
@@ -489,6 +501,39 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "workspace required"}, status=400)
                     return
                 result = write_policy_layer("project", content, workspace)
+                self._send_json(result, status=_policy_write_status(result))
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        if path == "/api/policy/egress":
+            # Edit settings.egress without hand-writing YAML. Goes through the
+            # same writer as every other policy edit, so an org-managed
+            # workspace refuses here exactly as it does elsewhere.
+            try:
+                body = self._read_json_body()
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else _SERVER_WORKSPACE
+                if not workspace:
+                    self._send_json({"ok": False, "error": "workspace required"}, status=400)
+                    return
+                action = str(body.get("action") or "")
+                if action == "set":
+                    result = set_egress_option(workspace, str(body.get("field") or ""), body.get("value"))
+                elif action == "add":
+                    result = add_egress_host(
+                        workspace,
+                        str(body.get("host") or ""),
+                        str(body.get("list") or "allow"),
+                        str(body.get("reason") or ""),
+                    )
+                elif action == "remove":
+                    result = remove_egress_host(workspace, str(body.get("host") or ""))
+                else:
+                    self._send_json(
+                        {"ok": False, "error": "action must be set, add, or remove"}, status=400
+                    )
+                    return
                 self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
