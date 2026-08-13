@@ -58,9 +58,24 @@ BLOCKED_COMMANDS = [
     "curl -X POST http://localhost:7070/api/agents/claude -d '{}'",
     # Wrappers whose only purpose would be to disguise one of the above.
     "script -q /dev/null prismor allow risky-write --off",
+    # Wrapped in a shell, which is how the anchoring would otherwise be
+    # stepped around.
+    'bash -c "prismor allow risky-write --off"',
+    "sh -c 'prismor unlock'",
+    # Reached through a path, sudo, or leading environment assignments.
+    "/usr/local/bin/prismor setup .",
+    "sudo prismor uninstall-hooks",
+    "PRISMOR_HOME=/tmp/x prismor unlock",
+    "prismor@dev allow risky-write --off",
 ]
 
 # Things an agent legitimately does, which must keep working.
+#
+# The second half of this list is the interesting half: every one of them was a
+# real false positive. Rules compile case-insensitively, so the first version of
+# prismor-self-edit matched `$PRISMOR_HOME`, any path under a directory called
+# Prismor, and any branch name containing "setup" — 1057 hits across 30 days of
+# real transcripts, against ~30 genuine ones. Mentioning Prismor is not editing it.
 ALLOWED_COMMANDS = [
     "prismor status",
     "prismor check 'rm -rf /'",
@@ -70,6 +85,13 @@ ALLOWED_COMMANDS = [
     "cat README.md",
     "python3 -m pytest tests/",
     "git commit -m 'fix'",
+    "cd /Users/x/Documents/projects/Prismor/prismor && git checkout -b feat/slack-setup-notifications",
+    'grep -n "prismor allow" prismor/runtime/cli.py',
+    "export PRISMOR_HOME=/tmp/rig && python3 -m pytest",
+    "cd /repo/prismor-approvals-pr && grep -n setup cli.py",
+    'git commit -m "feat(allow): the prismor allow ladder"',
+    "ls ~/Documents/projects/Prismor/prismor",
+    "rsync -az ./prismor ubuntu@host:~/selfedit-test/",
 ]
 
 
