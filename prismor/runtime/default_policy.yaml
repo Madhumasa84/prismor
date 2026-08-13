@@ -957,9 +957,16 @@ rules:
       - '\bprismor\b[^\n]*\begress\b[^\n]*\b(allow|disable)\b'
       - '\bprismor\b[^\n]*\b(setup|install-hooks|workspace)\b'
       # The unlock credential and grant. Reads matter as much as writes: the
-      # credential file is what a brute-force attempt would need.
-      - '\.prismor/unlock(-grant)?\.json\b'
-      - '(^|/)\.prismor/unlock(-grant)?\.json$'
+      # credential file is what an offline guess would need, and the grant file
+      # is what a forged window would be written to.
+      #
+      # Matched by filename anywhere rather than under `.prismor/`, because
+      # $PRISMOR_HOME relocates them — CI images, containers and test rigs all
+      # do this, and a rule that only knows the default path would wave those
+      # through. The names are specific enough that a false positive costs one
+      # `prismor allow`.
+      - '\bunlock(-grant)?\.json\b'
+      - '(^|/)unlock(-grant)?\.json$'
       # Other Prismor state an agent has no legitimate reason to rewrite.
       - '(>|rm|mv|cp|truncate|tee)[^\n]*\.prismor/(pause|identity|workspace-scopes)\.json'
       - '(^|/)\.prismor/(pause|identity|workspace-scopes)\.json$'

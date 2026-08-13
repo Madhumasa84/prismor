@@ -45,6 +45,11 @@ BLOCKED_COMMANDS = [
     "cat ~/.prismor/unlock.json",
     "python3 -c \"print(open('/home/u/.prismor/unlock.json').read())\"",
     "echo '{}' > ~/.prismor/unlock-grant.json",
+    # $PRISMOR_HOME relocates those files — CI images, containers and test rigs
+    # all do it, and a rule that only knew the default path would wave these
+    # through. Found by running the suite on a box with a relocated home.
+    "cat /tmp/rig/home/unlock.json",
+    "echo '{}' > /var/lib/prismor-home/unlock-grant.json",
     # Other runtime state that governs enforcement.
     "echo '{}' > ~/.prismor/pause.json",
     "rm ~/.prismor/identity.json",
