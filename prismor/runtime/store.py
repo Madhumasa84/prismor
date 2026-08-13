@@ -2776,11 +2776,19 @@ def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
     return {
         "editable": False,
         "reason": "org_managed",
+        # Deliberately does not mention `prismor workspace personal`. On an org
+        # that has not configured repo patterns every workspace is managed by
+        # default (reason "default_all"), and that override sits *below*
+        # default_all in resolve_scope — so it detaches the workspace from org
+        # policy and org telemetry entirely. Telling someone that in the same
+        # breath as "you may not edit this" is handing them the way out of
+        # governance. It stays available for genuinely personal repos; it is
+        # not the answer to "the org policy is in my way".
         "error": "This workspace's policy is managed by your organization — "
-                 "edit it in the Prismor console, or request an exemption "
-                 'with `prismor exempt request --reason "<why>"`.\n'
-                 "If this device was removed from the org, run `prismor enroll-status` "
-                 "to confirm, or `prismor workspace personal` to detach this workspace.",
+                 "edit it in the Prismor console if you administer the org, or "
+                 'request an exemption with `prismor exempt request --reason "<why>"`.\n'
+                 "If you think this device was removed from the org, check with "
+                 "`prismor enroll-status`.",
     }
 
 

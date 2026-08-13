@@ -78,14 +78,84 @@ class TestLadder(unittest.TestCase):
         rule = next(r for r in eng.rules if r.id == "secret-exfiltration")
         self.assertEqual(eng._resolve_mode(rule), "enforce")
 
+    def test_repeat_allows_for_one_rule_fold_into_one_entry(self):
+        # Three near-identical seven-line blocks say nothing the engine cannot
+        # read from one entry with three patterns, and a policy file nobody
+        # wants to open is one nobody audits.
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            for pattern in ("Dockerfile", "package.json", "go.mod"):
+                allow.add_allowlist(ws, "risky-write", pattern)
+            entries = allow.list_allows(ws)
+            eng = PolicyEngine(workspace=ws)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["patterns"], ["Dockerfile", "package.json", "go.mod"])
+        for pattern in ("Dockerfile", "package.json", "go.mod"):
+            self.assertTrue(eng._is_allowlisted("risky-write", pattern))
+
+    def test_an_entry_with_a_reason_keeps_its_own_block(self):
+        # The reason belongs to that exception; folding would silently attach it
+        # to cases nobody wrote it for.
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            allow.add_allowlist(ws, "risky-write", "Dockerfile")
+            allow.add_allowlist(ws, "risky-write", "package.json", reason="vendored")
+        self.assertEqual(len(allow.list_allows(ws)), 2)
+
+    def test_an_expiring_entry_keeps_its_own_block(self):
+        # Folding a temporary exception into a permanent one would quietly make
+        # it permanent.
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            allow.add_allowlist(ws, "risky-write", "Dockerfile")
+            allow.add_allowlist(ws, "risky-write", "package.json", expires_seconds=1800)
+        entries = allow.list_allows(ws)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(any(e.get("expires") for e in entries))
+
+    def test_adding_the_same_pattern_twice_changes_nothing(self):
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            allow.add_allowlist(ws, "risky-write", "Dockerfile")
+            allow.add_allowlist(ws, "risky-write", "Dockerfile")
+        entries = allow.list_allows(ws)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["patterns"], ["Dockerfile"])
+
     def test_undo_removes_only_that_entry(self):
         ws = _workspace(_render_selection_policy([]))
         with _unmanaged():
             first = allow.add_allowlist(ws, "risky-write", "Dockerfile")
-            second = allow.add_allowlist(ws, "risky-write", "package.json")
+            second = allow.add_allowlist(ws, "secret-access", ".env.local")
             self.assertTrue(allow.undo(ws, first["id"]))
         remaining = [e["id"] for e in allow.list_allows(ws)]
         self.assertEqual(remaining, [second["id"]])
+
+    def test_undo_can_drop_a_single_pattern_out_of_a_folded_entry(self):
+        # Folding entries must not make an exception harder to retract than it
+        # was to grant.
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            for pattern in ("Dockerfile", "package.json", "go.mod"):
+                allow.add_allowlist(ws, "risky-write", pattern)
+            self.assertTrue(allow.undo(ws, "package.json"))
+            eng = PolicyEngine(workspace=ws)
+        entries = allow.list_allows(ws)
+        self.assertEqual(entries[0]["patterns"], ["Dockerfile", "go.mod"])
+        self.assertFalse(eng._is_allowlisted("risky-write", "package.json"))
+        self.assertTrue(eng._is_allowlisted("risky-write", "Dockerfile"))
+
+    def test_undoing_the_last_pattern_drops_the_entry(self):
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            allow.add_allowlist(ws, "risky-write", "Dockerfile")
+            self.assertTrue(allow.undo(ws, "Dockerfile"))
+        self.assertEqual(allow.list_allows(ws), [])
+
+    def test_undoing_something_absent_reports_failure(self):
+        ws = _workspace(_render_selection_policy([]))
+        with _unmanaged():
+            self.assertFalse(allow.undo(ws, "never-added"))
 
 
 class TestPolicyEditability(unittest.TestCase):
@@ -124,10 +194,20 @@ class TestPolicyEditability(unittest.TestCase):
     def test_managed_without_a_pushed_policy_is_editable(self):
         self.assertTrue(self._check(managed=True, cached_age_days=None)["editable"])
 
-    def test_refusal_says_how_to_get_out_of_it(self):
+    def test_refusal_points_at_the_sanctioned_ways_out(self):
         error = self._check(managed=True, cached_age_days=1)["error"]
+        self.assertIn("console", error)
+        self.assertIn("exempt request", error)
         self.assertIn("enroll-status", error)
-        self.assertIn("workspace personal", error)
+
+    def test_refusal_does_not_advertise_leaving_org_management(self):
+        # `prismor workspace personal` sits below "default_all" in
+        # resolve_scope, so on an org that has not configured repo patterns it
+        # detaches the workspace from org policy AND org telemetry. Naming it
+        # here would answer "you may not edit this" with "here is how to stop
+        # being managed". It stays available for genuinely personal repos.
+        error = self._check(managed=True, cached_age_days=1)["error"]
+        self.assertNotIn("workspace personal", error)
 
 
 class TestRefusals(unittest.TestCase):

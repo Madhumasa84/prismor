@@ -116,7 +116,11 @@ def _load(path: Path) -> Tuple[List[str], Dict[str, Any]]:
 def _save(path: Path, header: List[str], data: Dict[str, Any]) -> None:
     import yaml
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    # `default_flow_style=None` keeps lists of mappings in block style (the rules
+    # and allowlist entries stay one field per line, which is what people read
+    # and edit) while collapsing lists of plain scalars — `rule_ids: [risky-write]`
+    # rather than four lines to say one rule id.
+    body = yaml.safe_dump(data, sort_keys=False, default_flow_style=None, width=100)
     text = ("\n".join(header) + "\n" if header else "") + body
     path.write_text(text, encoding="utf-8")
 
@@ -228,16 +232,41 @@ def add_allowlist(
     header, data = _load(policy_path(workspace))
     data.setdefault("version", "1.0")
     entries = list(data.get("allowlists") or [])
+    default_reason = "added by `prismor allow`"
+    expires = (
+        (datetime.now(timezone.utc) + timedelta(seconds=expires_seconds))
+        .isoformat().replace("+00:00", "Z")
+        if expires_seconds else None
+    )
+
+    # Fold into an existing entry for the same rule when nothing distinguishes
+    # them. Three `prismor allow risky-write --pattern ...` calls used to leave
+    # three near-identical seven-line blocks; as one entry with three patterns
+    # it means exactly the same thing to the engine and stays readable.
+    # Entries carrying a reason or an expiry keep their own block, since those
+    # are per-exception facts that a merge would silently widen.
+    if not expires and not reason:
+        for existing in entries:
+            if (isinstance(existing, dict)
+                    and list(existing.get("rule_ids") or []) == [rule_id]
+                    and not existing.get("expires")
+                    and str(existing.get("reason") or default_reason) == default_reason):
+                pats = list(existing.get("patterns") or [])
+                if pattern not in pats:
+                    pats.append(pattern)
+                    existing["patterns"] = pats
+                    data["allowlists"] = entries
+                    _save(policy_path(workspace), header, data)
+                return existing
+
     entry: Dict[str, Any] = {
         "id": _next_allow_id(data, rule_id),
         "rule_ids": [rule_id],
         "patterns": [pattern],
-        "reason": reason or "added by `prismor allow`",
+        "reason": reason or default_reason,
     }
-    if expires_seconds:
-        entry["expires"] = (
-            datetime.now(timezone.utc) + timedelta(seconds=expires_seconds)
-        ).isoformat().replace("+00:00", "Z")
+    if expires:
+        entry["expires"] = expires
     entries.append(entry)
     data["allowlists"] = entries
     _save(policy_path(workspace), header, data)
@@ -282,13 +311,37 @@ def list_allows(workspace: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def undo(workspace: Path, allow_id: str) -> bool:
+def undo(workspace: Path, target: str) -> bool:
+    """Remove an exception by entry id, or a single pattern out of one.
+
+    Folding repeat allows into one entry keeps the file readable but would make
+    exceptions harder to retract than to grant, so ``target`` also matches a
+    pattern: the pattern goes, and the entry with it once it holds nothing.
+    """
     header, data = _load(policy_path(workspace))
     entries = list(data.get("allowlists") or [])
-    kept = [e for e in entries if not (isinstance(e, dict) and str(e.get("id")) == allow_id)]
-    if len(kept) == len(entries):
+
+    kept = [e for e in entries if not (isinstance(e, dict) and str(e.get("id")) == target)]
+    if len(kept) != len(entries):
+        data["allowlists"] = kept
+        _save(policy_path(workspace), header, data)
+        return True
+
+    changed = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        patterns = list(entry.get("patterns") or [])
+        if target in patterns:
+            patterns.remove(target)
+            entry["patterns"] = patterns
+            changed = True
+    if not changed:
         return False
-    data["allowlists"] = kept
+    data["allowlists"] = [
+        e for e in entries
+        if not (isinstance(e, dict) and not (e.get("patterns") or []))
+    ]
     _save(policy_path(workspace), header, data)
     return True
 

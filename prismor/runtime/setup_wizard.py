@@ -846,10 +846,13 @@ def _render_selection_policy(selected: List[str]) -> str:
         "  default_mode: observe",
     ]
     if selected:
+        # One line per rule, matching what `prismor allow` writes when it
+        # rewrites this file — otherwise the policy changes shape the first time
+        # anyone adds an exception. Two lines per rule also made a recommended
+        # install 58 lines of mostly punctuation.
         lines.append("rules:")
         for rid in selected:
-            lines.append(f"  - id: {rid}")
-            lines.append("    mode: enforce")
+            lines.append(f"  - {{id: {rid}, mode: enforce}}")
     else:
         lines.append("# No rules selected — nothing blocks yet.")
         lines.append("rules: []")

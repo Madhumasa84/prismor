@@ -2966,7 +2966,8 @@ def build_parser() -> argparse.ArgumentParser:
     allow_parser.add_argument("--yes", action="store_true", help="Confirm a broad or floor-rule change")
     allow_parser.add_argument("--list", action="store_true", dest="list_allows",
                               help="Show the exceptions in this workspace")
-    allow_parser.add_argument("--undo", metavar="ALLOW_ID", help="Remove an exception by id")
+    allow_parser.add_argument("--undo", metavar="ALLOW_ID|PATTERN",
+                              help="Remove an exception — by entry id, or by one of its patterns")
     allow_parser.add_argument("--workspace", help="Workspace path")
 
     policy_parser = subparsers.add_parser("policy", help="Manage Prismor policies")
@@ -4528,7 +4529,8 @@ def _allow_cmd(args, workspace: Path) -> int:
         if _allow.undo(workspace, args.undo):
             print(f"Removed {args.undo}.")
             return 0
-        print(f"No exception with id '{args.undo}'. See: prismor allow --list")
+        print(f"No exception matching '{args.undo}' — try an entry id or one of its "
+              "patterns. See: prismor allow --list")
         return 1
 
     rule_id = (getattr(args, "rule_id", None) or "").strip()
