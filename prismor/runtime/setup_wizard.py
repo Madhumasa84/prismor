@@ -156,6 +156,50 @@ _SPACE = " "
 
 # ── Rule loading ─────────────────────────────────────────────────────────────
 
+def _floor_sets() -> tuple:
+    """(non_overridable_ids, core_categories, self_protection_ids) from the engine.
+
+    Imported rather than restated so the wizard's "Recommended" banding can
+    never drift from what the engine actually treats as the safety floor.
+    """
+    try:
+        from prismor.runtime.policy_engine import (
+            _NON_OVERRIDABLE_RULE_IDS,
+            _CORE_BLOCK_CATEGORIES,
+            _SELF_PROTECTION_RULE_IDS,
+        )
+        return (
+            set(_NON_OVERRIDABLE_RULE_IDS),
+            set(_CORE_BLOCK_CATEGORIES),
+            set(_SELF_PROTECTION_RULE_IDS),
+        )
+    except Exception:
+        return set(), set(), set()
+
+
+def _annotate_rules(rules: List[dict], block_categories: Optional[set] = None) -> List[dict]:
+    """Tag each rule with the flags the selection screen bands on.
+
+    ``self_protect``    — Prismor guarding itself; always on, never a choice here.
+    ``floor``           — the safety floor (core rule id / core block category).
+    ``default_blocked`` — a category the shipped policy blocks in enforce mode.
+    ``recommended``     — what we actually advise turning on: the floor.
+
+    Recommending the floor and nothing more is deliberate. Badging the whole
+    default block set would mark ~60 of 77 rules "recommended", which is not a
+    recommendation, it's a default wearing a costume.
+    """
+    non_over, core_cats, self_ids = _floor_sets()
+    cats = block_categories if block_categories is not None else set()
+    for r in rules:
+        rid, cat = r.get("id", ""), r.get("category", "")
+        r["self_protect"] = rid in self_ids
+        r["floor"] = (rid in non_over or cat in core_cats) and not r["self_protect"]
+        r["default_blocked"] = bool(cat) and cat in cats and not r["floor"] and not r["self_protect"]
+        r["recommended"] = r["floor"]
+    return rules
+
+
 def _load_rules() -> List[dict]:
     policy = _PKG_DIR / "default_policy.yaml"
     if policy.exists():
@@ -163,15 +207,19 @@ def _load_rules() -> List[dict]:
             import yaml
             with policy.open() as f:
                 data = yaml.safe_load(f)
-            return [
+            rules = [
                 {
                     "id":       r["id"],
                     "severity": r["severity"],
                     "title":    r.get("title", r["id"]),
+                    "category": r.get("category", ""),
+                    "action":   r.get("action", "warn"),
                     "on":       True,
                 }
                 for r in data.get("rules", [])
             ]
+            block_cats = set((data.get("settings", {}) or {}).get("block_categories", []) or [])
+            return _annotate_rules(rules, block_cats)
         except ImportError:
             return _parse_policy_manual(policy)
     return _default_rules()
@@ -203,26 +251,31 @@ def _parse_policy_manual(policy: Path) -> List[dict]:
             m3 = re.match(r"^\s*title:\s*(.+)$", line)
             if m3 and cur:
                 cur["title"] = m3.group(1).strip()
+            m4 = re.match(r"^\s*category:\s*(\S+)", line)
+            if m4 and cur:
+                cur["category"] = m4.group(1).strip()
     if cur:
         rules.append(cur)
-    return rules or _default_rules()
+    return _annotate_rules(rules) if rules else _default_rules()
 
 
 def _default_rules() -> List[dict]:
     D = [
-        ("destructive-command",     "CRITICAL", "Blocks rm -rf /, mkfs, dd to disk, shutdown, reboot"),
-        ("secret-exfiltration",     "CRITICAL", "Blocks cat .env | curl, piping secrets to external hosts"),
-        ("dos-resource-exhaustion", "CRITICAL", "Blocks fork bombs, while-true loops, /dev/urandom abuse"),
-        ("rce-canary",              "CRITICAL", "Blocks reverse shells, bash -i /dev/tcp, crontab injection"),
-        ("privilege-escalation",    "CRITICAL", "Blocks chmod +s, sudoers edits, useradd, setcap"),
-        ("prompt-injection",        "HIGH",     "Detects 'ignore instructions', 'reveal system prompt' in agent I/O"),
-        ("remote-execution",        "HIGH",     "Blocks curl | bash, wget | sh fetch-and-execute chains"),
-        ("secret-access",           "HIGH",     "Flags reads/writes to .env, .ssh/id_rsa, .aws/credentials"),
-        ("suspicious-network",      "HIGH",     "Flags calls to webhook.site, ngrok, pastebin, Discord webhooks"),
-        ("db-modification",         "HIGH",     "Flags DROP TABLE, DELETE FROM, TRUNCATE in shell commands"),
-        ("risky-write",             "MEDIUM",   "Flags writes to Dockerfile, CI workflows, package.json"),
+        ("destructive-command",     "CRITICAL", "destructive_command",     "Blocks rm -rf /, mkfs, dd to disk, shutdown, reboot"),
+        ("secret-exfiltration",     "CRITICAL", "secret_exfiltration",     "Blocks cat .env | curl, piping secrets to external hosts"),
+        ("dos-resource-exhaustion", "CRITICAL", "dos_resource_exhaustion", "Blocks fork bombs, while-true loops, /dev/urandom abuse"),
+        ("rce-canary",              "CRITICAL", "rce_canary",              "Blocks reverse shells, bash -i /dev/tcp, crontab injection"),
+        ("privilege-escalation",    "CRITICAL", "privilege_escalation",    "Blocks chmod +s, sudoers edits, useradd, setcap"),
+        ("prompt-injection",        "HIGH",     "prompt_injection",        "Detects 'ignore instructions', 'reveal system prompt' in agent I/O"),
+        ("remote-execution",        "HIGH",     "remote_execution",        "Blocks curl | bash, wget | sh fetch-and-execute chains"),
+        ("secret-access",           "HIGH",     "secret_access",           "Flags reads/writes to .env, .ssh/id_rsa, .aws/credentials"),
+        ("suspicious-network",      "HIGH",     "network_isolation",       "Flags calls to webhook.site, ngrok, pastebin, Discord webhooks"),
+        ("db-modification",         "HIGH",     "db_modification",         "Flags DROP TABLE, DELETE FROM, TRUNCATE in shell commands"),
+        ("risky-write",             "MEDIUM",   "risky_write",             "Flags writes to Dockerfile, CI workflows, package.json"),
     ]
-    return [{"id": i, "severity": s, "title": t, "on": True} for i, s, t in D]
+    rules = [{"id": i, "severity": s, "category": c, "title": t, "action": "block", "on": True}
+             for i, s, c, t in D]
+    return _annotate_rules(rules, {"secret_access", "db_modification", "prompt_injection"})
 
 
 # ── Agent detection ──────────────────────────────────────────────────────────
@@ -278,7 +331,7 @@ def _control_line(items: List[tuple]) -> str:
 
 # ── Step 1: Enforcement Mode ─────────────────────────────────────────────────
 
-def _step_mode(current: str = "observe") -> str:
+def _step_mode(current: str = "observe", total: int = 4) -> str:
     opts = [
         ("observe", "Log and warn, never block"),
         ("enforce", "Block dangerous actions in real time"),
@@ -286,7 +339,7 @@ def _step_mode(current: str = "observe") -> str:
     sel = 0 if current == "observe" else 1
 
     while True:
-        lines = _header_lines(1, 4, "ENFORCEMENT MODE")
+        lines = _header_lines(1, total, "ENFORCEMENT MODE")
         for i, (name, desc) in enumerate(opts):
             arrow = _w("▸ ", CYAN) if i == sel else "  "
             dot   = _w("●", GRN) if i == sel else _w("○", DIM)
@@ -303,9 +356,124 @@ def _step_mode(current: str = "observe") -> str:
         elif key in ("q", "Q", "\x03"): _cleanup(); sys.exit(0)
 
 
-# ── Step 2: Agent Selection ──────────────────────────────────────────────────
+# ── Step 2 (enforce only): Which rules block ─────────────────────────────────
 
-def _step_agents(target: Path) -> list:
+def _cat_label(cat: str) -> str:
+    return (cat or "other").replace("_", " ").upper()
+
+
+def _selection_rows(rules: List[dict]) -> List[dict]:
+    """Flatten the rule list into display rows: band headers + selectable rules.
+
+    Order is the argument the screen is making: the floor first (these are the
+    ones we think you want), then the rest of what the shipped policy blocks,
+    then everything else by category.
+    """
+    rows: List[dict] = []
+    floor = [r for r in rules if r.get("floor")]
+    rec = [r for r in rules if r.get("default_blocked")]
+    rest = [r for r in rules
+            if not r.get("floor") and not r.get("default_blocked") and not r.get("self_protect")]
+
+    if floor:
+        rows.append({"kind": "header", "text": "RECOMMENDED — Prismor's safety floor"})
+        rows.extend({"kind": "rule", "rule": r} for r in floor)
+    if rec:
+        rows.append({"kind": "header", "text": "ALSO BLOCKED BY THE DEFAULT POLICY"})
+        rows.extend({"kind": "rule", "rule": r} for r in rec)
+    for cat in sorted({r.get("category", "") for r in rest}):
+        rows.append({"kind": "header", "text": _cat_label(cat)})
+        rows.extend({"kind": "rule", "rule": r}
+                    for r in rest if r.get("category", "") == cat)
+    return rows
+
+
+def _step_policy_select(rules: List[dict], step: int = 2, total: int = 5):
+    """Pick which rules block. Everything starts off — enforce mode never
+    guesses on the user's behalf.
+
+    Prismor's self-protection rules are not on this screen: they are what stops
+    the agent from editing the choices made here, so offering them as a choice
+    would make every other choice on the screen meaningless.
+    """
+    for r in rules:
+        r["on"] = bool(r.get("on_selected"))  # start empty unless re-entering
+    rows = _selection_rows(rules)
+    pick = [i for i, row in enumerate(rows) if row["kind"] == "rule"]
+    n_self = sum(1 for r in rules if r.get("self_protect"))
+    n_rec = sum(1 for r in rules if r.get("recommended"))
+    sel = 0
+
+    while True:
+        n_on = sum(1 for r in rules if r["on"])
+        head = _header_lines(step, total, "WHAT SHOULD BLOCK")
+        head.append(f"  {_w('Nothing blocks until you choose it. Recommended entries are marked —', DIM)}")
+        head.append(f"  {_w('they are off until you turn them on.', DIM)}")
+        head.append("")
+        foot = [
+            "",
+            f"  {_w(f'{n_on} selected', GRN if n_on else YEL)}"
+            f"{_w(f'  ·  {n_rec} recommended  ·  {n_self} self-protection rules always on', DIM)}",
+            "",
+            _control_line([
+                ("↑↓", "move"), ("space", "toggle"), ("a", "all recommended"),
+                ("←", "back"), ("enter", "next"),
+            ]),
+        ]
+
+        # Viewport: keep the cursor visible without redrawing the whole policy.
+        avail = max(6, _term_height() - len(head) - len(foot) - 2)
+        cur_row = pick[sel]
+        start = max(0, min(cur_row - avail // 2, len(rows) - avail))
+        window = rows[start:start + avail]
+
+        lines = list(head)
+        if start > 0:
+            lines.append(_w("      ↑ more above", DIM))
+        for i, row in enumerate(window, start=start):
+            if row["kind"] == "header":
+                lines.append(f"  {_w(row['text'], BOLD, DIM)}")
+                continue
+            r = row["rule"]
+            arrow = _w("▸ ", CYAN) if i == cur_row else "  "
+            dot = _w("●", GRN) if r["on"] else _w("○", DIM)
+            sev = _w(f"{r['severity'][:4]:<4}", _sev_color(r["severity"]))
+            name = _pad(_w(r["id"], BOLD) if i == cur_row else r["id"], 30)
+            tag = _w(" recommended", YEL) if r.get("recommended") else ""
+            lines.append(f"  {arrow}{dot} {sev} {name}{tag}")
+        if start + avail < len(rows):
+            lines.append(_w("      ↓ more below", DIM))
+        lines.extend(foot)
+        _render(lines)
+
+        key = _read_key()
+        if key == _UP:
+            sel = (sel - 1) % len(pick)
+        elif key == _DOWN:
+            sel = (sel + 1) % len(pick)
+        elif key == _SPACE:
+            r = rows[pick[sel]]["rule"]
+            r["on"] = not r["on"]
+        elif key in ("a", "A"):
+            # Toggle: a second press clears them again.
+            want = not all(r["on"] for r in rules if r.get("recommended"))
+            for r in rules:
+                if r.get("recommended"):
+                    r["on"] = want
+        elif key in (_LEFT, "b", "B"):
+            return _BACK
+        elif key in (_ENTER, "\n"):
+            for r in rules:
+                r["on_selected"] = r["on"]  # remembered if the user steps back
+            return rules
+        elif key in ("q", "Q", "\x03"):
+            _cleanup()
+            sys.exit(0)
+
+
+# ── Step 3: Agent Selection ──────────────────────────────────────────────────
+
+def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
     detected = _detect_agents(target)
     agents = [
         {"name": "claude",   "label": "Claude Code", "on": detected.get("claude", False)},
@@ -327,7 +495,7 @@ def _step_agents(target: Path) -> list:
     sel = 0
 
     while True:
-        lines = _header_lines(2, 4, "AGENTS")
+        lines = _header_lines(step, total, "AGENTS")
         lines.append(f"  {_w('Select agents to install Prismor hooks for:', DIM)}")
         lines.append("")
         for i, ag in enumerate(agents):
@@ -356,7 +524,7 @@ def _step_agents(target: Path) -> list:
 
 # ── Step 3: Secret Cloaking ──────────────────────────────────────────────────
 
-def _step_cloak(current: bool = True) -> bool:
+def _step_cloak(current: bool = True, step: int = 3, total: int = 4) -> bool:
     opts = [
         ("yes", "Install cloaking hooks  (recommended — prevents secret leaks to the LLM provider)"),
         ("no",  "Skip — only runtime policy hooks will be installed"),
@@ -364,7 +532,7 @@ def _step_cloak(current: bool = True) -> bool:
     sel = 0 if current else 1
 
     while True:
-        lines = _header_lines(3, 4, "SECRET CLOAKING")
+        lines = _header_lines(step, total, "SECRET CLOAKING")
         lines.append(f"  {_w('Prevents real secrets from reaching model context, JSONL transcripts,', DIM)}")
         lines.append(f"  {_w('or upstream API requests. See prismor/runtime/cloaking/README.md.', DIM)}")
         lines.append("")
@@ -391,7 +559,7 @@ def _step_cloak(current: bool = True) -> bool:
 
 # ── Step 4: Install Scope ────────────────────────────────────────────────────
 
-def _step_scope(current: str = "project") -> str:
+def _step_scope(current: str = "project", step: int = 4, total: int = 4) -> str:
     opts = [
         ("project", "This workspace only",    "Hooks written to .claude/settings.json in the current project"),
         ("global",  "Global (all projects)",  "Hooks written to ~/.claude/settings.json — covers every workspace"),
@@ -399,7 +567,7 @@ def _step_scope(current: str = "project") -> str:
     sel = 0 if current == "project" else 1
 
     while True:
-        lines = _header_lines(4, 4, "INSTALL SCOPE")
+        lines = _header_lines(step, total, "INSTALL SCOPE")
         lines.append(f"  {_w('Where should Immunity hooks be installed?', DIM)}")
         lines.append("")
         tw = _term_width()
@@ -428,6 +596,8 @@ def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str],
     home = str(Path.home())
     disp = str(target).replace(home, "~")
     n_on = sum(1 for r in rules if r["on"])
+    n_rec = sum(1 for r in rules if r.get("recommended"))
+    n_rec_on = sum(1 for r in rules if r.get("recommended") and r["on"])
     ags  = ", ".join(agents)
     W = 48
 
@@ -449,7 +619,13 @@ def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str],
         lines.append(row())
         lines.append(row(kv("Project", disp[:30])))
         lines.append(row(kv("Mode", mode, GRN if mode == "enforce" else YEL)))
-        lines.append(row(kv("Rules", f"{n_on}/{len(rules)} enabled")))
+        if mode == "enforce":
+            lines.append(row(kv("Blocking", f"{n_on} selected  ({n_rec_on}/{n_rec} recommended)",
+                                GRN if n_on else YEL)))
+            if n_on == 0:
+                lines.append(row(_w("nothing blocks — Prismor will only watch", YEL)))
+        else:
+            lines.append(row(kv("Rules", f"{n_on}/{len(rules)} enabled")))
         lines.append(row(kv("Agents", ags)))
         lines.append(row(kv("Cloak", "yes  (secret prevention)" if cloak else "no",
                             GRN if cloak else DIM)))
@@ -539,6 +715,38 @@ def _write_agent_context(target: Path, agents: List[str]) -> None:
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
+def _render_selection_policy(selected: List[str]) -> str:
+    """The `.prismor/policy.yaml` an enforce install writes.
+
+    ``selection: explicit`` tells the engine this file names the blocking set in
+    full, so a core rule the user did not pick observes instead of blocking.
+    Prismor's own self-protection rules are unaffected — they are not a choice.
+    """
+    from datetime import date
+    lines = [
+        f"# Generated by `prismor setup` on {date.today().isoformat()}.",
+        "# Safe to edit by hand; re-running setup regenerates it.",
+        "#",
+        "# selection: explicit  →  the rules listed below are the ones that block.",
+        "#                         Anything not listed is still detected and",
+        "#                         reported, it just doesn't stop the agent.",
+        "# Add one with `prismor allow --list` / re-run `prismor setup`.",
+        'version: "1.0"',
+        "settings:",
+        "  selection: explicit",
+        "  default_mode: observe",
+    ]
+    if selected:
+        lines.append("rules:")
+        for rid in selected:
+            lines.append(f"  - id: {rid}")
+            lines.append("    mode: enforce")
+    else:
+        lines.append("# No rules selected — nothing blocks yet.")
+        lines.append("rules: []")
+    return "\n".join(lines) + "\n"
+
+
 def _install_skill(target: Path):
     """Copy the bundled immunity-agent Claude skill into the workspace.
 
@@ -612,9 +820,24 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
             return True, "run `pip install --upgrade prismor` to update"
         _spinner_run("Prismor (pip install)", _pip_note)
 
-    # 2. Policy overrides for disabled rules
+    # 2. Persist the rule selection.
+    #
+    # Enforce writes the full picture — `selection: explicit` plus one entry per
+    # rule the user chose — so what blocks is legible in the file rather than
+    # implied by the shipped defaults. Observe writes only disabled rules, as
+    # before: it blocks nothing either way, and adding `default_mode` there would
+    # switch off the compatibility bridge that makes an existing install with
+    # hand-flipped enforce hooks keep blocking (see PolicyEngine.is_legacy_policy).
+    selected = [r["id"] for r in rules if r["on"]]
     disabled = [r["id"] for r in rules if not r["on"]]
-    if disabled:
+    if mode == "enforce":
+        def _write_policy():
+            d = target / ".prismor"
+            d.mkdir(exist_ok=True)
+            (d / "policy.yaml").write_text(_render_selection_policy(selected))
+            return True, f"{len(selected)} rule(s) enforcing"
+        _spinner_run("Writing policy selection", _write_policy)
+    elif disabled:
         def _write_policy():
             d = target / ".prismor"
             d.mkdir(exist_ok=True)
@@ -763,27 +986,53 @@ def run_non_interactive(
     agents: Optional[List[str]] = None,
     cloak: bool = False,
     scope: str = "project",
+    enforce_rules: Optional[List[str]] = None,
+    recommended: bool = False,
 ) -> None:
-    """Run install without TUI. Args take precedence over env vars (resolution done by caller)."""
+    """Run install without TUI. Args take precedence over env vars (resolution done by caller).
+
+    ``enforce_rules`` / ``recommended`` are the scripted equivalent of the
+    selection step: which rules block. Enforce with neither installs with
+    nothing selected rather than guessing, and says so.
+    """
     rules = _load_rules()
+    if mode == "enforce":
+        wanted = set(enforce_rules or [])
+        unknown = wanted - {r["id"] for r in rules}
+        for r in rules:
+            r["on"] = r["id"] in wanted or (recommended and r.get("recommended", False))
+        if unknown:
+            print(f"[prismor] Unknown rule id(s) ignored: {', '.join(sorted(unknown))}")
     if agents is None:
         det = _detect_agents(target)
         agents = [n for n, ok in det.items() if ok] or ["claude"]
     cloak_tag = ", cloak=yes" if cloak else ""
     scope_tag = f", scope={scope}" if scope != "project" else ""
     print(f"[prismor] Non-interactive setup  (mode={mode}, agents={','.join(agents)}{cloak_tag}{scope_tag})")
+    if mode == "enforce":
+        n_on = sum(1 for r in rules if r["on"])
+        if n_on == 0:
+            print("[prismor] No rules selected — Prismor will detect and report, but block nothing.")
+            print("[prismor] Pick a set with `--recommended` or `--enforce-rules id1,id2`, "
+                  "or run `prismor setup` interactively.")
+        else:
+            print(f"[prismor] {n_on} rule(s) will block.")
     _do_install(target, mode, rules, agents, cloak=cloak, scope=scope)
 
 
 def run_wizard(target: Path) -> None:
-    """Run the full 4-step interactive TUI wizard."""
+    """Run the interactive TUI wizard.
+
+    Four steps in observe mode, five in enforce: choosing to block raises the
+    question of *what* to block, and that answer is the user's to give.
+    """
     sys.stdout.write(ALT_ON + HIDE)
     sys.stdout.flush()
     _raw_on()
 
-    # All detection rules ship enabled by default — there is no per-rule toggle
-    # step. Rules are loaded only so the confirm screen can show the count and
-    # _do_install can write policy overrides if any are ever disabled.
+    # In observe mode every rule stays enabled (nothing blocks regardless), so
+    # the list is only read for the confirm screen's count. In enforce mode the
+    # selection step below decides which of these actually block.
     rules = _load_rules()
     mode = "observe"
     agents = None
@@ -793,34 +1042,43 @@ def run_wizard(target: Path) -> None:
 
     try:
         while True:
+            enforcing = mode == "enforce"
+            total = 5 if enforcing else 4
             if step == 1:
-                mode = _step_mode(mode)
-                step = 2
+                mode = _step_mode(mode, total=total)
+                step = 2 if mode == "enforce" else 3
             elif step == 2:
-                result = _step_agents(target)
+                result = _step_policy_select(rules, step=2, total=total)
                 if result is _BACK:
                     step = 1
                     continue
-                agents = result
+                rules = result
                 step = 3
             elif step == 3:
-                result = _step_cloak(cloak)
+                result = _step_agents(target, step=3 if enforcing else 2, total=total)
                 if result is _BACK:
-                    step = 2
+                    step = 2 if enforcing else 1
                     continue
-                cloak = result
+                agents = result
                 step = 4
             elif step == 4:
-                result = _step_scope(scope)
+                result = _step_cloak(cloak, step=4 if enforcing else 3, total=total)
                 if result is _BACK:
                     step = 3
                     continue
-                scope = result
+                cloak = result
                 step = 5
             elif step == 5:
-                result = _step_confirm(target, mode, rules, agents, cloak=cloak, scope=scope)
+                result = _step_scope(scope, step=5 if enforcing else 4, total=total)
                 if result is _BACK:
                     step = 4
+                    continue
+                scope = result
+                step = 6
+            elif step == 6:
+                result = _step_confirm(target, mode, rules, agents, cloak=cloak, scope=scope)
+                if result is _BACK:
+                    step = 5
                     continue
                 break
     except Exception:

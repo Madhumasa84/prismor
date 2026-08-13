@@ -1667,7 +1667,13 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if cloak_flag is not None
                 else os.environ.get("PRISMOR_CLOAK", "").lower() in {"1", "true", "yes", "on"}
             )
-            run_non_interactive(target, mode=mode, agents=agents, cloak=cloak, scope=scope)
+            rules_str = getattr(args, "enforce_rules", None)
+            enforce_rules = [r.strip() for r in rules_str.split(",") if r.strip()] if rules_str else None
+            run_non_interactive(
+                target, mode=mode, agents=agents, cloak=cloak, scope=scope,
+                enforce_rules=enforce_rules,
+                recommended=bool(getattr(args, "recommended", False)),
+            )
         elif getattr(args, "scope", None) == "global":
             # Explicit `--scope global` skips the TUI scope step and guards the
             # whole machine directly — the recommended install for an enrolled
@@ -3287,6 +3293,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="project = hooks in ./.claude only; global = ~/.claude, guards every workspace "
              "(recommended for an enrolled device — no unguarded directories)",
+    )
+    setup_parser.add_argument(
+        "--enforce-rules",
+        default=None,
+        metavar="RULE[,RULE…]",
+        help="Which rules block, for --mode enforce (non-interactive only). "
+             "Enforce with no selection detects and reports but blocks nothing",
+    )
+    setup_parser.add_argument(
+        "--recommended",
+        action="store_true",
+        help="Select the recommended rule set (safety floor + default block categories) "
+             "for --mode enforce, instead of naming rules with --enforce-rules",
     )
     setup_parser.add_argument(
         "--cloak",
