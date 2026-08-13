@@ -590,9 +590,80 @@ def _step_scope(current: str = "project", step: int = 4, total: int = 4) -> str:
         elif key in ("q", "Q", "\x03"): _cleanup(); sys.exit(0)
 
 
+# ── Step 6 (optional): unlock password ───────────────────────────────────────
+
+def _step_unlock(current: bool = False, step: int = 6, total: int = 6):
+    """Offer to set a password that lets the agent edit policy, briefly.
+
+    Off by default. Without it the agent simply cannot touch Prismor's config,
+    which is the safe answer; the password only exists so the alternative to
+    "blocked" isn't "the human retypes the agent's work by hand".
+    """
+    opts = [
+        ("no", "Skip — only you can change Prismor's policy, by hand"),
+        ("yes", "Set a password — unlocks a 3-minute window on demand"),
+    ]
+    sel = 1 if current else 0
+
+    while True:
+        lines = _header_lines(step, total, "AGENT SELF-EDIT")
+        lines.append(f"  {_w('Prismor blocks the agent from editing its own policy.', DIM)}")
+        lines.append(f"  {_w('A password lets you hand it that ability for a few minutes:', DIM)}")
+        lines.append(f"  {_w('run `prismor unlock`, and the agent can fix a rule that is', DIM)}")
+        lines.append(f"  {_w('getting in the way. You can always set one up later.', DIM)}")
+        lines.append("")
+        for i, (name, desc) in enumerate(opts):
+            arrow = _w("▸ ", CYAN) if i == sel else "  "
+            dot = _w("●", GRN) if i == sel else _w("○", DIM)
+            nm = _pad(_w(name, BOLD) if i == sel else _w(name, DIM), 6)
+            lines.append(f"  {arrow}{dot}  {nm}{_w(desc[:max(_term_width() - 24, 30)], DIM)}")
+        lines.append("")
+        lines.append(_control_line([
+            ("↑↓", "select"), ("←", "back"), ("enter", "next"), ("q", "quit"),
+        ]))
+        _render(lines)
+
+        key = _read_key()
+        if key == _UP:                  sel = (sel - 1) % len(opts)
+        elif key == _DOWN:              sel = (sel + 1) % len(opts)
+        elif key in (_LEFT, "b", "B"):  return _BACK
+        elif key in (_ENTER, "\n"):     return opts[sel][0] == "yes"
+        elif key in ("q", "Q", "\x03"): _cleanup(); sys.exit(0)
+
+
+def _prompt_unlock_password() -> bool:
+    """Ask for the unlock password outside the alt-screen. True if one was set."""
+    import getpass
+    try:
+        from prismor.runtime import unlock as _unlock
+    except Exception:
+        return False
+    print()
+    print(_w("  Set your Prismor unlock password", BOLD))
+    print(_w("  This is what you type to let the agent edit policy for a few", DIM))
+    print(_w("  minutes. Use something other than your login password.", DIM))
+    print()
+    for _ in range(3):
+        try:
+            first = getpass.getpass("  New unlock password: ")
+            if len(first) < 8:
+                print(_w("  Too short — at least 8 characters.", YEL))
+                continue
+            if getpass.getpass("  Repeat it: ") != first:
+                print(_w("  Those did not match.", YEL))
+                continue
+            _unlock.set_password(first)
+            print(_w("  ✓ Set. Use `prismor unlock` when the agent needs it.", GRN))
+            return True
+        except (EOFError, KeyboardInterrupt):
+            break
+    print(_w("  Skipped — set one later with: prismor unlock --set-password", DIM))
+    return False
+
+
 # ── Confirm ──────────────────────────────────────────────────────────────────
 
-def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project") -> bool:
+def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project", unlock_pw: bool = False) -> bool:
     home = str(Path.home())
     disp = str(target).replace(home, "~")
     n_on = sum(1 for r in rules if r["on"])
@@ -631,6 +702,8 @@ def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str],
                             GRN if cloak else DIM)))
         lines.append(row(kv("Scope", "global (all projects)" if scope == "global" else "workspace only",
                             YEL if scope == "global" else GRN)))
+        lines.append(row(kv("Self-edit", "password (3m window)" if unlock_pw else "blocked",
+                            YEL if unlock_pw else GRN)))
         lines.append(row())
         lines.append(bdr("╰", "─", "╯"))
         lines.append("")
@@ -1040,12 +1113,21 @@ def run_wizard(target: Path) -> None:
     agents = None
     cloak = True
     scope = "project"
+    unlock_pw = False
     step = 1
+
+    # The unlock window is a local affordance; on an org-managed workspace the
+    # org decides whether self-edit is available at all, so don't offer it.
+    try:
+        from prismor.runtime.enterprise import workspace_scope as _scope
+        offer_unlock = not _scope.is_managed(target)
+    except Exception:
+        offer_unlock = True
 
     try:
         while True:
             enforcing = mode == "enforce"
-            total = 5 if enforcing else 4
+            total = (5 if enforcing else 4) + (1 if offer_unlock else 0)
             if step == 1:
                 mode = _step_mode(mode, total=total)
                 step = 2 if mode == "enforce" else 3
@@ -1078,9 +1160,20 @@ def run_wizard(target: Path) -> None:
                 scope = result
                 step = 6
             elif step == 6:
-                result = _step_confirm(target, mode, rules, agents, cloak=cloak, scope=scope)
+                if not offer_unlock:
+                    step = 7
+                    continue
+                result = _step_unlock(unlock_pw, step=total, total=total)
                 if result is _BACK:
                     step = 5
+                    continue
+                unlock_pw = result
+                step = 7
+            elif step == 7:
+                result = _step_confirm(target, mode, rules, agents, cloak=cloak,
+                                       scope=scope, unlock_pw=unlock_pw)
+                if result is _BACK:
+                    step = 6 if offer_unlock else 5
                     continue
                 break
     except Exception:
@@ -1089,6 +1182,10 @@ def run_wizard(target: Path) -> None:
         agents = ["claude"]
         cloak = False
         scope = "project"
+        unlock_pw = False
 
     _raw_off()
     _do_install(target, mode, rules, agents, cloak=cloak, scope=scope)
+    # After the install output, so the prompt isn't competing with spinners.
+    if unlock_pw:
+        _prompt_unlock_password()

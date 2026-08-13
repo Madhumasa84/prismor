@@ -555,6 +555,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     # ── pause / pause-hard / resume: suspend local ENFORCEMENT without ──────
     # uninstalling hooks or touching observe-mode screening/telemetry.
+    if args.command in ("unlock", "lock"):
+        raise SystemExit(_unlock_cmd(args, workspace))
+
     if args.command in ("pause", "pause-hard"):
         from prismor.runtime import pause as _pause
         hard = args.command == "pause-hard"
@@ -1388,6 +1391,38 @@ def main(argv: Optional[List[str]] = None) -> None:
                     "additionalContext": _mi_context,
                 }
             }) + "\n")
+
+        # A self-edit block lifts inside a password-verified unlock window: a
+        # human ran `prismor unlock` and handed the agent a few minutes to fix
+        # the policy. It clears ONLY the self-protection rules — everything else
+        # blocks exactly as before — and records the use, so an unlocked window
+        # is auditable rather than a hole nobody can see afterwards.
+        if blocking is not None:
+            try:
+                from prismor.runtime.policy_engine import _SELF_PROTECTION_RULE_IDS
+                if str(blocking.get("ruleId") or "") in _SELF_PROTECTION_RULE_IDS:
+                    from prismor.runtime import unlock as _unlock
+                    if _unlock.is_open(workspace):
+                        _left = _unlock.remaining_seconds(workspace)
+                        sys.stderr.write(
+                            f"[prismor] self-edit allowed: unlock window open "
+                            f"({_left}s left, rule: {blocking.get('ruleId')})\n"
+                        )
+                        try:
+                            findings.append({
+                                "severity": "MEDIUM",
+                                "category": "security_bypass",
+                                "ruleId": "self-edit-under-unlock",
+                                "title": "Agent edited Prismor policy inside an unlock window",
+                                "evidence": str(blocking.get("evidence") or "")[:200],
+                                "mode": "observe",
+                                "action": "log",
+                            })
+                        except Exception:
+                            pass
+                        blocking = None
+            except Exception:
+                pass
 
         force_observe = args.mode == "observe" and os.environ.get("PRISMOR_LOCAL_DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
         if blocking is not None and not force_observe and _pstate is None:
@@ -3078,6 +3113,25 @@ def build_parser() -> argparse.ArgumentParser:
     pause_hard_p.add_argument("--reason", help="Why you're pausing — shown in the console next to the device")
     subparsers.add_parser("resume", help="Resume enforcement after `prismor pause` / `prismor pause-hard`")
 
+    unlock_p = subparsers.add_parser(
+        "unlock",
+        help="Open a short window in which the agent may edit Prismor's own policy "
+             "(asks for your unlock password)",
+    )
+    unlock_p.add_argument("--for", dest="duration", metavar="DURATION",
+                          help="How long to stay unlocked, e.g. 5m (default: 3m)")
+    unlock_p.add_argument("--status", action="store_true",
+                          help="Show whether a window is open and how long is left")
+    unlock_p.add_argument("--set-password", action="store_true", dest="set_password",
+                          help="Set or change the unlock password")
+    unlock_p.add_argument("--system-password", action="store_true", dest="system_password",
+                          help="With --set-password: verify against your operating system "
+                               "account password instead of storing a Prismor one")
+    unlock_p.add_argument("--forget", action="store_true",
+                          help="Remove the unlock password entirely (self-edit stays blocked)")
+    unlock_p.add_argument("--workspace", help="Workspace path")
+    subparsers.add_parser("lock", help="Close the self-edit window opened by `prismor unlock`")
+
     workspace_p = subparsers.add_parser("workspace", help="Show or set whether this workspace is org-managed or personal")
     workspace_p.add_argument("action", nargs="?", choices=["managed", "personal", "auto"], help="managed = report to org; personal = local-only; auto = let org patterns decide")
     exempt_p = subparsers.add_parser("exempt", help="Request an admin exemption (rule relaxation) for this repo")
@@ -4306,6 +4360,119 @@ def _policy_test(workspace: Path, test_file: Optional[str] = None) -> None:
     print()
     if result["failed"]:
         raise SystemExit(1)
+
+
+def _unlock_cmd(args, workspace: Path) -> int:
+    """`prismor unlock` / `prismor lock` — the password-gated self-edit window."""
+    import getpass
+    from prismor.runtime import unlock as _unlock
+
+    if args.command == "lock":
+        if _unlock.close_window():
+            print("Locked — the agent can no longer edit Prismor's policy.")
+        else:
+            print("Already locked.")
+        return 0
+
+    if getattr(args, "status", False):
+        if not _unlock.is_configured():
+            print("No unlock password is set.  Set one with: prismor unlock --set-password")
+            return 0
+        if _unlock.org_self_edit_disabled():
+            print("Self-edit is disabled for this device by your organization.")
+            return 0
+        left = _unlock.remaining_seconds(workspace)
+        if left:
+            print(f"Unlocked — {left}s left.  Close it early with: prismor lock")
+        else:
+            print(f"Locked  (method: {_unlock.method()}).  Open a window with: prismor unlock")
+        return 0
+
+    if getattr(args, "forget", False):
+        if _unlock.clear_password():
+            print("Unlock password removed. Prismor's own policy can now only be edited by hand.")
+            return 0
+        print("No unlock password was set.")
+        return 0
+
+    # Every path below needs a person at the keyboard. Refuse rather than fall
+    # back to an env var: an env var an agent can set is not a password.
+    if not sys.stdin.isatty():
+        print("prismor unlock needs a terminal — run it yourself, not through an agent.")
+        return 1
+
+    if getattr(args, "set_password", False):
+        system = bool(getattr(args, "system_password", False))
+        if _unlock.is_configured():
+            current = getpass.getpass("Current Prismor unlock password: ")
+            ok, msg = _unlock.verify(current)
+            if not ok:
+                print(msg)
+                return 1
+        if system:
+            print("Unlock will ask for your operating system account password.")
+            probe = getpass.getpass("Confirm your system password: ")
+            if not _unlock._verify_system_password(probe):
+                print("That password did not verify against your system account. Nothing changed.")
+                return 1
+            _unlock.set_password("", system=True)
+        else:
+            print("This password lets the agent edit Prismor's policy for a few minutes at a time.")
+            print("Use something other than your login password.")
+            first = getpass.getpass("New Prismor unlock password: ")
+            if len(first) < 8:
+                print("Too short — use at least 8 characters. Nothing changed.")
+                return 1
+            second = getpass.getpass("Repeat it: ")
+            if first != second:
+                print("Those did not match. Nothing changed.")
+                return 1
+            _unlock.set_password(first)
+        print(f"Set. Open a window with: prismor unlock  (default {_unlock.DEFAULT_WINDOW_SECONDS // 60}m)")
+        return 0
+
+    if not _unlock.is_configured():
+        print("No unlock password is set, so the agent cannot edit Prismor's policy at all.")
+        print("Set one with:  prismor unlock --set-password")
+        return 1
+
+    if _unlock.org_self_edit_disabled():
+        print("Your organization has disabled agent self-edit on this device.")
+        print('To change a rule, ask an admin: prismor exempt request --reason "<why>"')
+        return 1
+
+    wait = _unlock.lockout_remaining()
+    if wait:
+        print(f"Too many failed attempts — try again in {wait}s.")
+        return 1
+
+    duration = None
+    if getattr(args, "duration", None):
+        from prismor.runtime import pause as _pause
+        try:
+            duration = _pause.parse_duration(args.duration)
+        except ValueError:
+            print(f"Could not read duration '{args.duration}'. Use e.g. 5m.")
+            return 2
+
+    ok, msg = _unlock.verify(getpass.getpass("Prismor unlock password: "))
+    if not ok:
+        print(msg)
+        return 1
+
+    by = ""
+    try:
+        from prismor.runtime.enterprise import identity as _identity
+        ident = _identity.load_identity() or {}
+        by = ident.get("user_id") or ident.get("label") or ""
+    except Exception:
+        pass
+
+    rec = _unlock.open_window(duration_seconds=duration, workspace=workspace, by=by)
+    left = _unlock.remaining_seconds(workspace)
+    print(f"Unlocked for {left}s — the agent may edit policy in {workspace} until {rec['until']}.")
+    print("Close it early with: prismor lock")
+    return 0
 
 
 def _allow_cmd(args, workspace: Path) -> int:
