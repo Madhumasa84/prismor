@@ -205,6 +205,31 @@ class TestUnblockMessage(unittest.TestCase):
         self.assertIn("prismor allow risky-write --pattern 'Dockerfile'", text)
         self.assertIn("--observe", text)
 
+    def test_ordinary_block_also_offers_to_delegate_to_the_agent(self):
+        # Watched a real agent read this message, correctly conclude the fix was
+        # the human's to run, relay it, and stop — which left the unlock window
+        # unreachable, because the only action that opens it is the one the
+        # message told the agent not to take. Delegation has to be offered.
+        from prismor.runtime.unblock import format_unblock
+        text = format_unblock(
+            {"ruleId": "risky-write", "category": "risky_write",
+             "evidence": "Dockerfile"},
+            workspace=Path("/work"),
+        )
+        self.assertIn("prismor unlock", text)
+        self.assertIn("let the agent apply", text)
+
+    def test_self_protection_block_does_not_offer_to_delegate(self):
+        # These are the rules the window lifts. Offering it here would read as
+        # "unlock so the agent can stop me guarding myself".
+        from prismor.runtime.unblock import format_unblock
+        text = format_unblock(
+            {"ruleId": "prismor-self-edit", "category": "security_bypass",
+             "evidence": "prismor allow risky-write --off"},
+            workspace=Path("/work"),
+        )
+        self.assertNotIn("let the agent apply", text)
+
 
 if __name__ == "__main__":
     unittest.main()

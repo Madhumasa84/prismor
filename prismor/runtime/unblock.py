@@ -315,4 +315,38 @@ def format_unblock(
         "To unblock (for the human at the keyboard — an agent running these is "
         "blocked unless `prismor unlock` is open):"
     )
-    return "\n".join([header] + steps)
+    return "\n".join(
+        [header] + steps
+        + _delegate_steps(str(finding.get("ruleId") or "").strip(), workspace)
+    )
+
+
+def _delegate_steps(rule_id: str, workspace: Optional[Path]) -> List[str]:
+    """The other way out: hand the fix to the agent for a few minutes.
+
+    Without this the window is unreachable in the ordinary case. The text above
+    tells the agent these commands are the human's to run, so a careful agent
+    relays them and stops — correctly — and nobody ever learns that delegating
+    was an option. Observed exactly that on the first real agent run.
+
+    Deliberately not offered for self-protection rules: those are the ones the
+    window lifts, and pointing at it there would read as "unlock to let the
+    agent stop me guarding myself", which is the opposite of the trade.
+    """
+    if rule_id in _SELF_PROTECTION_RULE_IDS:
+        return []
+    try:
+        from prismor.runtime import unlock as _unlock
+        if _unlock.org_self_edit_disabled():
+            return []
+        configured = _unlock.is_configured()
+    except Exception:
+        return []
+
+    open_cmd = "prismor unlock" if configured else "prismor unlock --set-password"
+    return [
+        f"Or let the agent apply one of these itself: {open_cmd}"
+        + ("" if configured else ", then prismor unlock"),
+        "   Opens a short password-gated window in which it may change policy — "
+        "it still cannot run the blocked action directly. Then tell it to retry.",
+    ]
