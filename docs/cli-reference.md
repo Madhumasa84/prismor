@@ -25,7 +25,7 @@ unchanged and prints a migration notice. Use `prismor`.
 
 | Command | What it does | Deep dive |
 |---|---|---|
-| `prismor setup` | Interactive 4-step onboarding wizard: pick mode, select agents, enable cloaking, choose install scope. | [Onboarding](#onboarding--lifecycle) |
+| `prismor setup` | Interactive onboarding wizard: pick mode, choose which rules block, select agents, enable cloaking, choose install scope, set the unlock password. | [Onboarding](#onboarding--lifecycle) |
 | `prismor status` | One-shot health check: workspace, hooks, mode, cloak, latest session, next action. | [Dashboard & sessions](dashboard.md) |
 | `prismor audit` | Full security-posture audit across every subsystem. `--fix` auto-remediates. | [Prismor](prismor-runtime.md#security-audit) |
 | `prismor --help` | The full command map. | — |
@@ -38,7 +38,7 @@ unchanged and prints a migration notice. Use `prismor`.
 prismor
 │
 ├─ Onboarding & lifecycle
-│   ├─ setup                  Interactive onboarding wizard (4-step TUI)
+│   ├─ setup                  Interactive onboarding wizard (TUI)
 │   ├─ install-hooks          Wire Prismor hooks into an agent/IDE
 │   ├─ uninstall-hooks        Remove hooks
 │   ├─ update                 Self-update check / upgrade
@@ -46,6 +46,8 @@ prismor
 │
 ├─ Runtime protection (policy engine)
 │   ├─ check                  Pre-check a command or path against policy
+│   ├─ allow <rule>           Make an exception to a rule that blocked you
+│   ├─ unlock / lock          Open/close the agent self-edit window (password)
 │   ├─ semantic-check         Hybrid LLM prompt-injection guard
 │   ├─ sandbox <action>       status · check · run — Docker command sandbox
 │   ├─ eval-server            HTTP evaluation endpoint for non-Python adapters
@@ -95,7 +97,7 @@ prismor
 
 | Command | Key flags | Description |
 |---|---|---|
-| `prismor setup [DIR]` | `--non-interactive`, `--mode`, `--agents`, `--cloak/--no-cloak` | Interactive wizard (or scripted with flags / `PRISMOR_MODE`, `PRISMOR_CLOAK` env vars). Picks mode, toggles rules, selects agents, enables cloaking. |
+| `prismor setup [DIR]` | `--non-interactive`, `--mode`, `--enforce-rules`, `--recommended`, `--agents`, `--cloak/--no-cloak` | Interactive wizard (or scripted with flags / `PRISMOR_MODE`, `PRISMOR_CLOAK` env vars). Picks mode, chooses which rules block, selects agents, enables cloaking, and optionally sets an unlock password. See [Choosing what blocks](#choosing-what-blocks). |
 | `prismor install-hooks` | `--agent <name\|all>` (required), `--mode <observe\|enforce>`, `--scope <project\|user>` | Writes hook config for the chosen agent so Prismor sees tool calls. Without hooks, nothing is monitored. |
 | `prismor uninstall-hooks` | `--agent <name\|all>`, `--scope` | Removes Prismor hooks for an agent. For `claude`/`all`, this also removes cloaking hooks (`prismor cloak install`) — secrets are no longer protected at the tool boundary until you reinstall with `prismor cloak install`. |
 | `prismor status` | `--workspace`, `--all`, `--days N` | Health check: hooks, mode, cloak state, latest session, and the single next action. Run this first every session. `--all` shows every registered workspace. |
@@ -105,6 +107,57 @@ prismor
 Agent → config matrix and per-agent details: [AGENT_INTEGRATIONS.md](../AGENT_INTEGRATIONS.md).
 Modes (`observe` vs `enforce`): [Prismor](prismor-runtime.md).
 
+### Choosing what blocks
+
+`observe` reports everything and blocks nothing, so setup leaves every rule on.
+
+`enforce` asks which rules should block, and starts with **none of them
+selected** — including the safety floor, which is marked *recommended* rather
+than assumed. Nothing blocks until you choose it. Press `a` on that screen to
+take the recommended set.
+
+The choice is written to `.prismor/policy.yaml` as `settings.selection:
+explicit` plus one entry per rule, so what blocks is legible in the file rather
+than implied by the defaults. Scripted installs say the same thing with
+`--recommended` or `--enforce-rules id1,id2`; `--mode enforce` with neither
+installs with nothing blocking and tells you so.
+
+Two things the selection does not reach:
+
+- **Prismor's self-protection rules** always block. They are what stops the
+  agent editing the choices above, so offering them as a checkbox would make
+  every other checkbox decorative.
+- **Org-managed workspaces** keep the full safety floor. `selection: explicit`
+  is honored only for a locally-authored policy on an unmanaged machine, and is
+  ignored if it arrives in a signed org bundle.
+
+### Making exceptions
+
+When a rule blocks something it should not, the block prints the command that
+fixes it:
+
+```
+prismor allow secret-exfiltration --pattern 'curl -F f=@.env'   # just this case
+prismor allow secret-exfiltration --observe                     # keep the rule, stop it blocking
+prismor allow secret-exfiltration --off --yes                    # off in this workspace
+prismor allow --list                                             # what you have added
+prismor allow --undo allow-secret-exfiltration                   # remove one
+```
+
+Add `--expires 30m` to make an exception temporary — it lapses instead of
+quietly becoming permanent policy.
+
+**These are for the human at the keyboard.** An agent that runs them is blocked,
+along with every other route to Prismor's own config: the policy file, the
+dashboard's write API, and the unlock credential. To hand the agent that
+ability for a few minutes, run `prismor unlock` and enter your password
+(`prismor unlock --set-password` if you have not set one). Inside the window the
+agent can adjust policy; it still cannot touch the self-protection rules or the
+password itself, and the window closes on its own.
+
+An unhooked agent — one running through a framework Prismor does not see — is
+outside all of this, the same as every other Prismor control.
+
 ---
 
 ## Runtime protection
@@ -113,6 +166,9 @@ Modes (`observe` vs `enforce`): [Prismor](prismor-runtime.md).
 |---|---|---|
 | `prismor check "<value>"` | `--type <command\|read\|write>`, `--explain`, `--from-log`, `--suggest-allowlist` | Dry-run a command or file path against the active policy. Returns ALLOW / WARN / BLOCK + reason without executing. Exit `2`=block, `1`=warn, `0`=clean. |
 | `prismor semantic-check [TEXT]` | `--mode <hybrid\|heuristic\|api>`, `--json`, `--cli-path` | Run the semantic prompt-injection guard on text or stdin. See [Semantic Guard](semantic-guard.md). |
+| `prismor allow <rule>` | `--pattern`, `--expires`, `--observe`, `--off`, `--yes`, `--reason`, `--list`, `--undo`, `--workspace` | Make an exception to a rule that blocked you, narrowest first. With no `--pattern` it uses the text of the most recent block for that rule. `--observe` keeps the rule but stops it blocking; `--off` disables it for the workspace (needs `--yes`). Refuses self-protection rules, refuses to turn a floor rule off, and refuses everything where an org's signed policy governs. See [Making exceptions](#making-exceptions). |
+| `prismor unlock` | `--for`, `--status`, `--set-password`, `--system-password`, `--forget`, `--workspace` | Open a short window (default 3 minutes) in which the agent may edit Prismor's own policy. Asks for your unlock password; needs a terminal. `--system-password` verifies against your operating-system account instead of storing a Prismor one. |
+| `prismor lock` | — | Close the self-edit window early. |
 | `prismor policy init` | `--workspace` | Scaffold `.prismor/policy.yaml`. |
 | `prismor policy show` | `--workspace` | Print active rules after merging defaults + project overrides. |
 | `prismor policy export` | `--json`, `--output PATH`, `--workspace` | Print the effective merged policy as stable, sorted JSON — patterns already resolved and disabled rules dropped — for non-Python consumers and for committing/diffing. |

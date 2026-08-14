@@ -70,7 +70,7 @@ Preferred path (works for every supported agent):
 
 ```bash
 pip install prismor
-prismor setup            # interactive 4-step TUI
+prismor setup            # interactive setup TUI
 ```
 
 For Claude Code, `prismor setup` also drops this skill into
@@ -203,23 +203,36 @@ sequence is:
 2. **Reproduce with `prismor check "<cmd>"`**: confirms the rule that fired and lets you experiment with variations.
 3. **Pick one**:
    - **The command was wrong** → fix it. Most blocks are accurate.
-   - **The command is fine for this project** → **relay the printed unblock steps to the user and stop.** Do not apply them yourself (see below).
+   - **The command is fine for this project** → **relay the printed unblock steps to the user and stop.** Do not apply them yourself (see below). If the user would rather delegate, they can run `prismor unlock` (password-gated, ~3-minute window) — inside that window you may run the printed `prismor allow …` command yourself, then retry the original action.
    - **The rule is wrong globally** → file an issue, don't silently disable.
 4. **Never** pass `--no-verify`, set `PRISMOR_MODE=observe` to "make it work", `prismor pause`, or uninstall the hooks to unblock a single command. All four defeat the entire layer.
 
 **You cannot apply the override yourself — by design.** The unblock steps
-address *the human at the keyboard*, not you. `.prismor/policy.yaml` and the
-agent hook configs are themselves guarded by the `agent-config-tampering` rule
-(CRITICAL), so an agent that edits them to widen its own permissions just earns
-a second block. This is true even when the user asks you to: the correct
-response is to show them the exact command or diff and let them run it.
+address *the human at the keyboard*, not you. `.prismor/policy.yaml`, the agent
+hook configs, the `prismor allow`/`unlock`/`pause`/`setup` commands, the
+dashboard's write API, and the unlock credential are all guarded by the
+self-protection rules (`agent-config-tampering`, `prismor-self-edit` —
+CRITICAL), so an agent that touches them to widen its own permissions just
+earns a second block. This is true even when the user asks you to: the correct
+response is to show them the exact command and let them run it.
+
+The one sanctioned exception is an **unlock window**: the human runs
+`prismor unlock` and enters their password, which lifts the self-edit block for
+a few minutes (3 by default). Inside the window you may run `prismor allow …`
+and other policy edits — every one is logged — but the dismantle routes stay
+shut: you still cannot relax a self-protection rule, change or read the unlock
+password, or extend your own window. When it expires or the human runs
+`prismor lock`, everything re-blocks.
 
 Some rules can't be overridden at all. `destructive-command`,
 `secret-exfiltration`, `rce-canary`, `privilege-escalation`,
 `dos-resource-exhaustion`, `audit-trail-tampering`, and
 `tool-category-crossover` sit on a non-overridable floor — a policy that tries
-to disable them is ignored rather than honored. If one of these fires, there is
-no override path. Fix the command.
+to disable them is ignored rather than honored. On an install that chose its
+enforce set explicitly (`settings.selection: explicit`, unmanaged workspaces
+only), an unselected floor rule reports instead of blocking, but its definition
+still cannot be weakened; the self-protection rules block always, everywhere.
+If one of these fires, there is no override path. Fix the command.
 
 For org-managed workspaces, the escape hatch is `prismor exempt request
 --reason "…"`, which asks an admin for a time-boxed relaxation instead of

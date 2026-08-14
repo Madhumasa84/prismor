@@ -47,7 +47,12 @@ from prismor.runtime.store import (
     list_registered_workspaces,
     get_enrollment,
     read_policy_layer,
+    add_egress_host,
+    get_egress_config,
     get_policy_precedence,
+    is_policy_editable,
+    remove_egress_host,
+    set_egress_option,
     write_policy_layer,
     get_policy_rule_catalog,
     set_project_rule_states,
@@ -68,6 +73,53 @@ _CORS_HEADERS = {
 
 # The workspace where the server was launched (set by run_server).
 _SERVER_WORKSPACE: Optional[Path] = None
+
+
+def _revocation_state() -> Optional[dict]:
+    """The device-revoked marker, or None. Never raises."""
+    try:
+        from prismor.runtime.enterprise import identity as _identity
+        info = _identity.revoked_info()
+        if not info:
+            return None
+        return {"at": info.get("at"), "reason": str(info.get("reason") or "")[:200]}
+    except Exception:
+        return None
+
+
+def _effective_policy_state(workspace: Optional[Path]) -> dict:
+    """What the merged policy actually does, for the header chip and badges.
+
+    ``mode`` is "enforce" when anything blocks at all, regardless of what
+    ``settings.default_mode`` says — that field is the fallback for unlisted
+    rules, not a description of the policy.
+    """
+    try:
+        from prismor.runtime.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        blocking = sum(1 for r in engine.rules if engine._resolve_mode(r) == "enforce")
+        return {
+            "mode": "enforce" if blocking else "observe",
+            "blocking": blocking,
+            "total": len(engine.rules),
+            "defaultMode": engine.default_mode,
+            "explicitSelection": bool(getattr(engine, "explicit_selection", False)),
+            "legacyBridge": bool(getattr(engine, "is_legacy_policy", False)),
+        }
+    except Exception:
+        return {}
+
+
+def _policy_write_status(result: dict) -> int:
+    """HTTP status for a policy write result.
+
+    An org-managed refusal is 403, not 400: the request was well-formed and the
+    answer is "not from here", which is what lets the UI show the right banner
+    instead of a validation error.
+    """
+    if result.get("ok"):
+        return 200
+    return 403 if result.get("reason") == "org_managed" else 400
 
 
 class PrismorRequestHandler(BaseHTTPRequestHandler):
@@ -166,8 +218,31 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 "enrollment": enrollment,
                 "workspace": str(workspace) if workspace else None,
                 "enterprise_enrolled": enrollment is not None,
+                # Whether local edits survive: on an org-managed workspace the
+                # signed bundle merges last, so the UI greys its controls rather
+                # than accepting edits the next policy pull would revert.
+                "editable": is_policy_editable(workspace),
+                # What is actually in force, as opposed to what `default_mode`
+                # says. A policy written by `prismor setup --mode enforce` sets
+                # default_mode: observe and flips its chosen rules to enforce,
+                # so reading the default alone reports "observe" for a machine
+                # that is blocking.
+                "effective": _effective_policy_state(workspace),
+                # A device whose key the control plane rejected still has its
+                # identity and its last org policy on disk, so without this the
+                # page can only say "not enrolled" and leave the reader to
+                # guess why the org policy it can see does not apply.
+                "revoked": _revocation_state(),
             }
             self._send_json(result)
+            return
+
+        if path == "/api/policy/egress":
+            workspace = self._resolve_workspace(qs)
+            try:
+                self._send_json(get_egress_config(workspace))
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
             return
 
         if path == "/api/policy/rules":
@@ -180,6 +255,15 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "rules": rules,
                 "workspace": str(workspace) if workspace else None,
+                # "How many rules are on" is the wrong headline for a policy
+                # that names its blocking set: what a reader wants is how many
+                # actually stop a call.
+                "summary": {
+                    "total": len(rules),
+                    "blocking": sum(1 for r in rules if r.get("blocks")),
+                    "reporting": sum(1 for r in rules if r.get("enabled") and not r.get("blocks")),
+                    "off": sum(1 for r in rules if not r.get("enabled")),
+                },
             })
             return
 
@@ -402,7 +486,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 content = body.get("yaml", "")
                 result = write_policy_layer("global", content)
-                self._send_json(result, status=200 if result["ok"] else 400)
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -417,7 +501,40 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "workspace required"}, status=400)
                     return
                 result = write_policy_layer("project", content, workspace)
-                self._send_json(result, status=200 if result["ok"] else 400)
+                self._send_json(result, status=_policy_write_status(result))
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        if path == "/api/policy/egress":
+            # Edit settings.egress without hand-writing YAML. Goes through the
+            # same writer as every other policy edit, so an org-managed
+            # workspace refuses here exactly as it does elsewhere.
+            try:
+                body = self._read_json_body()
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else _SERVER_WORKSPACE
+                if not workspace:
+                    self._send_json({"ok": False, "error": "workspace required"}, status=400)
+                    return
+                action = str(body.get("action") or "")
+                if action == "set":
+                    result = set_egress_option(workspace, str(body.get("field") or ""), body.get("value"))
+                elif action == "add":
+                    result = add_egress_host(
+                        workspace,
+                        str(body.get("host") or ""),
+                        str(body.get("list") or "allow"),
+                        str(body.get("reason") or ""),
+                    )
+                elif action == "remove":
+                    result = remove_egress_host(workspace, str(body.get("host") or ""))
+                else:
+                    self._send_json(
+                        {"ok": False, "error": "action must be set, add, or remove"}, status=400
+                    )
+                    return
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
@@ -435,7 +552,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "disabled must be a list"}, status=400)
                     return
                 result = set_project_rule_states(workspace, [str(x) for x in disabled])
-                self._send_json(result, status=200 if result.get("ok") else 400)
+                self._send_json(result, status=_policy_write_status(result))
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return

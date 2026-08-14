@@ -2576,7 +2576,17 @@ def read_policy_layer(scope: str, workspace: Optional[Path] = None) -> Dict[str,
 
 
 def _policy_default_mode(yaml_text: str) -> str:
-    match = re.search(r"^\s*default_mode\s*:\s*([A-Za-z0-9_-]+)\s*$", yaml_text or "", re.MULTILINE)
+    """The mode badge for a policy layer.
+
+    `default_mode` is the fallback for rules that do not set their own, so on a
+    policy that names its blocking set rule by rule it describes the rules
+    nobody selected — reading "observe" beside a summary saying three rules
+    enforce. Any rule pinned to enforce makes the layer an enforcing one.
+    """
+    text = yaml_text or ""
+    if re.search(r"^\s*mode\s*:\s*enforce\s*$", text, re.MULTILINE):
+        return "enforce"
+    match = re.search(r"^\s*default_mode\s*:\s*([A-Za-z0-9_-]+)\s*$", text, re.MULTILINE)
     return (match.group(1).strip().lower() if match else "observe")
 
 
@@ -2619,19 +2629,44 @@ def _policy_layer_summary(scope: str, layer: Dict[str, Any]) -> str:
         return "No enterprise policy. Enroll this device to receive org-managed controls."
     if scope == "project":
         if layer.get("exists"):
+            text = layer.get("yaml") or ""
+            # An explicit-selection policy names its blocking set rule by rule,
+            # so quoting `default_mode` alone would describe it as "observe"
+            # while it blocks — the same confusion the header chip had.
+            if re.search(r"^\s*selection\s*:\s*explicit\s*$", text, re.MULTILINE):
+                # Count rules, not every `mode: enforce` in the file —
+                # settings.egress has one too, and counting it reported one
+                # more blocking rule than the policy has.
+                enforcing = 0
+                try:
+                    import yaml as _yaml
+                    parsed = _yaml.safe_load(text) or {}
+                    enforcing = sum(
+                        1 for r in (parsed.get("rules") or [])
+                        if isinstance(r, dict) and str(r.get("mode") or "").lower() == "enforce"
+                    )
+                except Exception:
+                    enforcing = len(re.findall(r"^\s{2,}mode\s*:\s*enforce\s*$", text, re.MULTILINE))
+                return (
+                    f"Project policy names its blocking set: {enforcing} rule(s) enforce, "
+                    "everything else is reported. Written by `prismor setup --mode enforce`."
+                )
             return (
                 f"Project overrides are active for this workspace. Default mode: "
-                f"{_policy_default_mode(layer.get('yaml') or '')}. "
-                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+                f"{_policy_default_mode(text)}. "
+                f"{_policy_rule_override_count(text)} explicit rule override(s)."
             )
         return "No project override file for this workspace."
     if scope == "global":
+        # The engine merges defaults → project → org; it never reads this file
+        # (grep prismor_home in policy_engine.py). Listing it in the chain
+        # without saying so implies a layer that does not take part.
         if layer.get("exists"):
             return (
-                f"Machine-wide policy is active. Default mode: {_policy_default_mode(layer.get('yaml') or '')}. "
-                f"{_policy_rule_override_count(layer.get('yaml') or '')} explicit rule override(s)."
+                "This file exists but the policy engine does not currently merge it — "
+                "it changes nothing on its own. Use the project policy instead."
             )
-        return "No custom global policy on this machine."
+        return "No custom global policy on this machine (this layer is not applied by the runtime)."
     return ""
 
 
@@ -2697,10 +2732,74 @@ def get_policy_precedence(workspace: Optional[Path] = None, scoped: Optional[Dic
     return {"winner": winner, "chain": chain}
 
 
+def is_policy_editable(workspace: Optional[Path] = None) -> Dict[str, Any]:
+    """Whether local policy edits are worth offering here.
+
+    Where an org's signed policy governs, it merges after the project layer, so
+    a local edit either does nothing or reverts on the next pull. Saying so
+    beats letting someone edit a file that gets overwritten — the dashboard
+    greys its controls on this and the CLI writers refuse on it.
+
+    This is a usability guard, not a security control — the org overlay merges
+    after the local layers either way, so it still wins on anything it
+    specifies. That is why every uncertain case below resolves to *editable*:
+    refusing is only worth it when we can positively show an org policy is
+    live, and a read-only screen nobody can explain is worse than an edit that
+    a later pull overwrites.
+
+    Two things must hold: the workspace is org-managed, and a cached signed
+    policy exists to govern it. Enrollment alone is not enough — an org that
+    has not configured repo scoping manages every workspace by default
+    (workspace_scope.resolve_scope, reason "default_all"), so keying on
+    management would take local policy away from an enrolled solo developer in
+    their own side project for an org policy that does not exist.
+
+    ``is_managed`` already returns False once the device is revoked, so a
+    device removed from its org unlocks as soon as any authenticated call has
+    seen the 401 — which is also what the refusal message points at, for the
+    window before that has happened.
+    """
+    try:
+        from prismor.runtime.enterprise import workspace_scope as _scope
+        if not _scope.is_managed(workspace):
+            return {"editable": True, "reason": "", "error": ""}
+    except Exception:
+        return {"editable": True, "reason": "", "error": ""}
+
+    try:
+        from prismor.runtime.enterprise import remote_policy as _remote
+        if not _remote.cached_policy_path().exists():
+            return {"editable": True, "reason": "", "error": ""}
+    except Exception:
+        return {"editable": True, "reason": "", "error": ""}
+
+    return {
+        "editable": False,
+        "reason": "org_managed",
+        # Deliberately does not mention `prismor workspace personal`. On an org
+        # that has not configured repo patterns every workspace is managed by
+        # default (reason "default_all"), and that override sits *below*
+        # default_all in resolve_scope — so it detaches the workspace from org
+        # policy and org telemetry entirely. Telling someone that in the same
+        # breath as "you may not edit this" is handing them the way out of
+        # governance. It stays available for genuinely personal repos; it is
+        # not the answer to "the org policy is in my way".
+        "error": "This workspace's policy is managed by your organization — "
+                 "edit it in the Prismor console if you administer the org, or "
+                 'request an exemption with `prismor exempt request --reason "<why>"`.\n'
+                 "If you think this device was removed from the org, check with "
+                 "`prismor enroll-status`.",
+    }
+
+
 def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = None) -> Dict[str, Any]:
     """Write a policy layer.  Returns {ok, path?, error?}"""
     if scope == "enterprise":
         return {"ok": False, "error": "Enterprise policy is managed by org admin — edit it in the Prismor web dashboard."}
+
+    editable = is_policy_editable(workspace)
+    if not editable["editable"]:
+        return {"ok": False, "error": editable["error"], "reason": editable["reason"]}
 
     if scope == "global":
         path = _global_policy_path()
@@ -2719,12 +2818,253 @@ def write_policy_layer(scope: str, content: str, workspace: Optional[Path] = Non
         return {"ok": False, "error": str(exc)}
 
 
-def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Return every rule from the bundled default policy with its current
-    enabled state — the data behind the dashboard's per-rule toggle list.
-    A rule is "off" when the project override lists it with enabled: false.
+# ── network egress config ────────────────────────────────────────────────────
+#
+# `prismor egress ...` edits settings.egress in the project policy, but its
+# helpers print and sys.exit, so they cannot be called from the dashboard. These
+# are the same operations as data: they validate with the same EgressEntry the
+# runtime compiles with, and they save through write_policy_layer, which is what
+# makes the org-managed refusal apply here too.
+
+def _egress_settings_block(data: Dict[str, Any]) -> Dict[str, Any]:
+    settings = data.setdefault("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+        data["settings"] = settings
+    block = settings.setdefault("egress", {})
+    if not isinstance(block, dict):
+        block = {}
+        settings["egress"] = block
+    return block
+
+
+def _entry_to_dict(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        return {"host": entry, "reason": ""}
+    if isinstance(entry, dict):
+        return {
+            "host": str(entry.get("host") or entry.get("domain") or entry.get("cidr") or ""),
+            "reason": str(entry.get("reason") or ""),
+        }
+    return {"host": str(entry), "reason": ""}
+
+
+def get_egress_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
+    """The effective egress policy plus the project-local block that edits write.
+
+    Two views because they can differ: the effective one is what devices apply
+    after the org layer merges, and the editable one is this workspace's file.
+    Showing only the first would invite edits that appear to do nothing.
     """
-    from prismor.runtime.policy_engine import _load_yaml, is_floor_protected_rule
+    effective: Dict[str, Any] = {}
+    try:
+        from prismor.runtime.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        pol = engine.egress
+        effective = {
+            "enabled": bool(pol.enabled),
+            # None means "inherit the policy's default_mode", which is what the
+            # runtime does; spell it out rather than showing a blank.
+            "mode": pol.mode or engine.default_mode,
+            "modeInherited": pol.mode is None,
+            "default": pol.default,
+            "allowPrivate": bool(pol.allow_private),
+            "allow": [_entry_to_dict(e.raw) for e in pol.allow],
+            "deny": [_entry_to_dict(e.raw) for e in pol.deny],
+            "source": pol.source or "default",
+            "legacy": bool(pol.legacy),
+            "errors": list(pol.errors or []),
+        }
+    except Exception as exc:
+        effective = {"error": str(exc)}
+
+    local: Dict[str, Any] = {}
+    if workspace:
+        try:
+            from prismor.runtime.policy_engine import _load_yaml
+            ppath = _project_policy_path(workspace)
+            if ppath.exists():
+                raw = _load_yaml(ppath) or {}
+                block = ((raw.get("settings") or {}).get("egress") or {})
+                if isinstance(block, dict):
+                    local = {
+                        "enabled": bool(block.get("enabled", False)),
+                        "mode": block.get("mode"),
+                        "default": block.get("default", "allow"),
+                        "allowPrivate": bool(block.get("allow_private", True)),
+                        "allow": [_entry_to_dict(e) for e in (block.get("allow") or [])],
+                        "deny": [_entry_to_dict(e) for e in (block.get("deny") or [])],
+                    }
+        except Exception:
+            local = {}
+
+    return {
+        "effective": effective,
+        "project": local,
+        "editable": is_policy_editable(workspace),
+        "path": str(_project_policy_path(workspace)) if workspace else "",
+    }
+
+
+def _save_egress(workspace: Path, data: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        import yaml
+        content = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    except ImportError:
+        return {"ok": False, "error": "PyYAML is required to edit the egress policy"}
+    return write_policy_layer("project", content, workspace)
+
+
+def _load_project_policy(workspace: Path) -> Dict[str, Any]:
+    from prismor.runtime.policy_engine import _load_yaml
+    ppath = _project_policy_path(workspace)
+    if not ppath.exists():
+        return {"version": "1.0"}
+    loaded = _load_yaml(ppath)
+    return loaded if isinstance(loaded, dict) else {"version": "1.0"}
+
+
+def set_egress_option(workspace: Path, field: str, value: Any) -> Dict[str, Any]:
+    """Set enabled / mode / default / allow_private on the project egress block."""
+    allowed = {"enabled", "mode", "default", "allow_private"}
+    if field not in allowed:
+        return {"ok": False, "error": f"unknown egress field '{field}'"}
+    if field == "mode" and str(value) not in ("observe", "enforce"):
+        return {"ok": False, "error": "mode must be observe or enforce"}
+    if field == "default" and str(value) not in ("allow", "deny"):
+        return {"ok": False, "error": "default must be allow or deny"}
+
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    block[field] = value
+    # Setting anything other than the switch itself on a disabled policy is a
+    # silent no-op, which is how `prismor egress` behaves too.
+    if field != "enabled":
+        block.setdefault("enabled", True)
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["egress"] = get_egress_config(workspace)
+    return result
+
+
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+    r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$",
+    re.IGNORECASE,
+)
+
+
+def validate_egress_host(host: str) -> Optional[str]:
+    """Why this is not a usable egress entry, or None if it is.
+
+    EgressEntry accepts any non-empty string, because to the matcher an
+    unparseable host is simply one that never matches — harmless at evaluation
+    time, useless as an entry. Typed into a form that is a silent mistake: the
+    rule saves, looks right, and never fires. So the shape is checked here.
+    """
+    host = (host or "").strip()
+    if not host:
+        return "host required"
+    if host == "*":
+        return None
+    if "://" in host:
+        return "enter a host, not a URL — e.g. api.github.com"
+    candidate = host[2:] if host.startswith("*.") else host
+    if host.startswith("*.") and not candidate:
+        return "wildcard needs a domain, e.g. *.example.com"
+    if "/" in host:
+        import ipaddress
+        try:
+            ipaddress.ip_network(host, strict=False)
+            return None
+        except ValueError as exc:
+            return f"not a valid CIDR: {exc}"
+    import ipaddress
+    try:
+        ipaddress.ip_address(candidate)
+        return None
+    except ValueError:
+        pass
+    if not _HOSTNAME_RE.match(candidate):
+        return "not a hostname, wildcard (*.example.com), IP, or CIDR"
+    return None
+
+
+def add_egress_host(workspace: Path, host: str, list_name: str = "allow",
+                    reason: str = "") -> Dict[str, Any]:
+    """Add a host/wildcard/CIDR to settings.egress.allow or .deny."""
+    if list_name not in ("allow", "deny"):
+        return {"ok": False, "error": "list must be allow or deny"}
+    host = (host or "").strip()
+    problem = validate_egress_host(host)
+    if problem:
+        return {"ok": False, "error": f"{host!r}: {problem}" if host else problem}
+    try:
+        from prismor.runtime.egress import EgressEntry
+        EgressEntry(host, list_name)  # compile it the way the runtime will
+    except Exception as exc:
+        return {"ok": False, "error": f"invalid host {host!r}: {exc}"}
+
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    current = block.setdefault(list_name, [])
+    if not isinstance(current, list):
+        current = []
+        block[list_name] = current
+    existing = {_entry_to_dict(e)["host"] for e in current}
+    if host in existing:
+        return {"ok": False, "error": f"{host} is already in {list_name}"}
+    current.append({"host": host, "reason": reason} if reason else host)
+    if not block.get("enabled"):
+        block["enabled"] = True
+        block.setdefault("mode", "observe")
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["egress"] = get_egress_config(workspace)
+    return result
+
+
+def remove_egress_host(workspace: Path, host: str) -> Dict[str, Any]:
+    """Remove a host from both egress lists."""
+    data = _load_project_policy(workspace)
+    block = _egress_settings_block(data)
+    removed: List[str] = []
+    for key in ("allow", "deny"):
+        current = block.get(key)
+        if not isinstance(current, list):
+            continue
+        kept = []
+        for item in current:
+            if _entry_to_dict(item)["host"] == host:
+                removed.append(f"{key}:{host}")
+            else:
+                kept.append(item)
+        block[key] = kept
+    if not removed:
+        return {"ok": False, "error": f"no entry for {host}"}
+    result = _save_egress(workspace, data)
+    if result.get("ok"):
+        result["removed"] = removed
+        result["egress"] = get_egress_config(workspace)
+    return result
+
+
+def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Return every rule from the bundled default policy with its current state
+    — the data behind the dashboard's per-rule list.
+
+    Two different states, and the difference matters: a rule is *off* when the
+    project override lists it with ``enabled: false``, and separately it either
+    *blocks* or only *reports*, which is what the merged policy's resolved mode
+    decides. Reporting only the first would show 78 identical green toggles for
+    a policy where three rules actually stop anything.
+    """
+    from prismor.runtime.policy_engine import (
+        PolicyEngine,
+        _load_yaml,
+        is_floor_protected_rule,
+        is_self_protection_rule,
+    )
 
     disabled: set = set()
     if workspace:
@@ -2738,6 +3078,17 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
             except Exception:
                 pass
 
+    # Effective mode per rule, straight from the engine that decides it at
+    # dispatch — never recomputed here, or the dashboard would drift from
+    # enforcement the first time the resolution rules change.
+    modes: Dict[str, str] = {}
+    try:
+        engine = PolicyEngine(workspace=workspace) if workspace else PolicyEngine()
+        for compiled in engine.rules:
+            modes[compiled.id] = engine._resolve_mode(compiled)
+    except Exception:
+        modes = {}
+
     default_path = Path(__file__).resolve().parent / "default_policy.yaml"
     rules: List[Dict[str, Any]] = []
     try:
@@ -2747,17 +3098,26 @@ def get_policy_rule_catalog(workspace: Optional[Path] = None) -> List[Dict[str, 
             if not rid:
                 continue
             locked = is_floor_protected_rule(rid, r)
+            self_protect = is_self_protection_rule(rid)
             requested_enabled = rid not in disabled
+            enabled = True if locked else requested_enabled
+            mode = modes.get(rid, "")
             rules.append({
                 "id": rid,
                 "severity": r.get("severity", "MEDIUM"),
                 "category": r.get("category", ""),
                 "title": r.get("title", rid),
                 "action": r.get("action", ""),
-                "enabled": True if locked else requested_enabled,
+                "enabled": enabled,
                 "locked": locked,
+                "selfProtect": self_protect,
                 "requestedEnabled": requested_enabled,
+                # What this rule does right now: stop the call, or report it.
+                "mode": mode,
+                "blocks": bool(enabled and mode == "enforce"),
                 "lockReason": (
+                    "Prismor guards its own configuration with this rule — it always blocks."
+                    if self_protect else
                     "Pinned by Prismor's core safety floor and cannot be disabled at the project level."
                     if locked else ""
                 ),
@@ -2799,8 +3159,8 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
 
     data.setdefault("version", "1.0")
     seen: List[str] = []
-    rules_block: List[Dict[str, Any]] = []
     ignored: List[str] = []
+    wanted_off: List[str] = []
     for rid in disabled_ids or []:
         if not rid or rid in seen:
             continue
@@ -2808,7 +3168,23 @@ def set_project_rule_states(workspace: Path, disabled_ids: List[str]) -> Dict[st
         if is_floor_protected_rule(rid, default_rules_by_id.get(rid)):
             ignored.append(rid)
             continue
-        rules_block.append({"id": rid, "enabled": False})
+        wanted_off.append(rid)
+
+    # Merge into the existing entries rather than replacing them. The rules
+    # block also carries the per-rule `mode` that `prismor setup --mode enforce`
+    # writes to record which rules were chosen to block, and rewriting the block
+    # from the enable/disable list alone would silently discard that selection.
+    existing: List[Dict[str, Any]] = [
+        dict(r) for r in (data.get("rules") or []) if isinstance(r, dict) and r.get("id")
+    ]
+    by_id = {str(r["id"]): r for r in existing}
+    for rid in wanted_off:
+        by_id.setdefault(rid, {"id": rid})
+        by_id[rid]["enabled"] = False
+    for rid, rule in by_id.items():
+        if rid not in wanted_off:
+            rule.pop("enabled", None)  # re-enabled: drop the override, keep mode
+    rules_block = [r for r in by_id.values() if len(r) > 1]
     data["rules"] = rules_block
 
     try:

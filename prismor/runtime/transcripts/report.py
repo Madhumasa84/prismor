@@ -47,6 +47,70 @@ def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" + ("" if count == 1 else "s")
 
 
+# Severity carries the weight in this report, so it gets the colour rather than
+# the rule name. Disabled when stdout is not a terminal, so piping to a file or
+# a diff stays clean.
+_COLOR = {
+    "CRITICAL": "\033[31m",
+    "HIGH": "\033[33m",
+    "MEDIUM": "\033[34m",
+    "LOW": "\033[37m",
+}
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
+
+
+def _use_color() -> bool:
+    import os
+    import sys
+    if os.environ.get("NO_COLOR"):
+        return False
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _c(text: str, *codes: str) -> str:
+    if not codes or not _use_color():
+        return text
+    return "".join(codes) + text + _RESET
+
+
+def _bar(count: int, largest: int, width: int = 12) -> str:
+    """A proportional bar, so the shape of the distribution is visible.
+
+    A column of numbers makes the reader do the arithmetic to see that one rule
+    accounts for most of the findings; a bar shows it.
+    """
+    if largest <= 0:
+        return " " * width
+    filled = max(1, round(count / largest * width))
+    return "█" * filled + " " * (width - filled)
+
+
+def _rule_lines(grouped: List[Tuple[str, int, str, str]], limit: Optional[int] = None) -> List[str]:
+    """Render grouped rule counts as an aligned, proportional table."""
+    rows = grouped[:limit] if limit else grouped
+    if not rows:
+        return []
+    largest = max(count for _, count, _, _ in rows)
+    width = max(len(rule) for rule, _, _, _ in rows)
+    width = min(max(width, 20), 40)
+    out = []
+    for rule, count, severity, latest in rows:
+        color = _COLOR.get(severity.upper(), "")
+        recency = _ago(latest)
+        out.append(
+            f"  {rule:<{width}}  {count:>5}  "
+            f"{_c(_bar(count, largest), color)}  "
+            f"{_c(f'{severity:<8}', color)}  "
+            f"{_c(f'last {recency}', _DIM) if recency else ''}"
+        )
+    return out
+
+
 def _group(entries: List[Dict[str, Any]]) -> List[Tuple[str, int, str, str]]:
     """Group findings by rule -> (ruleId, count, severity, most-recent-ts)."""
     counts: collections.Counter = collections.Counter()
@@ -113,17 +177,17 @@ def format_report(result: SweepResult, *, since_label: str = "all history") -> s
 
     lines.append("")
     lines.append(
-        f"Scanned {_plural(len(result.sessions), 'session')} · "
-        f"{_plural(result.total_events, 'event')} · {since_label}"
-        f"   ({result.elapsed_seconds:.1f}s)"
+        _c(f"Scanned {_plural(len(result.sessions), 'session')} · "
+           f"{_plural(result.total_events, 'event')} · {since_label}", _BOLD)
+        + _c(f"   ({result.elapsed_seconds:.1f}s)", _DIM)
     )
     lines.append("")
     for agent, count in agents.most_common():
         lines.append(
-            f"  {labels.get(agent, agent):<14} {count:>4} sessions {events[agent]:>7} events"
+            f"  {labels.get(agent, agent):<14} {count:>5} sessions {events[agent]:>8} events"
         )
     for agent in result.empty_agents:
-        lines.append(f"  {agent:<14}    no transcripts found")
+        lines.append(f"  {labels.get(agent, agent):<14} {_c('no transcripts found', _DIM)}")
     # An agent whose every transcript predates the window would otherwise be
     # absent from the report entirely, which reads as "no data" rather than
     # "nothing recent".
@@ -138,33 +202,53 @@ def format_report(result: SweepResult, *, since_label: str = "all history") -> s
 
     would_block, warnings = partition(result)
 
+    _RULE_LIMIT = 12
+
     if would_block:
-        lines.append(f"Would BLOCK ({len(would_block)})")
-        for rule, count, severity, latest in _group(would_block):
-            recency = f"   most recent {_ago(latest)}" if latest else ""
-            lines.append(f"  {rule:<32} {count:>4}  {severity:<8}{recency}")
+        blocked_rules = _group(would_block)
+        lines.append(
+            _c(f"Would BLOCK  {len(would_block)}", _BOLD)
+            + _c(f"   across {_plural(len(blocked_rules), 'rule')}", _DIM)
+        )
+        lines.append("")
+        lines.extend(_rule_lines(blocked_rules, _RULE_LIMIT))
+        hidden = len(blocked_rules) - _RULE_LIMIT
+        if hidden > 0:
+            lines.append(_c(f"  … and {_plural(hidden, 'more rule')}", _DIM))
     else:
-        lines.append("Would BLOCK (0)")
+        lines.append(_c("Would BLOCK  0", _BOLD))
+        lines.append("")
         lines.append("  Nothing in this window would be blocked by the current policy.")
     lines.append("")
 
     if warnings:
-        lines.append(f"Would WARN ({len(warnings)})")
-        for rule, count, severity, latest in _group(warnings)[:12]:
-            recency = f"   most recent {_ago(latest)}" if latest else ""
-            lines.append(f"  {rule:<32} {count:>4}  {severity:<8}{recency}")
-        remaining = len(_group(warnings)) - 12
-        if remaining > 0:
-            lines.append(f"  … and {_plural(remaining, 'more rule')}")
+        warn_rules = _group(warnings)
+        lines.append(
+            _c(f"Would WARN  {len(warnings)}", _BOLD)
+            + _c(f"   across {_plural(len(warn_rules), 'rule')}", _DIM)
+        )
+        lines.append("")
+        lines.extend(_rule_lines(warn_rules, _RULE_LIMIT))
+        hidden = len(warn_rules) - _RULE_LIMIT
+        if hidden > 0:
+            lines.append(_c(f"  … and {_plural(hidden, 'more rule')}", _DIM))
         lines.append("")
 
     if result.silent_sessions:
         lines.append(
-            f"⚠  {_plural(len(result.silent_sessions), 'transcript')} produced no events "
+            _c("⚠  ", "\033[33m")
+            + f"{_plural(len(result.silent_sessions), 'transcript')} produced no events "
             f"despite containing records — likely an adapter format mismatch."
         )
-        for session in result.silent_sessions[:5]:
-            lines.append(f"     {session.agent}: {session.path}")
+        # Basenames, not full paths. The paths are ~110 characters of home
+        # directory and project slug that wrap over two lines each and bury the
+        # one thing worth reading, which is how many and from which agent.
+        for session in result.silent_sessions[:3]:
+            lines.append(_c(f"     {session.agent}: …/{session.path.name}", _DIM))
+        extra = len(result.silent_sessions) - 3
+        if extra > 0:
+            lines.append(_c(f"     … and {extra} more", _DIM))
+        lines.append(_c("     Full paths: prismor ingest --discover --json", _DIM))
         lines.append("")
 
     if result.truncated:
@@ -176,7 +260,16 @@ def format_report(result: SweepResult, *, since_label: str = "all history") -> s
 
     if would_block or warnings:
         example = (_group(would_block) or _group(warnings))[0][0]
-        lines.append(f"  prismor ingest --discover --show {example}    # see the calls")
+        lines.append(_c("Next", _BOLD))
+        lines.append(
+            f"  prismor ingest --discover --show {example}"
+            + _c("   see the calls behind a rule", _DIM)
+        )
+        if would_block:
+            lines.append(
+                "  prismor allow <rule> --pattern '<literal>'"
+                + _c("   make an exception before enforcing", _DIM)
+            )
         lines.append("")
     return "\n".join(lines)
 

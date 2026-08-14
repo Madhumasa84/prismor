@@ -32,10 +32,10 @@ See [`SKILL.md`](../SKILL.md) for the full decision tree and hard rules.
 
 ```bash
 pip install prismor
-prismor setup          # interactive 4-step onboarding wizard
+prismor setup          # interactive onboarding wizard
 ```
 
-`prismor setup` lets you pick enforcement mode, toggle detection rules, select agents, and optionally enable secret cloaking. Pass `--non-interactive` to skip the TUI.
+`prismor setup` lets you pick enforcement mode, choose which rules block (enforce mode starts with nothing selected and the safety floor marked *recommended*), select agents, optionally enable secret cloaking, and optionally set an unlock password for the agent self-edit window. Pass `--non-interactive` to skip the TUI (`--recommended` or `--enforce-rules id1,id2` picks the blocking set). See [Choosing what blocks](cli-reference.md#choosing-what-blocks).
 
 ## Git clone + wizard
 

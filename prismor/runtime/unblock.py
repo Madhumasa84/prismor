@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from prismor.runtime.policy_engine import (
     _CORE_BLOCK_CATEGORIES,
     _NON_OVERRIDABLE_RULE_IDS,
+    _SELF_PROTECTION_RULE_IDS,
 )
 
 # Longest evidence we will paste back as a literal allowlist pattern. Beyond
@@ -97,22 +98,60 @@ def _allowlist_yaml(rule_id: str, finding: Dict[str, Any]) -> List[str]:
     ]
 
 
+def _shell_single_quoted(value: str) -> str:
+    """Quote a pattern for a copy-pasteable shell command line."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 def _rule_override_steps(rule_id: str, finding: Dict[str, Any], workspace: Optional[Path]) -> List[str]:
-    """The standard narrow-to-broad ladder for an ordinary policy rule."""
+    """The standard narrow-to-broad ladder for an ordinary policy rule.
+
+    Each rung is a command rather than a paste of YAML: the paste is what makes
+    "just turn Prismor off" the easier option, and the whole point of printing
+    an unblock path is that the narrow one should be the easy one.
+    """
     path = _policy_path(workspace)
-    steps = [
-        f"1. Allow only this case — add to {path}:",
-    ]
-    steps += _allowlist_yaml(rule_id, finding)
+    pattern = _literal_pattern(finding)
+    steps: List[str] = []
+    if pattern:
+        steps.append(
+            f"1. Allow only this case:  prismor allow {rule_id} "
+            f"--pattern {_shell_single_quoted(pattern)}"
+        )
+        steps.append(
+            "   (add --expires 30m to make it temporary)"
+        )
+    else:
+        steps.append(
+            f"1. Allow only this case:  prismor allow {rule_id} --pattern '<literal to allow>'"
+        )
     steps += [
-        f"2. Or keep the rule but stop it blocking (still logged) — in {path}:",
-        "rules:",
-        f"  - id: {rule_id}",
-        "    mode: observe",
-        f"3. Or turn the rule off in this repo only: prismor policy edit  (or set `enabled: false` on {rule_id})",
-        f"Then verify without re-running the agent: prismor check '<your command>'",
+        f"2. Or keep the rule but stop it blocking (still reported):  prismor allow {rule_id} --observe",
+        f"3. Or turn it off in this repo:  prismor allow {rule_id} --off --yes",
+        f"   Each writes {path}; `prismor allow --list` shows what you have added, "
+        f"and `prismor allow --undo <id>` removes one.",
+        "Then verify without re-running the agent: prismor check '<your command>'",
     ]
     return steps
+
+
+def _self_protection_steps(rule_id: str, workspace: Optional[Path]) -> List[str]:
+    """Blocks on the rules Prismor uses to guard itself.
+
+    These are the only blocks whose answer is a password. Everything else can be
+    relaxed from the command line; if this one could be too, an agent that hit
+    any other rule could simply relax this one first and then that one.
+    """
+    return [
+        f"{rule_id} guards Prismor's own configuration, so it cannot be relaxed "
+        "with `prismor allow`.",
+        "1. If a person asked for this: run it yourself in your own terminal — "
+        "Prismor governs agent tool calls, not you.",
+        "2. To let the agent do it: open a short window with  prismor unlock  "
+        "(you will be asked for your Prismor password; the window is 3 minutes "
+        "by default), then have the agent retry.",
+        "3. If no unlock password is set up yet:  prismor unlock --set-password",
+    ]
 
 
 def _floor_steps(rule_id: str, finding: Dict[str, Any], enrolled: bool) -> List[str]:
@@ -121,6 +160,8 @@ def _floor_steps(rule_id: str, finding: Dict[str, Any], enrolled: bool) -> List[
         f"{rule_id} is a floor rule — `enabled: false`, `mode: observe` and "
         "`disable_patterns` are ignored for it in every policy layer, so editing "
         "policy.yaml will not clear this block.",
+        f"0. Allow just this one case (allowlists do apply to floor rules):  "
+        f"prismor allow {rule_id} --pattern '<literal>' --yes",
     ]
     # Only quote the pattern when a human could actually read it — the core
     # rules carry multi-line lookahead regexes that fill a screen and tell the
@@ -228,6 +269,9 @@ def unblock_steps(
     if not rule_id or rule_id == "unknown":
         return []
 
+    if rule_id in _SELF_PROTECTION_RULE_IDS:
+        return _self_protection_steps(rule_id, workspace)
+
     steps = _subsystem_steps(rule_id, finding, workspace, session_id)
     if steps is None:
         if is_floor(finding):
@@ -267,5 +311,42 @@ def format_unblock(
     )
     if not steps:
         return ""
-    header = "To unblock (for the human, not the agent — Prismor guards its own config):"
-    return "\n".join([header] + steps)
+    header = (
+        "To unblock (for the human at the keyboard — an agent running these is "
+        "blocked unless `prismor unlock` is open):"
+    )
+    return "\n".join(
+        [header] + steps
+        + _delegate_steps(str(finding.get("ruleId") or "").strip(), workspace)
+    )
+
+
+def _delegate_steps(rule_id: str, workspace: Optional[Path]) -> List[str]:
+    """The other way out: hand the fix to the agent for a few minutes.
+
+    Without this the window is unreachable in the ordinary case. The text above
+    tells the agent these commands are the human's to run, so a careful agent
+    relays them and stops — correctly — and nobody ever learns that delegating
+    was an option. Observed exactly that on the first real agent run.
+
+    Deliberately not offered for self-protection rules: those are the ones the
+    window lifts, and pointing at it there would read as "unlock to let the
+    agent stop me guarding myself", which is the opposite of the trade.
+    """
+    if rule_id in _SELF_PROTECTION_RULE_IDS:
+        return []
+    try:
+        from prismor.runtime import unlock as _unlock
+        if _unlock.org_self_edit_disabled():
+            return []
+        configured = _unlock.is_configured()
+    except Exception:
+        return []
+
+    open_cmd = "prismor unlock" if configured else "prismor unlock --set-password"
+    return [
+        f"Or let the agent apply one of these itself: {open_cmd}"
+        + ("" if configured else ", then prismor unlock"),
+        "   Opens a short password-gated window in which it may change policy — "
+        "it still cannot run the blocked action directly. Then tell it to retry.",
+    ]

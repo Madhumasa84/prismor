@@ -56,6 +56,14 @@ _NON_OVERRIDABLE_RULE_IDS = frozenset({
     # poisoned .prismor/policy.yaml also disable detection of itself.
     # See FIX_PLAN.md §3.5.
     "memory-integrity-mismatch",
+    # Self-protection rules; see _SELF_PROTECTION_RULE_IDS below. Listed here so
+    # no overlay can disable or weaken them, and listed there so the opt-in
+    # floor of an explicit-selection policy cannot leave them observing.
+    # (Keep apostrophes out of comments inside this literal: prismor-web
+    # generates its copy of the floor by parsing this frozenset, and a quote
+    # character splits the parse — see scripts/generate-default-policy-rules.js.)
+    "agent-config-tampering",
+    "prismor-self-edit",
 })
 
 # Categories that must stay in settings.block_categories no matter what an
@@ -70,6 +78,24 @@ _CORE_BLOCK_CATEGORIES = frozenset({
     "privilege_escalation",
     "dos_resource_exhaustion",
     "lethal_trifecta",
+})
+
+# Rules by which Prismor guards *itself*: its hook wiring, its policy files,
+# its audit trail, and the credential/grant that gate agent self-edit. These
+# always enforce — they are not a policy choice about what the agent may do to
+# the machine, they are what keeps every other choice honest. In particular
+# they are exempt from the opt-in floor of an explicit-selection policy
+# (settings.selection: explicit), because a selection screen that let the user
+# switch off "the agent may not rewrite its own policy" would make every other
+# selection on that screen meaningless.
+#
+# The one thing that lifts them is a password-verified unlock window
+# (prismor unlock — see runtime/unlock.py), checked at dispatch, never here.
+_SELF_PROTECTION_RULE_IDS = frozenset({
+    "agent-config-tampering",
+    "prismor-self-edit",
+    "audit-trail-tampering",
+    "memory-integrity-mismatch",
 })
 
 # Canonical field for each event type when 'fields' is not specified in the rule.
@@ -152,6 +178,15 @@ def is_floor_protected_rule(
         default_rule is not None
         and default_rule.get("category") in _CORE_BLOCK_CATEGORIES
     )
+
+
+def is_self_protection_rule(rule_id: str) -> bool:
+    """Return whether a rule is one by which Prismor guards itself.
+
+    These are the rules an explicit-selection policy may not leave in observe,
+    and that `prismor allow` refuses to touch even inside an unlock window.
+    """
+    return rule_id in _SELF_PROTECTION_RULE_IDS
 
 
 class _TaintStore:
@@ -549,12 +584,17 @@ class AllowlistEntry:
     carve-out visible in the same list.
     """
 
-    __slots__ = ("id", "rule_ids", "patterns", "raw_patterns", "reason", "type")
+    __slots__ = ("id", "rule_ids", "patterns", "raw_patterns", "reason", "type", "expires")
 
     def __init__(self, raw: Dict[str, Any]) -> None:
         self.id: str = raw["id"]
         self.rule_ids: set[str] = set(raw["rule_ids"])
         self.reason: str = raw.get("reason", "")
+        # Optional ISO-8601 expiry, so a "just this once" exception written by
+        # `prismor allow --expires` lapses on its own instead of quietly
+        # becoming permanent policy.
+        _exp = raw.get("expires")
+        self.expires: Optional[str] = str(_exp) if _exp else None
         # Absent means allow, so every pre-existing entry keeps its behaviour.
         _t = str(raw.get("type", "allow")).lower()
         self.type: str = _t if _t in ("allow", "veto") else "allow"
@@ -563,6 +603,8 @@ class AllowlistEntry:
         self.patterns: re.Pattern[str] = re.compile(joined, re.IGNORECASE)
 
     def applies_to(self, rule_id: str) -> bool:
+        if self.expires and self.expires < _now_iso_z():
+            return False
         return "*" in self.rule_ids or rule_id in self.rule_ids
 
 
@@ -590,6 +632,10 @@ class PolicyEngine:
         self._semantic_guard = None  # lazy-instantiated on first uncertain event
         self.remote_policy_meta: Dict[str, Any] = {}
         self._default_mode_explicit: bool = False
+        # True when this policy names its blocking set rule by rule
+        # (settings.selection: explicit, written by `prismor setup`) and that
+        # choice is locally authoritative. See _resolve_mode.
+        self.explicit_selection: bool = False
         self._load(workspace, policy_path)
 
     @property
@@ -609,6 +655,38 @@ class PolicyEngine:
             and not self._default_mode_explicit
             and not any(r.mode for r in self.rules)
         )
+
+    def _resolve_mode(self, rule: "CompiledRule") -> str:
+        """Effective observe/enforce for a finding raised by ``rule``.
+
+        Per-rule mode, else the policy's ``default_mode``; ``should_block()``
+        blocks only on "enforce". Two exceptions sit above that:
+
+        * **Self-protection** (``_SELF_PROTECTION_RULE_IDS``) always enforces.
+          Nothing in a policy file can leave the agent free to rewrite Prismor's
+          own wiring; only a password-verified unlock window lifts it, and that
+          is applied at dispatch, not here.
+        * **The safety floor** (core rule ids / core block categories) enforces
+          regardless of ``default_mode`` — unless this policy declared
+          ``settings.selection: explicit``, i.e. the operator chose their
+          blocking set rule by rule in `prismor setup` and did not choose this
+          one. That opt-in is honored only for a locally-authored policy on an
+          unmanaged workspace (see ``self.explicit_selection``), so it can never
+          downgrade an org-managed install.
+
+        The floor only applies to rules whose action is "block"; a rule that
+        explicitly declares action: "warn" is honored as a warning even inside a
+        core category — otherwise a warn-intended rule silently hard-blocks.
+        """
+        if rule.id in _SELF_PROTECTION_RULE_IDS:
+            return "enforce"
+        if (
+            rule.action == "block"
+            and (rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES)
+            and not self.explicit_selection
+        ):
+            return "enforce"
+        return self.device_mode or rule.mode or self.default_mode
 
     def _match_exemption(self, workspace: Optional[Path], settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Find an admin-granted, non-expired exemption matching this workspace's
@@ -733,6 +811,16 @@ class PolicyEngine:
                 rules_by_id[rule["id"]] = rule
         allowlist_raw.extend(override_raw.get("allowlists", []) or [])
         override_settings = dict(override_raw.get("settings", {}) or {})
+        # `selection: explicit` makes the safety floor opt-in, so it is a
+        # local-only affordance for a developer's own machine. Arriving from the
+        # signed org bundle (or a repo exemption overlay) it would mean an admin
+        # had turned the floor off fleet-wide, which the floor exists to prevent.
+        if source != "project" and "selection" in override_settings:
+            sys.stderr.write(
+                f"[prismor] Ignoring settings.selection from the {source} policy layer "
+                f"(the safety floor stays on for managed workspaces)\n"
+            )
+            override_settings.pop("selection", None)
         if "block_categories" in override_settings:
             cats = set(override_settings.get("block_categories") or [])
             dropped = _CORE_BLOCK_CATEGORIES - cats
@@ -871,6 +959,19 @@ class PolicyEngine:
         # Did the operator explicitly adopt the per-rule observe/enforce model?
         # Used by the backward-compat enforce bridge (see is_legacy_policy).
         self._default_mode_explicit: bool = ("default_mode" in settings) or ("mode" in settings)
+        # `settings.selection: explicit` — the operator picked their blocking set
+        # rule by rule in `prismor setup`, so an unselected floor rule observes
+        # rather than blocks (self-protection excepted; see _resolve_mode).
+        #
+        # Honored only where the choice is genuinely the operator's own: an
+        # unmanaged workspace with no signed org layer applied. On an org-managed
+        # machine the floor is the org's to set, and a local file saying
+        # otherwise is exactly the downgrade the floor defends against.
+        self.explicit_selection: bool = (
+            str(settings.get("selection", "")).lower() == "explicit"
+            and not self.workspace_managed
+            and not self.remote_policy_meta
+        )
         outputs = settings.get("outputs") or []
         if isinstance(outputs, list):
             self.outputs = [o for o in outputs if isinstance(o, dict)]
@@ -1142,23 +1243,8 @@ class PolicyEngine:
                 # the dashboard distinguish a directive from live user input,
                 # untrusted tool output, or project memory (issue #155).
                 "source": _EVENT_SOURCE.get(event_type, event_type),
-                # Effective observe/enforce for this finding — per-rule override
-                # else the policy's default_mode. should_block() blocks only when
-                # this is "enforce". EXCEPTION: the non-overridable floor (core
-                # rule IDs + core block categories) always enforces — it can't be
-                # left in observe by default_mode, nor downgraded by an overlay.
-                # The floor only applies to rules whose action is "block"; a rule
-                # that explicitly declares action: "warn" is honored as a warning
-                # (observe unless the install is --mode enforce), even inside a
-                # core category — otherwise a warn-intended rule silently hard-blocks.
-                "mode": (
-                    "enforce"
-                    if (
-                        rule.action == "block"
-                        and (rule.id in _NON_OVERRIDABLE_RULE_IDS or rule.category in _CORE_BLOCK_CATEGORIES)
-                    )
-                    else (self.device_mode or rule.mode or self.default_mode)
-                ),
+                # Effective observe/enforce for this finding — see _resolve_mode.
+                "mode": self._resolve_mode(rule),
                 # True when the match sits in inert text rather than executable
                 # position. should_block() never blocks on such a finding.
                 "contextInert": context_inert,
@@ -1884,14 +1970,7 @@ class PolicyEngine:
                     # inline finding does -- including the non-overridable
                     # floor -- so a root wipe hidden in a script is treated the
                     # same as one typed at the prompt.
-                    "mode": "observe" if advisory else (
-                        "enforce"
-                        if (
-                            rule.id in _NON_OVERRIDABLE_RULE_IDS
-                            or rule.category in _CORE_BLOCK_CATEGORIES
-                        )
-                        else (self.device_mode or rule.mode or self.default_mode)
-                    ),
+                    "mode": "observe" if advisory else self._resolve_mode(rule),
                     # Advisory findings never block, by the same flag the
                     # inline contextual verifier uses.
                     "contextInert": advisory,

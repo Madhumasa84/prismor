@@ -52,8 +52,20 @@ class TestOrdinaryRuleSteps(unittest.TestCase):
 
     def test_narrowest_option_comes_first(self):
         joined = "\n".join(self.steps)
-        self.assertLess(joined.index("Allow only this case"), joined.index("mode: observe"))
-        self.assertLess(joined.index("mode: observe"), joined.index("enabled: false"))
+        self.assertLess(joined.index("Allow only this case"), joined.index("--observe"))
+        self.assertLess(joined.index("--observe"), joined.index("--off"))
+
+    def test_each_rung_is_a_command_the_user_can_run(self):
+        # The ladder is only useful if the narrow rung is the easy one; a step
+        # that says "paste this YAML" loses to "turn Prismor off".
+        joined = "\n".join(self.steps)
+        self.assertIn("prismor allow secret-access --pattern", joined)
+        self.assertIn("prismor allow secret-access --observe", joined)
+
+    def test_pattern_is_prefilled_from_the_evidence(self):
+        joined = "\n".join(unblock.unblock_steps(
+            _finding(evidence="/home/u/.ssh/id_rsa"), workspace=Path("/w")))
+        self.assertIn(r"/home/u/\.ssh/id_rsa", joined)
 
     def test_names_the_policy_file(self):
         self.assertIn("/w/.prismor/policy.yaml", "\n".join(self.steps))

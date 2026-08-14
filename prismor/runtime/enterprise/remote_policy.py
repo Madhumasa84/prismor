@@ -268,10 +268,20 @@ def check_and_refresh(interval: Optional[float] = None) -> bool:
         latest_pause_sig is not None
         and str(latest_pause_sig) != str(_current_pause_sig())
     )
+    # settings.self_edit — whether a human may open a password-verified window
+    # in which the agent can edit local policy, and for how long. Same reasoning
+    # as the pause above: it can relax enforcement, so only its signature is
+    # served here and the record itself arrives signed.
+    latest_self_edit_sig = body.get("selfEditSig")
+    self_edit_changed = (
+        latest_self_edit_sig is not None
+        and str(latest_self_edit_sig) != str(_current_self_edit_sig())
+    )
     if (version_changed or profile_changed or capture_changed
             or repos_changed or controls_changed or rule_ex_changed
             or egress_changed or tool_denies_changed or subject_controls_changed
-            or device_mode_changed or tool_tags_changed or pause_changed):
+            or device_mode_changed or tool_tags_changed or pause_changed
+            or self_edit_changed):
         return fetch(force=True)
     return False
 
@@ -438,6 +448,44 @@ def remote_pause() -> Optional[Dict[str, Any]]:
         return pause
     except Exception:
         return None
+
+
+def remote_self_edit() -> Optional[Dict[str, Any]]:
+    """The org's self-edit settings for this device from the cached SIGNED
+    policy, or None when the org has no opinion.
+
+    ``{"enabled": bool, "window_seconds": int}`` — whether a human may open a
+    password-verified window in which the agent can edit local policy, and for
+    how long (see runtime/unlock.py).
+
+    Read through ``verify_and_load`` for the same reason as ``remote_pause``:
+    enabling self-edit or widening its window can only ever *relax*
+    enforcement, so an unsigned file must not be able to say anything about it.
+    A disable, being a tightening, is honored from any policy that verifies.
+    """
+    try:
+        pol = verify_and_load()
+        rec = ((pol or {}).get("settings") or {}).get("self_edit")
+        return rec if isinstance(rec, dict) else None
+    except Exception:
+        return None
+
+
+def _current_self_edit_sig() -> str:
+    """Signature of the cached policy's settings.self_edit, matching the
+    server's ``selfEditSig`` format (canonical JSON → sha256 → 16 hex; empty
+    when the org has no opinion) so the device re-pulls the moment an admin
+    changes the self-edit window from the console."""
+    try:
+        pol = verify_and_load()
+        rec = ((pol or {}).get("settings") or {}).get("self_edit")
+        if not isinstance(rec, dict) or not rec:
+            return ""
+        import hashlib
+        blob = json.dumps(rec, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
 
 
 def _current_egress_sig() -> str:

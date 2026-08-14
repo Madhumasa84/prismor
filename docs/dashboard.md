@@ -75,9 +75,25 @@ never leaves your machine.
 | `GET /api/supply-chain` | Supply-chain enforcement stats |
 | `GET /api/agents` | Agent registry merged with per-agent call stats |
 | `POST /api/agents/<name>` | Update per-agent controls: `{enabled?, mode?, iam_profile?}` |
+| `GET /api/policy` | Effective policy state: mode, blocking/total rule counts, `explicitSelection`, editability |
+| `GET/PUT /api/policy/egress` | Read / edit `settings.egress` (`{action: set|add|remove, …}`); hostnames are validated |
+| `PUT /api/policy/rules` | Toggle rule enable/mode from the Policy tab |
 
 If you run `dashboard` before installing hooks anywhere, it warns that no workspaces
 are registered yet — install hooks in a project first to collect data.
+
+### Policy tab
+
+Shows the **effective** state, not the static file: the mode chip reflects what
+actually blocks (an explicit-selection install shows *N blocking / M total*
+with per-rule blocks/reports pills), and the YAML editor edits the project
+layer through the same writer as `prismor allow`. A **Network egress** tab
+edits `settings.egress` (enable, mode, default verdict, allow/deny hosts)
+without hand-writing YAML. On an **org-managed** workspace every write control
+is disabled with a banner — the signed org bundle would overwrite local edits
+on the next pull, so the console (or `prismor exempt request`) is the path
+instead. All of these writes are also blocked for agents by the
+self-protection rules; the dashboard write API is one of the guarded routes.
 
 ### Agents tab
 

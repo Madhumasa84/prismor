@@ -68,6 +68,70 @@ class TestEnforcementFloor(unittest.TestCase):
         self.assertNotIn(noncore.id, _NON_OVERRIDABLE_RULE_IDS)
 
 
+class TestExplicitSelectionFloor(unittest.TestCase):
+    """`settings.selection: explicit` — written by `prismor setup` when the user
+    picks their blocking set rule by rule — makes the ordinary floor opt-in on
+    an unmanaged workspace. Self-protection and managed installs are unmoved."""
+
+    def _engine(self, yaml_text, managed=False):
+        import tempfile
+        from unittest import mock
+        d = Path(tempfile.mkdtemp())
+        p = d / "policy.yaml"
+        p.write_text(yaml_text)
+        with mock.patch(
+            "prismor.runtime.enterprise.workspace_scope.is_managed", return_value=managed
+        ):
+            return PolicyEngine(workspace=d, policy_path=p)
+
+    _EMPTY = ('version: "1.0"\nsettings:\n  selection: explicit\n'
+              "  default_mode: observe\nrules: []\n")
+
+    def test_unselected_floor_rule_observes(self):
+        eng = self._engine(self._EMPTY)
+        findings = eng.evaluate({"type": "shell", "command": "rm -rf /"}, index=0)
+        floor = [f for f in findings if f.get("ruleId") == "destructive-command"]
+        self.assertTrue(floor)
+        self.assertEqual(floor[0]["mode"], "observe")
+        self.assertIsNone(should_block(findings, {**PRE, "type": "shell"}))
+
+    def test_selected_floor_rule_blocks(self):
+        eng = self._engine(
+            'version: "1.0"\nsettings:\n  selection: explicit\n  default_mode: observe\n'
+            "rules:\n  - id: destructive-command\n    mode: enforce\n"
+        )
+        findings = eng.evaluate({"type": "shell", "command": "rm -rf /"}, index=0)
+        self.assertIsNotNone(should_block(findings, {**PRE, "type": "shell"}))
+
+    def test_managed_workspace_keeps_the_hard_floor(self):
+        eng = self._engine(self._EMPTY, managed=True)
+        findings = eng.evaluate({"type": "shell", "command": "rm -rf /"}, index=0)
+        floor = [f for f in findings if f.get("ruleId") == "destructive-command"]
+        self.assertEqual(floor[0]["mode"], "enforce")
+        self.assertIsNotNone(should_block(findings, {**PRE, "type": "shell"}))
+
+    def test_self_protection_blocks_with_nothing_selected(self):
+        eng = self._engine(self._EMPTY)
+        findings = eng.evaluate(
+            {"type": "shell", "command": "rm -rf ~/.prismor/audit"}, index=0
+        )
+        self.assertTrue([f for f in findings if f.get("ruleId") == "audit-trail-tampering"])
+        self.assertIsNotNone(should_block(findings, {**PRE, "type": "shell"}))
+
+    def test_definition_of_an_unselected_floor_rule_still_cannot_be_weakened(self):
+        # Unselecting lowers a rule to observe; it does not let an overlay
+        # disable the rule or blunt its patterns.
+        eng = self._engine(
+            'version: "1.0"\nsettings:\n  selection: explicit\n  default_mode: observe\n'
+            "rules:\n  - id: destructive-command\n    enabled: false\n"
+        )
+        findings = eng.evaluate({"type": "shell", "command": "rm -rf /"}, index=0)
+        self.assertTrue(
+            [f for f in findings if f.get("ruleId") == "destructive-command"],
+            "the rule must still fire and report, even unselected",
+        )
+
+
 class TestDeviceModeOverride(unittest.TestCase):
     """settings.device_mode is a per-device kill switch delivered in the signed
     policy (scoped server-side to the requesting device). It must win over

@@ -445,8 +445,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         if revoked:
             print("Enrolled — but the control plane REJECTED this device's key")
             print(f"  reason:     {revoked.get('reason') or 'rejected (401/403)'}")
-            print("  This device was likely revoked by an org admin. Local protection")
-            print("  still applies (last good policy). Re-link with: prismor enroll <token>")
+            # Be precise about what stops: once the revocation marker is set,
+            # workspace_scope resolves every workspace to local, so the engine
+            # no longer merges the org overlay at all. Saying "last good policy
+            # still applies" describes the unreachable-control-plane case, not
+            # this one, and overstates what is still protecting the machine.
+            print("  This device was removed or revoked by an org admin. Org policy no")
+            print("  longer applies here and nothing is reported to the org; the built-in")
+            print("  and project rules still run. Re-link with: prismor enroll <token>")
         elif verified.get("ok"):
             print("Enrolled and verified")
         elif "unreachable" in str(verified.get("error", "")):
@@ -555,6 +561,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     # ── pause / pause-hard / resume: suspend local ENFORCEMENT without ──────
     # uninstalling hooks or touching observe-mode screening/telemetry.
+    if args.command in ("unlock", "lock"):
+        raise SystemExit(_unlock_cmd(args, workspace))
+
     if args.command in ("pause", "pause-hard"):
         from prismor.runtime import pause as _pause
         hard = args.command == "pause-hard"
@@ -731,7 +740,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 return
             _print_findings(total_findings, engine=engine,
                             explain=args.explain, suggest=args.suggest_allowlist)
-            if any(f.get("action") == "block" for f in total_findings):
+            if any(_blocks(f) for f in total_findings):
                 raise SystemExit(2)
             raise SystemExit(1)
 
@@ -757,10 +766,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                         explain=args.explain, suggest=args.suggest_allowlist,
                         input_value=args.value)
 
-        # Exit 2 if any finding has action=block, 1 for warn-only, 0 for log-only.
-        if any(f.get("action") == "block" for f in findings):
+        # Exit 2 if a finding would actually block, 1 for warn-only, 0 for
+        # log-only — keyed on the effective verdict, so a CI gate reflects what
+        # this policy does rather than what its rules would like to do.
+        if any(_blocks(f) for f in findings):
             raise SystemExit(2)
-        if any(f.get("action") == "warn" for f in findings):
+        if any(_effective_verdict(f) == "WARN" for f in findings):
             raise SystemExit(1)
         return
 
@@ -1389,6 +1400,38 @@ def main(argv: Optional[List[str]] = None) -> None:
                 }
             }) + "\n")
 
+        # A self-edit block lifts inside a password-verified unlock window: a
+        # human ran `prismor unlock` and handed the agent a few minutes to fix
+        # the policy. It clears ONLY the self-protection rules — everything else
+        # blocks exactly as before — and records the use, so an unlocked window
+        # is auditable rather than a hole nobody can see afterwards.
+        if blocking is not None:
+            try:
+                from prismor.runtime.policy_engine import _SELF_PROTECTION_RULE_IDS
+                if str(blocking.get("ruleId") or "") in _SELF_PROTECTION_RULE_IDS:
+                    from prismor.runtime import unlock as _unlock
+                    if _unlock.is_open(workspace):
+                        _left = _unlock.remaining_seconds(workspace)
+                        sys.stderr.write(
+                            f"[prismor] self-edit allowed: unlock window open "
+                            f"({_left}s left, rule: {blocking.get('ruleId')})\n"
+                        )
+                        try:
+                            findings.append({
+                                "severity": "MEDIUM",
+                                "category": "security_bypass",
+                                "ruleId": "self-edit-under-unlock",
+                                "title": "Agent edited Prismor policy inside an unlock window",
+                                "evidence": str(blocking.get("evidence") or "")[:200],
+                                "mode": "observe",
+                                "action": "log",
+                            })
+                        except Exception:
+                            pass
+                        blocking = None
+            except Exception:
+                pass
+
         force_observe = args.mode == "observe" and os.environ.get("PRISMOR_LOCAL_DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
         if blocking is not None and not force_observe and _pstate is None:
             # R4 authorization verdict, driven by the surfaced enforce finding's
@@ -1667,7 +1710,13 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if cloak_flag is not None
                 else os.environ.get("PRISMOR_CLOAK", "").lower() in {"1", "true", "yes", "on"}
             )
-            run_non_interactive(target, mode=mode, agents=agents, cloak=cloak, scope=scope)
+            rules_str = getattr(args, "enforce_rules", None)
+            enforce_rules = [r.strip() for r in rules_str.split(",") if r.strip()] if rules_str else None
+            run_non_interactive(
+                target, mode=mode, agents=agents, cloak=cloak, scope=scope,
+                enforce_rules=enforce_rules,
+                recommended=bool(getattr(args, "recommended", False)),
+            )
         elif getattr(args, "scope", None) == "global":
             # Explicit `--scope global` skips the TUI scope step and guards the
             # whole machine directly — the recommended install for an enrolled
@@ -2301,6 +2350,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         parser.parse_args(["tags", "--help"])
         return
 
+    # ── allow ──────────────────────────────────────────────────────────
+    if args.command == "allow":
+        raise SystemExit(_allow_cmd(args, workspace))
+
     # ── policy subcommands ─────────────────────────────────────────────
     if args.command == "policy":
         if args.policy_command == "init":
@@ -2884,6 +2937,39 @@ def build_parser() -> argparse.ArgumentParser:
     hook_dispatch.add_argument("--mode", choices=["observe", "enforce"], default="observe")
 
     # ── policy ─────────────────────────────────────────────────────────
+    allow_parser = subparsers.add_parser(
+        "allow",
+        help="Make an exception to a rule that blocked you (narrowest by default)",
+    )
+    allow_parser.add_argument(
+        "rule_id", nargs="?",
+        help="Rule to make an exception for (shown in the block message)",
+    )
+    allow_parser.add_argument(
+        "--pattern",
+        help="Allow only what matches this literal/regex. Defaults to the text "
+             "of the most recent block for this rule",
+    )
+    allow_parser.add_argument(
+        "--expires", metavar="DURATION",
+        help="Make it temporary: 30m, 2h, 7d. Without this the exception is permanent",
+    )
+    allow_parser.add_argument(
+        "--observe", action="store_true",
+        help="Broader: keep the rule but stop it blocking (still reported)",
+    )
+    allow_parser.add_argument(
+        "--off", action="store_true",
+        help="Broadest: turn the rule off in this workspace (not even reported)",
+    )
+    allow_parser.add_argument("--reason", help="Why this exception is safe (recorded in the file)")
+    allow_parser.add_argument("--yes", action="store_true", help="Confirm a broad or floor-rule change")
+    allow_parser.add_argument("--list", action="store_true", dest="list_allows",
+                              help="Show the exceptions in this workspace")
+    allow_parser.add_argument("--undo", metavar="ALLOW_ID|PATTERN",
+                              help="Remove an exception — by entry id, or by one of its patterns")
+    allow_parser.add_argument("--workspace", help="Workspace path")
+
     policy_parser = subparsers.add_parser("policy", help="Manage Prismor policies")
     policy_sub = policy_parser.add_subparsers(dest="policy_command")
 
@@ -3035,6 +3121,25 @@ def build_parser() -> argparse.ArgumentParser:
     pause_hard_p = subparsers.add_parser("pause-hard", help="Pause local ENFORCEMENT indefinitely, until you run `prismor resume` (observe mode stays on)")
     pause_hard_p.add_argument("--reason", help="Why you're pausing — shown in the console next to the device")
     subparsers.add_parser("resume", help="Resume enforcement after `prismor pause` / `prismor pause-hard`")
+
+    unlock_p = subparsers.add_parser(
+        "unlock",
+        help="Open a short window in which the agent may edit Prismor's own policy "
+             "(asks for your unlock password)",
+    )
+    unlock_p.add_argument("--for", dest="duration", metavar="DURATION",
+                          help="How long to stay unlocked, e.g. 5m (default: 3m)")
+    unlock_p.add_argument("--status", action="store_true",
+                          help="Show whether a window is open and how long is left")
+    unlock_p.add_argument("--set-password", action="store_true", dest="set_password",
+                          help="Set or change the unlock password")
+    unlock_p.add_argument("--system-password", action="store_true", dest="system_password",
+                          help="With --set-password: verify against your operating system "
+                               "account password instead of storing a Prismor one")
+    unlock_p.add_argument("--forget", action="store_true",
+                          help="Remove the unlock password entirely (self-edit stays blocked)")
+    unlock_p.add_argument("--workspace", help="Workspace path")
+    subparsers.add_parser("lock", help="Close the self-edit window opened by `prismor unlock`")
 
     workspace_p = subparsers.add_parser("workspace", help="Show or set whether this workspace is org-managed or personal")
     workspace_p.add_argument("action", nargs="?", choices=["managed", "personal", "auto"], help="managed = report to org; personal = local-only; auto = let org patterns decide")
@@ -3289,6 +3394,19 @@ def build_parser() -> argparse.ArgumentParser:
              "(recommended for an enrolled device — no unguarded directories)",
     )
     setup_parser.add_argument(
+        "--enforce-rules",
+        default=None,
+        metavar="RULE[,RULE…]",
+        help="Which rules block, for --mode enforce (non-interactive only). "
+             "Enforce with no selection detects and reports but blocks nothing",
+    )
+    setup_parser.add_argument(
+        "--recommended",
+        action="store_true",
+        help="Select the recommended rule set (safety floor + default block categories) "
+             "for --mode enforce, instead of naming rules with --enforce-rules",
+    )
+    setup_parser.add_argument(
         "--cloak",
         dest="cloak",
         action="store_true",
@@ -3350,6 +3468,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _effective_verdict(finding: Dict[str, Any]) -> str:
+    """What this finding would actually do, as `check` should report it.
+
+    A rule's `action` is what it asks for; the finding's resolved `mode` is what
+    it gets. Those used to be the same thing in practice, so reporting `action`
+    was fine. They are not the same once a policy names its blocking set
+    explicitly (`prismor setup --mode enforce`): an unselected rule still
+    carries `action: block` while resolving to observe, and reporting BLOCK for
+    something that will only warn makes `prismor check` useless for the exact
+    question it exists to answer.
+    """
+    action = str(finding.get("action") or "warn").lower()
+    if action == "block" and str(finding.get("mode") or "").lower() != "enforce":
+        return "WARN"
+    return action.upper()
+
+
+def _blocks(finding: Dict[str, Any]) -> bool:
+    return _effective_verdict(finding) == "BLOCK"
+
+
 def _print_findings(
     findings: List[Dict[str, Any]],
     *,
@@ -3362,7 +3501,7 @@ def _print_findings(
     for f in findings:
         sev = f["severity"]
         color = _RED if sev == "CRITICAL" else _YELLOW if sev == "HIGH" else _DIM
-        action_label = f.get("action", "warn").upper()
+        action_label = _effective_verdict(f)
         print(_color(f"[{sev}]", color) + f" {f['title']}  " + _color(f"({action_label})", color))
         evidence = str(f.get("evidence", "")).split("\n", 1)[0]
         print(f"  rule: {f.get('ruleId', '?')}  evidence: {evidence}")
@@ -4251,6 +4390,215 @@ def _policy_test(workspace: Path, test_file: Optional[str] = None) -> None:
     print()
     if result["failed"]:
         raise SystemExit(1)
+
+
+def _unlock_cmd(args, workspace: Path) -> int:
+    """`prismor unlock` / `prismor lock` — the password-gated self-edit window."""
+    import getpass
+    from prismor.runtime import unlock as _unlock
+
+    if args.command == "lock":
+        if _unlock.close_window():
+            print("Locked — the agent can no longer edit Prismor's policy.")
+        else:
+            print("Already locked.")
+        return 0
+
+    if getattr(args, "status", False):
+        if not _unlock.is_configured():
+            print("No unlock password is set.  Set one with: prismor unlock --set-password")
+            return 0
+        if _unlock.org_self_edit_disabled():
+            print("Self-edit is disabled for this device by your organization.")
+            return 0
+        left = _unlock.remaining_seconds(workspace)
+        if left:
+            print(f"Unlocked — {left}s left.  Close it early with: prismor lock")
+        else:
+            print(f"Locked  (method: {_unlock.method()}).  Open a window with: prismor unlock")
+        return 0
+
+    if getattr(args, "forget", False):
+        if _unlock.clear_password():
+            print("Unlock password removed. Prismor's own policy can now only be edited by hand.")
+            return 0
+        print("No unlock password was set.")
+        return 0
+
+    # Every path below needs a person at the keyboard. Refuse rather than fall
+    # back to an env var: an env var an agent can set is not a password.
+    if not sys.stdin.isatty():
+        print("prismor unlock needs a terminal — run it yourself, not through an agent.")
+        return 1
+
+    if getattr(args, "set_password", False):
+        system = bool(getattr(args, "system_password", False))
+        if _unlock.is_configured():
+            current = getpass.getpass("Current Prismor unlock password: ")
+            ok, msg = _unlock.verify(current)
+            if not ok:
+                print(msg)
+                return 1
+        if system:
+            print("Unlock will ask for your operating system account password.")
+            probe = getpass.getpass("Confirm your system password: ")
+            if not _unlock._verify_system_password(probe):
+                print("That password did not verify against your system account. Nothing changed.")
+                return 1
+            _unlock.set_password("", system=True)
+        else:
+            print("This password lets the agent edit Prismor's policy for a few minutes at a time.")
+            print("Use something other than your login password.")
+            first = getpass.getpass("New Prismor unlock password: ")
+            if len(first) < 8:
+                print("Too short — use at least 8 characters. Nothing changed.")
+                return 1
+            second = getpass.getpass("Repeat it: ")
+            if first != second:
+                print("Those did not match. Nothing changed.")
+                return 1
+            _unlock.set_password(first)
+        print(f"Set. Open a window with: prismor unlock  (default {_unlock.DEFAULT_WINDOW_SECONDS // 60}m)")
+        return 0
+
+    if not _unlock.is_configured():
+        print("No unlock password is set, so the agent cannot edit Prismor's policy at all.")
+        print("Set one with:  prismor unlock --set-password")
+        return 1
+
+    if _unlock.org_self_edit_disabled():
+        print("Your organization has disabled agent self-edit on this device.")
+        print('To change a rule, ask an admin: prismor exempt request --reason "<why>"')
+        return 1
+
+    wait = _unlock.lockout_remaining()
+    if wait:
+        print(f"Too many failed attempts — try again in {wait}s.")
+        return 1
+
+    duration = None
+    if getattr(args, "duration", None):
+        from prismor.runtime import pause as _pause
+        try:
+            duration = _pause.parse_duration(args.duration)
+        except ValueError:
+            print(f"Could not read duration '{args.duration}'. Use e.g. 5m.")
+            return 2
+
+    ok, msg = _unlock.verify(getpass.getpass("Prismor unlock password: "))
+    if not ok:
+        print(msg)
+        return 1
+
+    by = ""
+    try:
+        from prismor.runtime.enterprise import identity as _identity
+        ident = _identity.load_identity() or {}
+        by = ident.get("user_id") or ident.get("label") or ""
+    except Exception:
+        pass
+
+    rec = _unlock.open_window(duration_seconds=duration, workspace=workspace, by=by)
+    left = _unlock.remaining_seconds(workspace)
+    print(f"Unlocked for {left}s — the agent may edit policy in {workspace} until {rec['until']}.")
+    print("Close it early with: prismor lock")
+    return 0
+
+
+def _allow_cmd(args, workspace: Path) -> int:
+    """`prismor allow` — write a policy exception, narrowest rung by default."""
+    from prismor.runtime import allow as _allow
+
+    if getattr(args, "list_allows", False):
+        entries = _allow.list_allows(workspace)
+        if not entries:
+            print("No exceptions in this workspace.")
+            return 0
+        print(f"Exceptions in {_allow.policy_path(workspace)}:\n")
+        for e in entries:
+            expiry = f"  (expires {e['expires']})" if e.get("expires") else ""
+            print(f"  {e['id']}{expiry}")
+            print(f"    rules:    {', '.join(e.get('rule_ids') or [])}")
+            print(f"    patterns: {', '.join(e.get('patterns') or [])}")
+            if e.get("reason"):
+                print(f"    reason:   {e['reason']}")
+        print("\nRemove one with: prismor allow --undo <id>")
+        return 0
+
+    if getattr(args, "undo", None):
+        if _allow.undo(workspace, args.undo):
+            print(f"Removed {args.undo}.")
+            return 0
+        print(f"No exception matching '{args.undo}' — try an entry id or one of its "
+              "patterns. See: prismor allow --list")
+        return 1
+
+    rule_id = (getattr(args, "rule_id", None) or "").strip()
+    if not rule_id:
+        print("Which rule? The block message names it, e.g:")
+        print("  prismor allow secret-exfiltration --pattern '<literal>'")
+        print("  prismor allow --list")
+        return 2
+
+    if args.off:
+        scope = "off"
+    elif args.observe:
+        scope = "observe"
+    else:
+        scope = "pattern"
+
+    engine = PolicyEngine(workspace=workspace)
+    refusal = _allow.check_allowed(
+        rule_id,
+        scope=scope,
+        workspace=workspace,
+        confirmed=bool(args.yes),
+        explicit_selection=bool(getattr(engine, "explicit_selection", False)),
+    )
+    if refusal:
+        print(refusal)
+        return 1
+
+    if scope == "observe":
+        _allow.set_rule_mode(workspace, rule_id, "observe")
+        print(f"{rule_id} will report but not block in this workspace.")
+        return 0
+
+    if scope == "off":
+        _allow.set_rule_enabled(workspace, rule_id, False)
+        print(f"{rule_id} is off in this workspace — it will not be reported either.")
+        return 0
+
+    pattern = args.pattern
+    if not pattern:
+        # Fill in from the block that just happened, so the user does not have
+        # to retype the command that failed.
+        evidence = _allow.last_evidence_for_rule(workspace, rule_id)
+        pattern = _allow.literal_pattern(evidence or "")
+        if not pattern:
+            print(f"No recent {rule_id} block to copy a pattern from.")
+            print(f"Say what to allow:  prismor allow {rule_id} --pattern '<literal>'")
+            return 2
+        print(f"Using the last {rule_id} block as the pattern:  {pattern}")
+
+    expires_seconds = None
+    if getattr(args, "expires", None):
+        expires_seconds = _allow.parse_duration(args.expires)
+        if expires_seconds is None:
+            print(f"Could not read --expires '{args.expires}'. Use 30m, 2h or 7d.")
+            return 2
+
+    entry = _allow.add_allowlist(
+        workspace, rule_id, pattern,
+        reason=getattr(args, "reason", "") or "",
+        expires_seconds=expires_seconds,
+    )
+    window = f" until {entry['expires']}" if entry.get("expires") else ""
+    print(f"Added {entry['id']}{window} — {rule_id} will not block what matches:")
+    print(f"  {pattern}")
+    print("\nCheck it:   prismor check '<your command>'")
+    print(f"Undo it:    prismor allow --undo {entry['id']}")
+    return 0
 
 
 def _policy_show(workspace: Path) -> None:
