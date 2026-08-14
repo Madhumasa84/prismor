@@ -36,6 +36,22 @@ Most-specific wins for non-floor rules. The floor (`_NON_OVERRIDABLE_RULE_IDS` +
 core block categories) survives every layer — an exemption literally cannot let
 `rm -rf /` or secret exfil through.
 
+**One deliberate exception:** an *unmanaged* workspace whose policy was written
+by `prismor setup` in enforce mode carries `settings.selection: explicit` — the
+user chose their blocking set rule-by-rule, so an unselected floor rule reports
+instead of blocking there. The floor's *definitions* still cannot be weakened
+(disable/patterns/action edits are ignored), the setting is stripped if it
+arrives via a signed org bundle, and enrolled/org-managed devices always keep
+the full blocking floor. Prismor's **self-protection rules**
+(`agent-config-tampering`, `prismor-self-edit`, `audit-trail-tampering`,
+`memory-integrity-mismatch`) are never selectable and force-enforce in every
+configuration — they are what keeps the selection itself honest. The only
+sanctioned relaxation is the human-opened, password-gated
+[`prismor unlock` window](cli-reference.md#making-exceptions), during which an
+agent may edit policy (fully logged) but still cannot touch the self-protection
+rules or the unlock credential. Org admins can disable or cap that window per
+device from the console; the setting rides the signed bundle.
+
 ## The request → grant flow
 
 1. **Dev requests** (in the repo): `prismor exempt request --reason "deploy.sh uses curl|sh"`.

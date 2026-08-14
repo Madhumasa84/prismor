@@ -88,6 +88,7 @@ For the Skill, curl, and git-clone alternatives, plus PEP 668 systems and secret
 - 🎯 [Scoped Agent](docs/scoped-agent.md) synthesizes minimal, task-specific rules per session so an injected pivot off-task gets blocked
 - 🧬 [Learning](docs/learning.md) mines session history to propose new rules, flag false positives, and detect evasion
 - ⚖️ [Layered Policy & Exemptions](docs/policy-layers-and-exemptions.md) covers per-rule observe/enforce, the non-overridable floor, and admin-granted, time-boxed exemptions across org / project / repo layers
+- 🔐 [Explicit enforce selection & the unlock window](docs/cli-reference.md#choosing-what-blocks) — enforce setup starts with nothing blocking and you pick the set; `prismor allow` makes narrow exceptions, and `prismor unlock` opens a password-gated, time-boxed window in which an agent may edit policy (never the self-protection rules that guard Prismor itself)
 - 📡 [Live Telemetry](docs/live-telemetry.md) covers the optional enterprise control-plane link — device enrollment, signed remote policy, and redacted telemetry streamed to a self-hosted org dashboard
 - 📊 [Dashboard](docs/dashboard.md) covers the terminal and local web dashboards plus session forensics, with `prismor tokens` breaking down where a session's context and token spend actually went
 - 🩺 [Health and Recovery](docs/cli-reference.md) — `prismor doctor` health-checks every subsystem (hooks, policy signature, enrollment, telemetry sink, chain state), and `prismor pause` / `pause-hard` suspends *enforcement only* for a human during an incident while observe-mode logging keeps running
@@ -131,6 +132,8 @@ rules:
 ```
 
 Policy is authoritative: a rule set to `enforce` blocks **regardless of how the hook was installed** (`--mode`), so an admin who flips a rule to enforce via the [control plane](docs/live-telemetry.md) blocks even on observe-installed devices. See [Layered Policy & Exemptions](docs/policy-layers-and-exemptions.md) for org / project / repo precedence and the non-overridable floor.
+
+`prismor setup` makes the choice explicit rather than implied: an **observe** install ships with the defaults on, while an **enforce** install starts with *nothing selected* and asks you to pick what blocks (the safety floor is pre-marked *recommended* — press `a` to take it). Your selection is written to `.prismor/policy.yaml` as `settings.selection: explicit` plus one line per rule, so what blocks is readable in the file. When a rule then blocks something legitimate, the deny message prints the exact `prismor allow <rule> --pattern '<literal>'` that fixes it — for the human to run; agents are stopped from editing Prismor's own config by always-on self-protection rules, unless the human opens a short password-gated window with `prismor unlock`. See [Choosing what blocks](docs/cli-reference.md#choosing-what-blocks) and [Making exceptions](docs/cli-reference.md#making-exceptions).
 
 The install flag still sets the starting posture, and an observe install combined with `PRISMOR_LOCAL_DRY_RUN=1` acts as a local dry-run kill-switch that suppresses all blocking:
 

@@ -25,7 +25,7 @@ unchanged and prints a migration notice. Use `prismor`.
 
 | Command | What it does | Deep dive |
 |---|---|---|
-| `prismor setup` | Interactive 4-step onboarding wizard: pick mode, select agents, enable cloaking, choose install scope. | [Onboarding](#onboarding--lifecycle) |
+| `prismor setup` | Interactive onboarding wizard: pick mode, choose which rules block, select agents, enable cloaking, choose install scope, set the unlock password. | [Onboarding](#onboarding--lifecycle) |
 | `prismor status` | One-shot health check: workspace, hooks, mode, cloak, latest session, next action. | [Dashboard & sessions](dashboard.md) |
 | `prismor audit` | Full security-posture audit across every subsystem. `--fix` auto-remediates. | [Prismor](prismor-runtime.md#security-audit) |
 | `prismor --help` | The full command map. | — |
@@ -38,7 +38,7 @@ unchanged and prints a migration notice. Use `prismor`.
 prismor
 │
 ├─ Onboarding & lifecycle
-│   ├─ setup                  Interactive onboarding wizard (4-step TUI)
+│   ├─ setup                  Interactive onboarding wizard (TUI)
 │   ├─ install-hooks          Wire Prismor hooks into an agent/IDE
 │   ├─ uninstall-hooks        Remove hooks
 │   ├─ update                 Self-update check / upgrade

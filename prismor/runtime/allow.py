@@ -158,9 +158,11 @@ def check_allowed(
         return (
             f"{rule_id} is one of the rules Prismor uses to guard itself, so it "
             "cannot be relaxed from here — an agent that could would be able to "
-            "undo every other rule too.\n"
-            "If this is blocking legitimate work, edit the file yourself: "
-            f"{policy_path(workspace)}"
+            "undo every other rule too. Policy-file overrides on it are ignored "
+            "for the same reason.\n"
+            "If it is blocking legitimate work: run the command yourself in your "
+            "own terminal (Prismor governs agent tool calls, not you), or open a "
+            "short agent self-edit window with: prismor unlock"
         )
 
     try:
