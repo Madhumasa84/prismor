@@ -255,6 +255,13 @@ def _run_memory(args) -> None:
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # `--scope user` and `--scope global` are the same thing (hooks in $HOME);
+    # both spellings are accepted everywhere so users need not remember which
+    # command uses which. Setup/iam speak 'global', install-hooks/cloak 'user'.
+    if getattr(args, 'scope', None) == 'user' and args.command in ('setup', 'iam'):
+        args.scope = 'global'
+    elif getattr(args, 'scope', None) == 'global' and args.command in ('install-hooks', 'uninstall-hooks', 'cloak'):
+        args.scope = 'user'
 
     if args.command is None:
         parser.print_help()
@@ -384,8 +391,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         cloak_secret_count = 0
         try:
             from prismor.runtime.cloaking import status as _cloak_status_fn, list_secrets as _list_secrets
-            cinfo = _cloak_status_fn(workspace=workspace, scope="project")
-            cloak_installed = bool(cinfo.get("installed"))
+            cloak_installed = any(_cloak_status_fn(workspace=workspace, scope=sc).get("installed")
+                                  for sc in ("project", "user"))
             cloak_secret_count = len(_list_secrets())
         except Exception:
             pass
@@ -654,12 +661,12 @@ def main(argv: Optional[List[str]] = None) -> None:
             print(f"  org:        {ident.get('org_name') or ident.get('org_id')}")
             print("  → Org policy applies and redacted telemetry is reported to your org.")
             if reason in ("default_all", "opt_in"):
-                print("  → Personal repo? Run `prismor scope personal` to keep it local-only.")
+                print("  → Personal repo? Run `prismor workspace personal` to keep it local-only.")
         else:
             why = {"opt_out": "you marked it personal", "personal": "not an org-claimed repo"}.get(reason, reason)
             print(f"  scope:      personal / local-only — {why}")
             print("  → Local protection is active, but NOTHING is reported to your org")
-            print("    and no org policy applies. Use `prismor scope managed` to opt in.")
+            print("    and no org policy applies. Use `prismor workspace managed` to opt in.")
         pats = _scope.org_managed_patterns()
         if pats:
             print(f"  org claims: {', '.join(pats)}")
@@ -1133,11 +1140,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     # ── sessions ───────────────────────────────────────────────────────
     if args.command == "sessions":
         if getattr(args, "global_view", False):
-            sessions = []
-            for ws in list_registered_workspaces():
-                for s in list_sessions(ws, args.limit):
-                    s["_workspace"] = str(ws)
-                    sessions.append(s)
+            # One shared DB: a single machine-wide query, labelled per session.
+            sessions = list_sessions(workspace, args.limit, all_workspaces=True)
+            for s in sessions:
+                s["_workspace"] = s.get("workspacePath") or ""
         else:
             sessions = list_sessions(workspace, args.limit)
         if getattr(args, "findings_only", False):
@@ -1184,6 +1190,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         register_workspace(workspace)
         for item in results:
             print(f"Installed {item['agent']} hooks at {item['configPath']}")
+        _print_codex_trust_note([item["agent"] for item in results])
+        _warn_other_scope_hooks(workspace, args.scope, [item["agent"] for item in results], installed=True)
         return
 
     # ── uninstall-hooks ────────────────────────────────────────────────
@@ -1204,6 +1212,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     )
             else:
                 print(f"No Prismor hooks found for {item['agent']} at {item['configPath']}")
+        _warn_other_scope_hooks(workspace, args.scope, [item["agent"] for item in results], installed=False)
         return
 
     # ── mcp-gateway (single MCP connector for all downstream servers) ──
@@ -1218,9 +1227,17 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     # ── hook-dispatch (called by IDE hooks) ────────────────────────────
     if args.command == "hook-dispatch":
+        payload = json.loads(sys.stdin.read() or "{}")
+        # A global (~/.claude) hook carries no --workspace: attribute the call
+        # to the repo the agent is actually running in (payload cwd → git root),
+        # not to whichever directory `setup --scope global` happened to run
+        # from. An explicit --workspace / PRISMOR_WORKSPACE still wins.
+        if not ws_value:
+            _cwd = payload.get("cwd") or payload.get("workspace") or (payload.get("workspace_roots") or [None])[0]
+            if isinstance(_cwd, str) and _cwd:
+                workspace = _git_root_or_self(Path(_cwd))
         register_workspace(workspace)
 
-        payload = json.loads(sys.stdin.read() or "{}")
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
         _agent_event = str(event.get("agent_event") or "")
@@ -1286,7 +1303,12 @@ def main(argv: Optional[List[str]] = None) -> None:
         # (payload / normalized / event were read at the top of hook-dispatch,
         # before the pause check, so the paused path can gate on the event type.)
 
-        # ── Scoped agent: synthesize rules on first prompt ────────────
+        # ── Scoped agent: synthesize rules on EVERY prompt, widening ─────
+        # The first prompt sets the scope; each later prompt re-derives rules
+        # for what it asks and unions them in. A session that opened with
+        # "what does this repo do?" is no longer Read-only forever once the
+        # user says "now fix it". (Narrowing is the operator's job: IAM or the
+        # dashboard's per-session denies, which merge_scoped_rules preserves.)
         if event.get("agent_event") == "UserPromptSubmit":
             try:
                 from prismor.runtime.scoped_agent import (
@@ -1294,9 +1316,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                     synthesize_scoped_rules as _synthesize_scoped,
                     save_scoped_rules as _save_scoped,
                     format_scoped_rules_box as _format_scoped_box,
+                    merge_scoped_rules as _merge_scoped,
+                    apply_agent_invariants as _agent_invariants,
                 )
                 _existing_scoped = _load_scoped(workspace, normalized["sessionId"])
-                if _existing_scoped is None and event.get("prompt"):
+                _sc = _existing_scoped or {}
+                if event.get("prompt") and not _sc.get("paused") and not _sc.get("operator_edited"):
                     _available_tools = ["Bash", "Read", "Edit", "MultiEdit", "Write", "WebFetch", "WebSearch"]
                     _scoped_rules = _synthesize_scoped(
                         goal=event["prompt"],
@@ -1304,6 +1329,9 @@ def main(argv: Optional[List[str]] = None) -> None:
                         workspace=workspace,
                     )
                     if _scoped_rules:
+                        _scoped_rules = _agent_invariants(_scoped_rules, args.agent)
+                        if _existing_scoped is not None:
+                            _scoped_rules = _merge_scoped(_existing_scoped, _scoped_rules)
                         _save_scoped(workspace, normalized["sessionId"], _scoped_rules)
                         sys.stderr.write(_format_scoped_box(_scoped_rules) + "\n")
             except Exception as _scoped_exc:
@@ -2391,11 +2419,31 @@ def main(argv: Optional[List[str]] = None) -> None:
     if args.command == "scope":
         from prismor.runtime.scoped_agent import (
             load_scoped_rules, clear_scoped_rules,
-            list_scoped_sessions, format_scoped_rules_box,
+            list_scoped_sessions, format_scoped_rules_box, resolve_session_ref,
         )
+        from datetime import datetime as _dt
+
+        def _print_scoped_list(sessions):
+            for s in sessions:
+                tools = ", ".join(s["rules"].get("allowed_tools", []))
+                when = _dt.fromtimestamp(s["updated"]).strftime("%b %d %H:%M")
+                flags = []
+                if s["rules"].get("paused"):
+                    flags.append("paused")
+                if s["rules"].get("operator_edited"):
+                    flags.append("hand-edited")
+                if s["rules"].get("prompts_seen"):
+                    flags.append(f"{s['rules']['prompts_seen']} prompts")
+                extra = f"  ({'; '.join(flags)})" if flags else ""
+                print(f"  {when}  {s['session_id']}  tools: [{tools}]{extra}")
+
         sub = getattr(args, "scope_command", None)
+        if getattr(args, "session_id", None):
+            args.session_id = resolve_session_ref(workspace, args.session_id)
+        if getattr(args, "session_id_pos", None):
+            args.session_id_pos = resolve_session_ref(workspace, args.session_id_pos)
         if sub == "show":
-            sid = getattr(args, "session_id", None)
+            sid = getattr(args, "session_id", None) or getattr(args, "session_id_pos", None)
             if sid:
                 rules = load_scoped_rules(workspace, sid)
                 if rules is None:
@@ -2409,21 +2457,17 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if not sessions:
                     print("No active scoped sessions.")
                     return
-                print("Showing all scoped sessions — pass an id for full rules: prismor scope show <session-id>")
-                for s in sessions:
-                    tools = ", ".join(s["rules"].get("allowed_tools", []))
-                    print(f"  {s['session_id']}  tools: [{tools}]")
+                print("Showing all scoped sessions (newest first) — full rules: prismor scope show <session-id|latest>")
+                _print_scoped_list(sessions)
             return
         if sub == "list":
             sessions = list_scoped_sessions(workspace)
             if not sessions:
                 print("No active scoped sessions.")
                 return
-            print(f"  {_color('PRISMOR', _BOLD)}  scoped sessions")
+            print(f"  {_color('PRISMOR', _BOLD)}  scoped sessions  (newest first; `latest` or a unique id prefix works everywhere)")
             print(f"  {_color('─' * 50, _DIM)}")
-            for s in sessions:
-                tools = ", ".join(s["rules"].get("allowed_tools", []))
-                print(f"  {s['session_id']}  tools: [{tools}]")
+            _print_scoped_list(sessions)
             return
         if sub == "edit":
             sid = args.session_id
@@ -2433,7 +2477,21 @@ def main(argv: Optional[List[str]] = None) -> None:
                 sys.stderr.write(f"No scoped rules for session '{sid}'\n")
                 raise SystemExit(1)
             editor = os.environ.get("EDITOR", "vi")
+            _before = path.read_text(encoding="utf-8")
             subprocess.run([editor, str(path)])
+            try:
+                _after = path.read_text(encoding="utf-8")
+                _rules = json.loads(_after)
+            except (OSError, json.JSONDecodeError) as _exc:
+                sys.stderr.write(f"prismor scope edit: {path} is not valid JSON after editing ({_exc}). "
+                                 f"Restoring the previous rules.\n")
+                path.write_text(_before, encoding="utf-8")
+                raise SystemExit(1)
+            if _after != _before:
+                # A hand-edited scope is authoritative: stop auto-widening it.
+                _rules["operator_edited"] = True
+                path.write_text(json.dumps(_rules, indent=2) + "\n", encoding="utf-8")
+                print(_color("Saved", _GREEN) + f" scoped rules for session '{sid}' (auto-widening off for this session)")
             return
         if sub == "clear":
             sid = args.session_id
@@ -2444,11 +2502,12 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
         # No action → print usage instead of dumping every session's full box.
         sys.stderr.write(
-            "Usage: prismor scope {list|show|edit|clear} [session-id]\n"
-            "  list             List active scoped sessions (compact)\n"
+            "Usage: prismor scope {list|show|edit|clear} [session-id|latest]\n"
+            "  list             List active scoped sessions (newest first)\n"
             "  show [session]   Show rules — compact for all, full for one session\n"
-            "  edit <session>   Edit a session's scoped rules in $EDITOR\n"
+            "  edit <session>   Edit a session's scoped rules in $EDITOR (turns off auto-widening)\n"
             "  clear <session>  Remove a session's scoped rules\n"
+            "  A session may be given as `latest` or any unique prefix of its id.\n"
         )
         raise SystemExit(2)
 
@@ -2536,7 +2595,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     if args.command == "update":
-        import subprocess
         from prismor.runtime import __version__ as _current
         from prismor.runtime.version_check import fetch_latest, record_latest
         check_only = getattr(args, "check_only", False)
@@ -2879,7 +2937,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser("install-hooks", help="Install IDE hooks for real-time monitoring")
     install_parser.add_argument("--workspace", help="Workspace path")
     install_parser.add_argument("--agent", choices=["claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro", "crush", "openhands", "qwen", "continue", "goose", "all"], required=True, help="Which agent/IDE")
-    install_parser.add_argument("--scope", choices=["project", "user"], default="project", help="Hook scope (default: project)")
+    install_parser.add_argument("--scope", choices=["project", "user", "global"], default="project", help="Hook scope (default: project)")
     install_parser.add_argument("--mode", choices=["observe", "enforce"], default="observe", help="observe=log only, enforce=block dangerous actions")
 
     # ── uninstall-hooks ────────────────────────────────────────────────
@@ -2893,7 +2951,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall_parser.add_argument("--workspace", help="Workspace path")
     uninstall_parser.add_argument("--agent", choices=["claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro", "crush", "openhands", "qwen", "continue", "goose", "all"], required=True, help="Which agent/IDE")
-    uninstall_parser.add_argument("--scope", choices=["project", "user"], default="project", help="Hook scope")
+    uninstall_parser.add_argument("--scope", choices=["project", "user", "global"], default="project", help="Hook scope")
 
     # ── mcp-gateway ────────────────────────────────────────────────────
     gw_parser = subparsers.add_parser(
@@ -3170,7 +3228,7 @@ def build_parser() -> argparse.ArgumentParser:
     t_install.add_argument("--agent", choices=["claude", "hermes", "all"], default="claude",
                            help="Agent to install cloaking for (default: claude)")
     t_install.add_argument("--workspace", help="Workspace path")
-    t_install.add_argument("--scope", choices=["project", "user"], default="project",
+    t_install.add_argument("--scope", choices=["project", "user", "global"], default="project",
                            help="Hook scope (default: project)")
     t_install.add_argument("--no-userprompt-guard", action="store_true",
                            help="Skip the UserPromptSubmit soft-block hook (use a clipboard filter instead)")
@@ -3188,7 +3246,7 @@ def build_parser() -> argparse.ArgumentParser:
     t_uninstall.add_argument("--agent", choices=["claude", "hermes", "all"], default="claude",
                              help="Agent to remove cloaking for (default: claude)")
     t_uninstall.add_argument("--workspace", help="Workspace path")
-    t_uninstall.add_argument("--scope", choices=["project", "user"], default="project",
+    t_uninstall.add_argument("--scope", choices=["project", "user", "global"], default="project",
                              help="Hook scope (default: project)")
 
     t_add = cloak_sub.add_parser("add", help="Register one secret or import all entries from a dotenv file")
@@ -3205,7 +3263,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     t_status = cloak_sub.add_parser("status", help="Show whether cloaking hooks are installed")
     t_status.add_argument("--workspace", help="Workspace path")
-    t_status.add_argument("--scope", choices=["project", "user"], default="project",
+    t_status.add_argument("--scope", choices=["project", "user", "global"], default="project",
                           help="Hook scope (default: project)")
 
     t_run = cloak_sub.add_parser(
@@ -3253,13 +3311,14 @@ def build_parser() -> argparse.ArgumentParser:
     scope_sub = scope_parser.add_subparsers(dest="scope_command")
 
     scope_show = scope_sub.add_parser("show", help="Show active scoped rules for a session")
-    scope_show.add_argument("--session-id", help="Session ID (default: list all active)")
+    scope_show.add_argument("session_id_pos", nargs="?", metavar="SESSION_ID", help="Session ID (default: list all active)")
+    scope_show.add_argument("--session-id", dest="session_id", help=argparse.SUPPRESS)
 
     scope_edit = scope_sub.add_parser("edit", help="Edit scoped rules in $EDITOR")
-    scope_edit.add_argument("session_id", help="Session ID to edit")
+    scope_edit.add_argument("session_id", help="Session ID to edit (or `latest`, or a unique prefix)")
 
     scope_clear = scope_sub.add_parser("clear", help="Remove scoped rules for a session")
-    scope_clear.add_argument("session_id", help="Session ID to clear")
+    scope_clear.add_argument("session_id", help="Session ID to clear (or `latest`, or a unique prefix)")
 
     scope_sub.add_parser("list", help="List all sessions with active scoped rules")
 
@@ -3293,7 +3352,7 @@ def build_parser() -> argparse.ArgumentParser:
     iam_init = iam_subs.add_parser("init", help="Create a starter iam.yaml config")
     iam_init.add_argument(
         "--scope",
-        choices=["global", "project"],
+        choices=["global", "project", "user"],
         default="global",
         help="Write to ~/.prismor/iam.yaml (global) or .prismor/iam.yaml (project)",
     )
@@ -3388,7 +3447,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup_parser.add_argument(
         "--scope",
-        choices=["project", "global"],
+        choices=["project", "global", "user"],
         default=None,
         help="project = hooks in ./.claude only; global = ~/.claude, guards every workspace "
              "(recommended for an enrolled device — no unguarded directories)",
@@ -3532,6 +3591,65 @@ def _truncate_str(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _print_codex_trust_note(agents: List[str]) -> None:
+    """Codex silently ignores hooks it has not been told to trust — the hook file
+    is written, `status` says installed, and nothing ever fires. Say so."""
+    if "codex" not in agents:
+        return
+    print("  Codex runs hooks only after you trust them: open the Codex TUI once in this "
+          "workspace and accept the hook-trust prompt, or for headless runs pass "
+          "`codex exec --dangerously-bypass-hook-trust`.")
+
+
+def _warn_other_scope_hooks(workspace: Path, scope: str, agents: List[str], *, installed: bool) -> None:
+    """After (un)installing at one scope, point out hooks for the same agents at
+    the OTHER scope: both dispatch, so an install doubles screening and an
+    uninstall leaves screening on."""
+    from prismor.runtime.hooks import hook_installed as _hook_installed
+    other = "project" if scope != "project" else "global"
+    still = [a for a in agents if _hook_installed(a, other, workspace)]
+    if not still:
+        return
+    if installed:
+        print(f"  Note: {', '.join(still)} also hooked at {other} scope — each tool call is now screened "
+              f"twice. Remove one: prismor uninstall-hooks --agent {still[0]} --scope {other}")
+    else:
+        print(f"  Note: {', '.join(still)} still hooked at {other} scope — Prismor keeps screening this "
+              f"workspace. To stop: prismor uninstall-hooks --agent {still[0]} --scope {other}")
+
+
+def _hooks_by_scope(workspace: Path) -> Dict[str, Dict[str, Optional[str]]]:
+    """{scope: {agent: mode}} for every agent hooked at project or global scope."""
+    from prismor.runtime.hooks import _config_path as _hook_cfg_path
+    out: Dict[str, Dict[str, Optional[str]]] = {"project": {}, "global": {}}
+    for scope_name in ("project", "global"):
+        for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
+            try:
+                hook_path = _hook_cfg_path(agent_name, scope_name, workspace)
+                if not hook_path.exists():
+                    continue
+                content = hook_path.read_text()
+            except Exception:
+                continue
+            if "hook-dispatch" not in content:
+                continue
+            out[scope_name][agent_name] = ("enforce" if "--mode enforce" in content
+                                           else "observe" if "--mode observe" in content else None)
+    return out
+
+
+def _git_root_or_self(path: Path) -> Path:
+    """Nearest ancestor containing .git (the repo root), else the path itself."""
+    try:
+        p = path.resolve()
+    except OSError:
+        return path
+    for cand in (p, *p.parents):
+        if (cand / ".git").exists():
+            return cand
+    return p
+
+
 def _find_hook_config(agent: str, workspace: Path) -> Path:
     """Find the hook config file for an agent."""
     if agent == "claude":
@@ -3632,7 +3750,7 @@ def _print_dashboard(days: int = 7) -> None:
 
     if not workspaces:
         print(f"  {_color('No registered workspaces found.', _DIM)}")
-        print(f"  Run {_color('prismor install-hooks --agent all --mode enforce', _CYAN)} in a project to register it.")
+        print(f"  Run {_color('prismor setup', _CYAN)} in a project to register it.")
         print()
         return
 
@@ -3657,19 +3775,14 @@ def _print_dashboard(days: int = 7) -> None:
         risk_color = _RED if latest_risk >= 50 else _YELLOW if latest_risk >= 20 else _GREEN
 
         mode = ""
-        for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
-            hook_path = _find_hook_config(agent_name, ws)
-            if hook_path and hook_path.exists():
-                try:
-                    content = hook_path.read_text()
-                    if "prismor" in content.lower() or "prismor" in content.lower():
-                        if "--mode enforce" in content:
-                            mode = "enforce"
-                        elif "--mode observe" in content:
-                            mode = "observe"
-                        break
-                except Exception:
-                    pass
+        _hs = _hooks_by_scope(ws)
+        _modes = list(_hs["project"].values()) + list(_hs["global"].values())
+        if "enforce" in _modes:
+            mode = "enforce"
+        elif "observe" in _modes:
+            mode = "observe"
+        elif _modes:
+            mode = "hooked"
 
         # Per-workspace sparkline for the days window
         ws_day_counts: List[int] = [0] * days
@@ -3956,20 +4069,32 @@ def _run_doctor(workspace: Path, as_json: bool = False) -> None:
     def add(state: str, name: str, detail: str) -> None:
         checks.append({"state": state, "name": name, "detail": detail})
 
-    # 1. IDE hooks — per-agent config with the dispatcher wired in.
-    agents_with_hooks: List[str] = []
-    for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
-        hook_path = _find_hook_config(agent_name, workspace)
-        if hook_path and hook_path.exists():
-            try:
-                if "prismor" in hook_path.read_text().lower() or "prismor" in hook_path.read_text().lower():
-                    agents_with_hooks.append(agent_name)
-            except Exception:
-                pass
+    # 1. IDE hooks — per-agent config with the dispatcher wired in, at either
+    #    scope (a ~/.claude hook screens this workspace just like a project one).
+    from prismor.runtime.hooks import hook_installed as _hook_installed
+    _hooked: Dict[str, List[str]] = {"project": [], "global": []}
+    for scope_name in ("project", "global"):
+        for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
+            if _hook_installed(agent_name, scope_name, workspace):
+                _hooked[scope_name].append(agent_name)
+    agents_with_hooks = sorted(set(_hooked["project"]) | set(_hooked["global"]))
     if agents_with_hooks:
-        add("ok", "hooks", f"installed for {', '.join(agents_with_hooks)}")
+        _parts = []
+        if _hooked["project"]:
+            _parts.append(f"project: {', '.join(_hooked['project'])}")
+        if _hooked["global"]:
+            _parts.append(f"global: {', '.join(_hooked['global'])}")
+        _dup = sorted(set(_hooked["project"]) & set(_hooked["global"]))
+        if _dup:
+            add("warn", "hooks", f"{' · '.join(_parts)} — {', '.join(_dup)} at both scopes (double dispatch); "
+                                 f"remove one with prismor uninstall-hooks --scope project|global")
+        else:
+            add("ok", "hooks", f"installed ({' · '.join(_parts)})")
     else:
         add("warn", "hooks", "no IDE hooks installed (run `prismor install-hooks`; SDK adapters are unaffected)")
+    if "codex" in agents_with_hooks:
+        add("warn", "codex trust", "Codex only runs hooks it has been told to trust: accept the hook-trust prompt "
+                                   "in the Codex TUI once, or pass --dangerously-bypass-hook-trust to `codex exec`")
 
     # 2. Policy engine loads.
     try:
@@ -4173,28 +4298,57 @@ def _print_status_overview(workspace: Path) -> None:
     print()
     print(f"  {_color('Workspace:', _GREEN)}   {ws_display}")
 
-    # Hooks + mode
-    agents_with_hooks: List[str] = []
-    mode: Optional[str] = None
-    for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
-        hook_path = _find_hook_config(agent_name, workspace)
-        if hook_path and hook_path.exists():
+    # Hooks + mode — at BOTH scopes. A global (~/.claude) hook screens this
+    # workspace just as much as a project one; reporting "not installed" when
+    # only the global hook exists sent people to install a second, project
+    # hook on top and every tool call was then evaluated twice.
+    from prismor.runtime.hooks import _config_path as _hook_cfg_path
+    hooks_by_scope: Dict[str, List[str]] = {"project": [], "global": []}
+    modes_by_scope: Dict[str, Optional[str]] = {"project": None, "global": None}
+    for scope_name in ("project", "global"):
+        for agent_name in ("claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro"):
             try:
+                hook_path = _hook_cfg_path(agent_name, scope_name, workspace)
+                if not hook_path.exists():
+                    continue
                 content = hook_path.read_text()
-                if "prismor" in content.lower() or "prismor" in content.lower():
-                    agents_with_hooks.append(agent_name)
-                    if mode is None:
-                        if "--mode enforce" in content:
-                            mode = "enforce"
-                        elif "--mode observe" in content:
-                            mode = "observe"
             except Exception:
-                pass
+                continue
+            if "hook-dispatch" not in content:
+                continue
+            hooks_by_scope[scope_name].append(agent_name)
+            if modes_by_scope[scope_name] is None:
+                if "--mode enforce" in content:
+                    modes_by_scope[scope_name] = "enforce"
+                elif "--mode observe" in content:
+                    modes_by_scope[scope_name] = "observe"
+
+    agents_with_hooks = sorted(set(hooks_by_scope["project"]) | set(hooks_by_scope["global"]))
+    # Effective mode: enforce wins if either scope enforces (both hooks run).
+    mode: Optional[str] = None
+    for _m in (modes_by_scope["project"], modes_by_scope["global"]):
+        if _m == "enforce":
+            mode = "enforce"
+        elif _m == "observe" and mode is None:
+            mode = "observe"
 
     if agents_with_hooks:
         mode_color = _GREEN if mode == "enforce" else _YELLOW
         mode_str = _color(mode or "unknown", mode_color)
-        print(f"  {_color('Hooks:', _GREEN)}       {', '.join(agents_with_hooks)}  ({mode_str})")
+        if hooks_by_scope["project"] and hooks_by_scope["global"]:
+            scope_str = "project + global"
+        elif hooks_by_scope["global"]:
+            scope_str = "global (~/)"
+        else:
+            scope_str = "project"
+        print(f"  {_color('Hooks:', _GREEN)}       {', '.join(agents_with_hooks)}  ({mode_str}, {scope_str})")
+        _both = sorted(set(hooks_by_scope["project"]) & set(hooks_by_scope["global"]))
+        if _both:
+            print(f"  {_color('Note:', _YELLOW)}        {', '.join(_both)} hooked at both scopes — each tool call is "
+                  f"screened twice. Remove one: prismor uninstall-hooks --agent {_both[0]} --scope project|global")
+        if modes_by_scope["project"] and modes_by_scope["global"] and modes_by_scope["project"] != modes_by_scope["global"]:
+            print(f"  {_color('Note:', _YELLOW)}        project hooks are {modes_by_scope['project']}, global hooks are "
+                  f"{modes_by_scope['global']} — enforce wins")
     else:
         print(f"  {_color('Hooks:', _GREEN)}       {_color('not installed', _YELLOW)}")
 
@@ -4226,13 +4380,18 @@ def _print_status_overview(workspace: Path) -> None:
     cloak_secret_count = 0
     try:
         from prismor.runtime.cloaking import status as cloak_status_fn, list_secrets
-        cinfo = cloak_status_fn(workspace=workspace, scope="project")
-        cloak_state = "installed" if cinfo.get("installed") else "not installed"
+        _cl_scopes = [sc for sc in ("project", "user")
+                      if cloak_status_fn(workspace=workspace, scope=sc).get("installed")]
+        if _cl_scopes:
+            cloak_state = "installed" + ("" if _cl_scopes == ["project"] else
+                                         " (global)" if _cl_scopes == ["user"] else " (project + global)")
+        else:
+            cloak_state = "not installed"
         cloak_secret_count = len(list_secrets())
     except Exception:
         cloak_state = "not installed"
 
-    cloak_color = _GREEN if cloak_state == "installed" else _DIM
+    cloak_color = _GREEN if cloak_state.startswith("installed") else _DIM
     secrets_str = f"  ({cloak_secret_count} secret{'s' if cloak_secret_count != 1 else ''})" if cloak_secret_count else ""
     print(f"  {_color('Cloaking:', _GREEN)}    {_color(cloak_state, cloak_color)}{secrets_str}")
     if "codex" in agents_with_hooks and cloak_secret_count:
@@ -4262,10 +4421,10 @@ def _print_status_overview(workspace: Path) -> None:
     # Next-step nudge — one action, picked by current state
     print()
     if not agents_with_hooks:
-        print(f"  {_color('Next:', _CYAN)} prismor install-hooks --agent claude --mode observe")
+        print(f"  {_color('Next:', _CYAN)} prismor setup   (or scripted: prismor setup --non-interactive --mode observe)")
     elif mode == "observe":
         print(f"  {_color('Tip:', _DIM)}  observe mode logs only. Switch with:")
-        print(f"        prismor install-hooks --agent all --mode enforce")
+        print(f"        prismor setup --mode enforce --recommended   (picks the rules that block)")
     elif sessions and sessions[0].get("findingsCount", 0) > 0:
         print(f"  {_color('Next:', _CYAN)} prismor sessions --findings-only")
     else:
@@ -5242,6 +5401,7 @@ def format_sessions(payload: Dict[str, Any]) -> str:
             f"  {_color(f'risk={risk}/100', risk_color)}"
             f"  findings={session['findingsCount']}"
             f"  agent={session['agent']}"
+            + (f"  {_color(str(session['_workspace']).replace(str(Path.home()), '~'), _DIM)}" if session.get("_workspace") else "")
         )
         # Show inline findings if they were enriched (--findings-only)
         findings = session.get("findings", [])

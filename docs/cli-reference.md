@@ -253,9 +253,9 @@ Design, setup, best practices, and threat model: [Sweep & Cloak](sweep-and-cloak
 | `prismor iam list` | — | List defined identities; marks the active `PRISMOR_AGENT_ID`. |
 | `prismor iam show <agent>` | — | Show one identity's permission profile. |
 | `prismor iam check <agent> --value "<v>"` | `--type <command\|read\|write\|network>` | Test whether an identity may perform an action. |
-| `prismor scope show` | `--session-id` | Show session-scoped rules (all, or one session). |
+| `prismor scope show [id\|latest]` | — | Show session-scoped rules (all, or one session; `latest` or a unique id prefix). |
 | `prismor scope list` | — | List sessions with active scoped rules. |
-| `prismor scope edit <id>` | — | Edit a session's scoped rules in `$EDITOR`. |
+| `prismor scope edit <id\|latest>` | — | Edit a session's scoped rules in `$EDITOR` (freezes auto-widening for that session). |
 | `prismor scope clear <id>` | — | Remove a session's scoped rules. |
 | `prismor agents list` | — | List every named agent instance seen (the adapter's `name=`), with framework + control state. |
 | `prismor agents show <name>` | — | Show one named agent's control settings (enabled, mode, IAM profile, last seen). |

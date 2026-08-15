@@ -27,9 +27,9 @@ flowchart TD
     CHECK -->|"not in allowed_tools"| BLOCK["BLOCK"]
 ```
 
-On the first prompt of a session, Prismor derives a tight rule set from the goal
-and the tools available, saves it keyed by session id, and then checks every
-subsequent tool call against it alongside the base policy. The rules evaporate
+On each prompt of a session, Prismor derives a rule set from what that prompt
+asks and unions it into the session's rules (keyed by session id), then checks
+every subsequent tool call against it alongside the base policy. The rules evaporate
 when the session ends — they never accumulate into your permanent policy.
 
 This synthesis happens automatically inside the hook dispatcher; you don't run a
@@ -62,16 +62,29 @@ prismor scope list
 
 # Show the scoped rules (all active sessions, or one)
 prismor scope show
-prismor scope show --session-id <id>
+prismor scope show <id>          # `latest` or a unique id prefix also works
 
 # Hand-edit a session's scoped rules in $EDITOR
-prismor scope edit <id>
+prismor scope edit <id>          # after a hand edit, Prismor stops auto-widening that session
 
 # Drop a session's scoped rules
 prismor scope clear <id>
 ```
 
-`prismor scope` with no action prints the rules for all active sessions.
+Anywhere a session id is accepted you can pass `latest` (the most recently
+updated scoped session) or any unique prefix of the id.
+
+Rules are re-derived on **every** prompt and unioned with the session's
+existing rules, so a session that opens with "what does this repo do?" and
+continues with "now fix it" widens to include Edit/Write instead of blocking.
+Rules only widen automatically — a hand edit (`prismor scope edit` or the
+dashboard) freezes the scope and becomes authoritative. Rules live in
+`$PRISMOR_HOME/scoped/<session-id>.json`.
+
+Without `ANTHROPIC_API_KEY` (and the `anthropic` SDK) Prismor uses a keyword
+heuristic instead of an LLM. That heuristic always allows `Read` and `Bash`
+(shell is how agents do almost anything, and Codex has no Read tool at all);
+it decides writes and network. Dangerous shell is the base policy's job.
 
 ---
 

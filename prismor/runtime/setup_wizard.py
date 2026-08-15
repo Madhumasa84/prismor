@@ -588,7 +588,7 @@ def _step_scope(current: str = "project", step: int = 4, total: int = 4) -> str:
 
     while True:
         lines = _header_lines(step, total, "INSTALL SCOPE")
-        lines.append(f"  {_w('Where should Immunity hooks be installed?', DIM)}")
+        lines.append(f"  {_w('Where should Prismor hooks be installed?', DIM)}")
         lines.append("")
         tw = _term_width()
         for i, (key, label, desc) in enumerate(opts):
@@ -1087,7 +1087,10 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     def _info(k: str, v: str) -> None:
         print(f"  {_w(k + ':', GRN)}  {_w(v, DIM)}")
 
-    _info("Hooks",      f"installed  (mode: {mode})")
+    _info("Hooks",      f"installed  (mode: {mode}, scope: {'global — every workspace on this machine' if scope == 'global' else 'this workspace'})")
+    if "codex" in agents:
+        _info("Codex",  "hooks run only after you trust them — accept the hook-trust prompt in the Codex TUI once,")
+        print(f"          {_w('or pass --dangerously-bypass-hook-trust to `codex exec` for headless runs', DIM)}")
     if "claude" in agents:
         _info("Skill",  str(target / ".claude" / "skills" / "immunity-agent").replace(home, "~"))
     _info("Docs",       "https://github.com/PrismorSec/prismor")

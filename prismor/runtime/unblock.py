@@ -221,11 +221,13 @@ def _subsystem_steps(
     if rule_id == "scoped-agent":
         sid = session_id or "<session-id>"
         return [
-            "This is a session scope Prismor synthesized from your first prompt — "
-            "it is not a policy rule and it dies with the session.",
+            "This is a session scope Prismor synthesized from your prompts so far — "
+            "it is not a policy rule and it dies with the session. Asking for the "
+            "task in a new prompt usually widens it automatically.",
             f"1. See the scope: prismor scope show {sid}",
-            f"2. Widen it: prismor scope edit {sid}",
+            f"2. Widen it by hand: prismor scope edit {sid}",
             f"3. Or drop it for this session entirely: prismor scope clear {sid}",
+            "   (`latest` works in place of the session id)",
         ]
 
     if rule_id == "tool-category-crossover":

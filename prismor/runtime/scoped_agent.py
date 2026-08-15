@@ -209,12 +209,56 @@ def _apply_cloak_invariant(rules: Dict[str, Any], goal: str) -> Dict[str, Any]:
     return rules
 
 
+# Agents whose only way to read a file is a shell command. A scope that grants
+# Read but not Bash leaves them unable to do anything (verified live: Codex
+# blocked on `cat README.md` after a "summarize the README" prompt).
+_SHELL_ONLY_AGENTS = {
+    "codex", "hermes", "goose", "openclaw", "opencode", "grok", "kiro", "crush",
+    "openhands", "qwen", "continue", "copilot",
+}
+
+
+def apply_agent_invariants(rules: Dict[str, Any], agent: str) -> Dict[str, Any]:
+    """Per-agent floor: shell-only agents always keep Bash."""
+    if agent in _SHELL_ONLY_AGENTS:
+        if "Bash" not in rules.get("allowed_tools", []):
+            rules["allowed_tools"] = list(rules.get("allowed_tools", [])) + ["Bash"]
+        rules["deny_tools"] = [t for t in rules.get("deny_tools", []) if t != "Bash"]
+    return rules
+
+
+def merge_scoped_rules(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
+    """Widen ``existing`` with rules synthesised from a later prompt.
+
+    Sessions are conversations, not single tasks: the first prompt is often
+    "what does this do?" and the third is "ok, fix it". Rules are therefore
+    re-derived on every prompt and UNIONED — a later prompt can widen the
+    scope, never narrow it. Once an operator has edited the scope by hand
+    (dashboard or ``prismor scope edit``, which set ``operator_edited``) the
+    caller must stop merging: a human-shaped scope is authoritative."""
+    merged = dict(existing)
+    allowed = list(dict.fromkeys(list(existing.get("allowed_tools", [])) + list(new.get("allowed_tools", []))))
+    deny = [t for t in dict.fromkeys(list(existing.get("deny_tools", [])) + list(new.get("deny_tools", [])))
+            if t not in allowed]
+    merged["allowed_tools"] = allowed if "*" not in allowed else ["*"]
+    merged["deny_tools"] = deny
+    paths = list(dict.fromkeys(list(existing.get("allowed_paths", ["**"])) + list(new.get("allowed_paths", ["**"]))))
+    merged["allowed_paths"] = ["**"] if "**" in paths else paths
+    merged["deny_network"] = bool(existing.get("deny_network", False)) and bool(new.get("deny_network", False))
+    merged["prompts_seen"] = int(existing.get("prompts_seen") or 1) + 1
+    return merged
+
+
 def _static_fallback_rules(goal: str, available_tools: List[str]) -> Dict[str, Any]:
     """Keyword-based heuristic fallback when no API is available."""
     goal_lower = goal.lower()
 
-    # Start with Read always allowed
-    allowed = {"Read"}
+    # Start with Read + Bash always allowed. Without an LLM this heuristic
+    # cannot tell "summarize the README" from "summarize, then run the tests",
+    # and shell is how agents do almost anything (Codex has no Read tool at
+    # all — it reads files with `cat`). Dangerous shell is the base policy's
+    # job; the static scope only decides writes and network.
+    allowed = {"Read", "Bash"}
     deny_network = True
 
     # Detect task intent from keywords
@@ -292,17 +336,33 @@ def list_scoped_sessions(workspace: Path) -> List[Dict[str, Any]]:
     if not scoped.exists():
         return []
     results = []
-    for f in sorted(scoped.glob("*.json")):
+    for f in scoped.glob("*.json"):
         try:
+            mtime = f.stat().st_mtime
             rules = json.loads(f.read_text(encoding="utf-8"))
-            results.append({
-                "session_id": f.stem,
-                "path": str(f),
-                "rules": rules,
-            })
         except (json.JSONDecodeError, OSError):
             continue
+        results.append({
+            "session_id": f.stem,
+            "path": str(f),
+            "rules": rules,
+            "updated": mtime,
+        })
+    # Newest first — the session you are in is almost always the top one.
+    results.sort(key=lambda r: r["updated"], reverse=True)
     return results
+
+
+def resolve_session_ref(workspace: Path, ref: str) -> str:
+    """``latest`` → the most recently updated scoped session; a unique prefix
+    → the full id; anything else is returned unchanged."""
+    sessions = list_scoped_sessions(workspace)
+    if ref == "latest" and sessions:
+        return sessions[0]["session_id"]
+    hits = [s["session_id"] for s in sessions if s["session_id"].startswith(ref)]
+    if len(hits) == 1:
+        return hits[0]
+    return ref
 
 
 # ── Enforcement ────────────────────────────────────────────────────────────
@@ -429,7 +489,8 @@ def format_scoped_rules_box(rules: Dict[str, Any]) -> str:
         f"  deny_tools:     [{denied}]",
         f"  deny_network:   {network}",
         "",
-        "  These rules apply this session only and persist in .prismor/scoped/",
+        "  Session-only; widened on each new prompt. Stored in $PRISMOR_HOME/scoped/.",
+        "  Adjust: prismor scope show|edit|clear <session-id>",
     ]
 
     max_width = max(len(line) for line in content_lines) + 4
