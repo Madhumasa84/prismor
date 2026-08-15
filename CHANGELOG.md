@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [1.42.1] — 2026-08-15
+
 ### Fixed
 - `prismor scope edit` crashed with `UnboundLocalError` (a function-local `import subprocess` shadowed the module import). It now also validates the JSON after editing and restores the previous rules on a parse error.
 - `prismor scope show <id>` accepts the positional id every message told users to type (`--session-id` still works); `latest` and unique id prefixes are accepted by `show`/`edit`/`clear`.
