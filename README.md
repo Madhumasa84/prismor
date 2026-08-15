@@ -349,7 +349,7 @@ This does **not** affect policy rules set to `mode: enforce` in `.prismor/policy
 
 ```bash
 prismor scope list                    # find the session ID
-prismor scope show --session-id ID    # inspect its allowed_tools / deny_tools
+prismor scope show ID                 # inspect its allowed_tools / deny_tools (`latest` works too)
 prismor scope clear ID                # remove the scoped rules for that session
 prismor scope edit ID                 # or hand-edit deny_tools in $EDITOR
 ```

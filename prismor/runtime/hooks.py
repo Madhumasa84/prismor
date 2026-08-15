@@ -72,9 +72,17 @@ def install_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str, m
         # version's, or an older one that used a prismor/runtime/cli.py path) before adding
         # the current command, so re-running install never double-dispatches.
         config, _ = _strip_for_agent(current_agent, config, "hook-dispatch")
-        command = _dispatcher_command(repo_root=repo_root, workspace=workspace, agent=current_agent, mode=mode)
+        # Project hooks pin the workspace. Global hooks must NOT — they fire
+        # from every repo on the machine, and pinning the directory setup ran
+        # from attributed every other repo's sessions (and its managed/personal
+        # decision) to that one directory. hook-dispatch resolves the workspace
+        # from the payload's cwd instead.
+        command = _dispatcher_command(
+            repo_root=repo_root, workspace=workspace, agent=current_agent, mode=mode,
+            pin_workspace=(scope == "project"),
+        )
         if current_agent == "claude":
-            config = _merge_claude(config, command, workspace)
+            config = _merge_claude(config, command, workspace, pin_workspace=(scope == "project"))
         elif current_agent == "cursor":
             config = _merge_cursor(config, command)
         elif current_agent == "openclaw":
@@ -524,7 +532,7 @@ def _config_path(agent: str, scope: str, workspace: Path) -> Path:
     return home / ".codeium" / "windsurf" / "hooks.json"
 
 
-def _dispatcher_command(*, repo_root: Path, workspace: Path, agent: str, mode: str) -> str:
+def _dispatcher_command(*, repo_root: Path, workspace: Path, agent: str, mode: str, pin_workspace: bool = True) -> str:
     # Route through the prismor CLI for consistency (one canonical entry point),
     # invoked as a module with the current interpreter. Using `-m` + sys.executable
     # — rather than a raw path to prismor/runtime/cli.py — keeps the hook working across
@@ -534,13 +542,14 @@ def _dispatcher_command(*, repo_root: Path, workspace: Path, agent: str, mode: s
     # PYTHONPATH is prepended so the hook works regardless of how the IDE/agent
     # launcher configures the environment (Claude Code strips user site-packages).
     py = sys.executable or "python3"
+    ws_flag = f'--workspace "{workspace}" ' if pin_workspace else ""
     return (
         f'PYTHONPATH="{repo_root}" "{py}" -m prismor.runtime.immunity_cli hook-dispatch '
-        f'--agent {agent} --workspace "{workspace}" --mode {mode}'
+        f'--agent {agent} {ws_flag}--mode {mode}'
     )
 
 
-def _merge_claude(config: Dict[str, Any], command: str, workspace: Path) -> Dict[str, Any]:
+def _merge_claude(config: Dict[str, Any], command: str, workspace: Path, pin_workspace: bool = True) -> Dict[str, Any]:
     hooks = dict(config.get("hooks", {}))
     hooks["UserPromptSubmit"] = _merge_claude_entries(
         hooks.get("UserPromptSubmit", []),
@@ -573,8 +582,15 @@ def _merge_claude(config: Dict[str, Any], command: str, workspace: Path) -> Dict
     # exceeds OS argument limits (E2BIG) on long conversations. Stop fires after
     # all actions are complete so it has no security enforcement value.
     env = dict(config.get("env", {}))
-    env["PRISMOR_WORKSPACE"] = str(workspace)
-    return {**config, "hooks": hooks, "env": env}
+    if pin_workspace:
+        env["PRISMOR_WORKSPACE"] = str(workspace)
+    else:
+        env.pop("PRISMOR_WORKSPACE", None)
+    if env:
+        return {**config, "hooks": hooks, "env": env}
+    cfg = {**config, "hooks": hooks}
+    cfg.pop("env", None)
+    return cfg
 
 
 def _merge_cursor(config: Dict[str, Any], command: str) -> Dict[str, Any]:

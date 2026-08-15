@@ -208,10 +208,14 @@ def list_registered_workspaces() -> List[Path]:
         ws = Path(p)
         if not ws.exists():
             continue
+        # Current layout: one shared DB under $PRISMOR_HOME — every registered
+        # workspace that still exists counts. Older layouts kept a DB per
+        # workspace; those still qualify so their history can be merged in.
+        shared_db = prismor_home() / "prismor.db"
         central_db = _workspace_state_dir(ws) / "prismor.db"
         legacy_db = ws / ".prismor" / "prismor.db"
         legacy_warden_db = ws / _LEGACY_DATA_DIR / _LEGACY_DB_NAME
-        if central_db.exists() or legacy_db.exists() or legacy_warden_db.exists():
+        if shared_db.exists() or central_db.exists() or legacy_db.exists() or legacy_warden_db.exists():
             result.append(ws)
     return result
 
@@ -749,7 +753,31 @@ def save_session_snapshot(
             ),
         )
         cursor.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
-        cursor.execute("DELETE FROM findings WHERE session_id = ?", (session_id,))
+        # Re-derive analysis findings, but KEEP runtime findings (scoped-agent,
+        # IAM, kill-switch, org denies — persisted by persist_runtime_findings
+        # with source=runtime). They are per-event enforcement decisions, not
+        # something whole-session re-analysis can reproduce; wiping them here
+        # made every block vanish from `prismor status` on the next tool call.
+        cursor.execute(
+            "DELETE FROM findings WHERE session_id = ? "
+            "AND (enrichment_json IS NULL OR enrichment_json NOT LIKE '%\"source\": \"runtime\"%')",
+            (session_id,),
+        )
+        runtime_row = cursor.execute(
+            "SELECT COUNT(*), MAX(CASE lower(severity) WHEN 'critical' THEN 90 WHEN 'high' THEN 70 "
+            "WHEN 'medium' THEN 45 WHEN 'low' THEN 15 ELSE 0 END) FROM findings WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        runtime_count = int((runtime_row or [0])[0] or 0)
+        runtime_risk = int((runtime_row or [0, 0])[1] or 0)
+        if runtime_count:
+            summary = dict(analysis["summary"])
+            summary["totalFindings"] = int(summary.get("totalFindings") or 0) + runtime_count
+            summary["riskScore"] = max(int(summary.get("riskScore") or 0), runtime_risk)
+            cursor.execute(
+                "UPDATE sessions SET findings_count = ?, risk_score = ?, summary_json = ? WHERE session_id = ?",
+                (summary["totalFindings"], summary["riskScore"], json.dumps(summary), session_id),
+            )
 
         cursor.executemany(
             """
@@ -897,20 +925,40 @@ def persist_runtime_findings(
         connection.close()
 
 
-def list_sessions(workspace: Path, limit: int = 20) -> List[Dict[str, Any]]:
+def list_sessions(workspace: Path, limit: int = 20, *, all_workspaces: bool = False) -> List[Dict[str, Any]]:
+    """Sessions for ``workspace`` (newest first). The runtime DB is shared by
+    every workspace on the machine, so this filters on ``workspace_path``;
+    pass ``all_workspaces=True`` for the machine-wide view (`sessions --global`,
+    `status --all`). Rows with no recorded workspace are always included."""
     db_path = initialize_database(workspace)
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     try:
-        rows = connection.execute(
-            """
-            SELECT session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
-            FROM sessions
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        if all_workspaces:
+            rows = connection.execute(
+                """
+                SELECT session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
+                FROM sessions
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            try:
+                ws_key = str(workspace.resolve())
+            except OSError:
+                ws_key = str(workspace)
+            rows = connection.execute(
+                """
+                SELECT session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
+                FROM sessions
+                WHERE workspace_path = ? OR workspace_path = ? OR workspace_path IS NULL OR workspace_path = ''
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (ws_key, str(workspace), limit),
+            ).fetchall()
     finally:
         connection.close()
     return [_session_from_row(row) for row in rows]
@@ -3374,6 +3422,9 @@ def update_session_control(
         for field in ("allowed_tools", "deny_tools", "deny_network", "allowed_paths"):
             if field in data:
                 scoped[field] = data[field]
+        # An operator edit is authoritative: the hook stops auto-widening the
+        # scope on later prompts once a human has shaped it by hand.
+        scoped["operator_edited"] = True
         save_scoped_rules(workspace, session_id, scoped)
         return {"ok": True, "action": "update", "scoped": scoped}
 

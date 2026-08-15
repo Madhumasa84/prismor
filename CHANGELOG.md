@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Fixed
+- `prismor scope edit` crashed with `UnboundLocalError` (a function-local `import subprocess` shadowed the module import). It now also validates the JSON after editing and restores the previous rules on a parse error.
+- `prismor scope show <id>` accepts the positional id every message told users to type (`--session-id` still works); `latest` and unique id prefixes are accepted by `show`/`edit`/`clear`.
+- Session scope no longer locks a session to its first prompt: rules are re-derived on every prompt and unioned, static (no-API-key) rules always allow Bash, and shell-only agents (Codex, Hermes, Goose, …) always keep Bash. A hand-edited scope (dashboard or `scope edit`) freezes auto-widening.
+- Runtime findings (scoped-agent, IAM, kill-switch, org tool denies) survived only until the next tool call: `save_session_snapshot` wiped them, so an enforce block vanished from `prismor status`/`sessions`. They are now kept and counted.
+- `prismor status --all` always said "No registered workspaces" under the single-DB layout.
+- `prismor sessions` / `prismor status` showed every workspace's sessions in every workspace; they are now per-workspace (`sessions --global` for the machine-wide list, now labelled with the workspace).
+- Global (`--scope global`) hooks pinned the directory `setup` ran from as the workspace for every repo on the machine; they now resolve the workspace from the hook payload's cwd (git root).
+- `prismor status`/`doctor`/`status --all` only looked for project-scope hooks and cloaking, so a globally-hooked workspace read as "not installed" (and the suggested fix produced double dispatch); `uninstall-hooks` reported success while the other scope kept screening. All three now report both scopes, flag double-hooking and mixed modes, and (un)install points at hooks left at the other scope.
+- `setup --scope global --cloak` failed to install cloaking (`cloak install` only knew `--scope user`). `--scope user` and `--scope global` are now interchangeable on every command.
+- `prismor workspace` told users to run `prismor scope personal|managed`, which does not exist.
+- Codex silently ignores hooks it has not been told to trust; `setup`, `install-hooks` and `doctor` now say so and name the fix (`--dangerously-bypass-hook-trust` for headless runs).
+- Setup summary shows the install scope; "Immunity" wording in the scope step; `status` next-step hints point at `prismor setup`.
+
 ## [1.40.1] — 2026-08-10
 
 ### Fixed
