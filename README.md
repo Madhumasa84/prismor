@@ -383,16 +383,4 @@ By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ---
 
-## Star History
-
-<a href="https://www.star-history.com/?repos=PrismorSec%2Fprismor&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=PrismorSec/prismor&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=PrismorSec/prismor&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=PrismorSec/prismor&type=date&legend=top-left" />
- </picture>
-</a>
-
----
-
 - [Prismor.dev](https://prismor.dev)
