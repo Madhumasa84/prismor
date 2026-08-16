@@ -596,3 +596,61 @@ class TestMigrateConfigs:
         good = _cfg(tmp_path, ".mcp.json", {"mcpServers": {"a": {"command": "x"}}})
         statuses = {r.path.name: r.status for r in migrate_configs([bad, good])}
         assert statuses == {"bad.json": "failed", ".mcp.json": "migrated"}
+
+
+# ── data boundary: modify (pii_redact) and headless step_up ─────────────────
+
+def test_call_modify_pii_redact_rewrites_arguments(tmp_path, monkeypatch):
+    a = stub("crm")
+    gateway, sent = make_gateway(tmp_path, monkeypatch, [a])
+    list_tools(gateway, sent)
+    decisions = iter([
+        Decision(allow=False, blocking={
+            "severity": "HIGH", "title": "email to external", "ruleId": "pii-to-untrusted",
+            "category": "data_boundary", "action": "modify", "transform": "pii_redact"}),
+        Decision(allow=True),
+    ])
+    monkeypatch.setattr("prismor.runtime.runtime.evaluate_tool_call", lambda **k: next(decisions))
+    gateway._handle_tools_call_safe("C9", {"name": "crm__echo",
+                                          "arguments": {"to": "bob@realco.com", "n": 1}})
+    forwarded = [p for m, p in a.requests if m == "tools/call"]
+    assert forwarded and forwarded[0]["arguments"] == {"to": "[REDACTED:email]", "n": 1}
+    assert sent[-1]["result"].get("isError") is not True
+
+
+def test_call_step_up_approved_redacted(tmp_path, monkeypatch):
+    from prismor.runtime.enterprise import approvals as _approvals
+
+    a = stub("crm")
+    gateway, sent = make_gateway(tmp_path, monkeypatch, [a])
+    list_tools(gateway, sent)
+    decisions = iter([
+        Decision(allow=False, blocking={
+            "severity": "HIGH", "title": "self email to external", "ruleId": "self-identity-to-external",
+            "category": "data_boundary", "action": "step_up", "dataClasses": ["email"]}),
+        Decision(allow=True),
+    ])
+    monkeypatch.setattr("prismor.runtime.runtime.evaluate_tool_call", lambda **k: next(decisions))
+    monkeypatch.setattr(_approvals, "await_step_up",
+                        lambda decision, **kw: _approvals.ApprovalOutcome(True, redacted=True))
+    gateway._handle_tools_call_safe("C10", {"name": "crm__echo",
+                                           "arguments": {"email": "bob@realco.com"}})
+    forwarded = [p for m, p in a.requests if m == "tools/call"]
+    assert forwarded and forwarded[0]["arguments"] == {"email": "[REDACTED:email]"}
+
+
+def test_call_step_up_denied_blocks(tmp_path, monkeypatch):
+    from prismor.runtime.enterprise import approvals as _approvals
+
+    a = stub("crm")
+    gateway, sent = make_gateway(tmp_path, monkeypatch, [a])
+    list_tools(gateway, sent)
+    monkeypatch.setattr("prismor.runtime.runtime.evaluate_tool_call",
+                        lambda **k: Decision(allow=False, blocking={
+                            "severity": "HIGH", "title": "held", "ruleId": "pii-to-external",
+                            "action": "step_up"}))
+    monkeypatch.setattr(_approvals, "await_step_up",
+                        lambda decision, **kw: _approvals.ApprovalOutcome(False, status="denied"))
+    gateway._handle_tools_call_safe("C11", {"name": "crm__echo", "arguments": {"x": 1}})
+    assert sent[-1]["result"]["isError"] is True
+    assert not any(m == "tools/call" for m, _ in a.requests)

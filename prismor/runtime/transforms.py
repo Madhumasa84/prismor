@@ -153,3 +153,59 @@ def _memory_redact_transform(*, payload, workspace, mode):
             "updatedInput": new_input,
         }
     }
+
+
+@register("pii_redact")
+def _pii_redact_transform(*, payload, workspace, mode):
+    """Strip sensitive values from an outbound shell command before it runs.
+
+    Applies only to values the data-boundary classifier found in URL query
+    strings and request bodies (``curl -d … https://…?email=…``). Values passed
+    as CLI flags are never redacted here — the engine downgrades those to
+    step_up, because dropping a required flag breaks the command and sends the
+    agent hunting for another way to supply the value. Declines (``None`` →
+    deny) when nothing could be located, so a call is never silently passed
+    through un-cleaned.
+    """
+    from prismor.runtime.data_boundary import (
+        DataBoundaryPolicy, classify, extract_outbound, redact_command,
+    )
+    from prismor.runtime.policy_engine import PolicyEngine
+
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+
+    try:
+        policy = PolicyEngine(workspace=Path(workspace)).data_boundary
+    except Exception:
+        policy = DataBoundaryPolicy()
+
+    matches = []
+    for ob in extract_outbound({"type": "shell", "command": command}):
+        if ob.dest is not None and ob.dest.is_private:
+            continue
+        for ctx, text in ob.parts:
+            if ctx in ("query", "body", "header"):
+                matches.extend(m for m in classify(text, policy=policy, context=ctx)
+                               if not m.synthetic)
+    if not matches:
+        return None
+    new_command, n = redact_command(command, matches)
+    if not n or new_command == command:
+        return None
+    kinds = sorted({m.kind for m in matches})
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": {**tool_input, "command": new_command},
+        },
+        # Surfaced to the user (and model) so a changed call is never a mystery.
+        "systemMessage": (
+            f"Prismor redacted {', '.join(kinds)} from this outbound call "
+            f"(policy: data_boundary). {n} value(s) replaced with [REDACTED:*]."
+        ),
+    }

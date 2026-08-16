@@ -6,7 +6,7 @@ line-string; three keywords; whitespace-tokenized:
     rule      := seq [ "->" action ]
     seq       := term ( ("then" | "with") term )*
     term      := TAG                      # [a-z0-9][a-z0-9_.-]*
-    action    := "block" | "warn"         # omitted -> "block"
+    action    := "block" | "warn" | "redact"   # omitted -> "block"
 
 Semantics:
   * ``with`` groups adjacent terms into one unordered step (all tags must
@@ -21,6 +21,12 @@ Examples:
     untrusted_content then private_data then external_comms -> block
     web_read with secrets_access -> warn
     customer_pii then external_comms          (implicit -> block)
+    untrusted_content then data.email with dest.external -> redact
+
+``redact`` rewrites the completing call through the ``pii_redact`` transform
+(strips classified values from the outbound payload) instead of denying it;
+where the surface cannot rewrite input it degrades like any data-boundary
+modify verdict (see cli.py).
 
 ``not``, ``or``, ``within`` and ``count`` are reserved for future grammar
 growth and raise a ParseError today.
@@ -39,7 +45,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from prismor.runtime.trifecta import DEFAULT_INCOMPATIBLE, _as_list
 
-ACTIONS = ("block", "warn")
+ACTIONS = ("block", "warn", "redact")
 CONNECTORS = ("then", "with")
 RESERVED = ("not", "or", "within", "count")
 _TAG_RE = re.compile(r"^[a-z0-9][a-z0-9_.\-]*$")
@@ -64,7 +70,7 @@ class CompiledRule:
     """Internal representation shared by DSL rules and legacy incompatible sets."""
 
     steps: List[Set[str]]  # ordered steps; each step is an unordered tag set
-    action: str = "block"  # "block" | "warn"
+    action: str = "block"  # "block" | "warn" | "redact"
     source: str = ""  # original expression, or "incompatible" for legacy rows
     rule_id: str = field(default="")
 

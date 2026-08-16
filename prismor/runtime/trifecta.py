@@ -129,12 +129,26 @@ _EGRESS_RULE_TAGS = {
 
 
 def egress_tags(findings: Optional[list] = None) -> Set[str]:
-    """Map this event's egress findings to tags. Empty when egress is off."""
+    """Map this event's egress + data-boundary findings to tags.
+
+    Egress: ``egress.offlist`` / ``egress.denied``. Data boundary: ``data.<class>``
+    (``data.email``, ``data.secret``, …), ``data.self`` when the datum is the
+    user's own identity, and ``dest.<tier>`` (``dest.external``, ``dest.untrusted``)
+    — so a tag rule can say ``untrusted_content then data.email with dest.external
+    -> block``. Empty when both are off.
+    """
     out: Set[str] = set()
     for f in findings or []:
-        tag = _EGRESS_RULE_TAGS.get(str((f or {}).get("ruleId") or ""))
+        f = f or {}
+        tag = _EGRESS_RULE_TAGS.get(str(f.get("ruleId") or ""))
         if tag:
             out.add(tag)
+        for cls in f.get("dataClasses") or []:
+            out.add(f"data.{cls}")
+        if f.get("dataSubject") == "self":
+            out.add("data.self")
+        if f.get("destTrust"):
+            out.add(f"dest.{f.get('destTrust')}")
     return out
 
 
