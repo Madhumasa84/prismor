@@ -14,10 +14,11 @@ import shlex
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Iterable, Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 from prismor.runtime.egress import EgressPolicy
+from prismor.runtime.data_boundary import DataBoundaryPolicy
 
 try:
     import yaml
@@ -207,6 +208,12 @@ class _TaintStore:
         self.injection_detected: bool = False
         self.injection_event_index: Optional[int] = None
         self.seen_domains: set = set()
+        # Doc/skill provenance: every external instruction source this session
+        # loaded ({kind, ref, host, index}), and every binary it installed. Used
+        # to annotate and (one rung) escalate data-boundary findings — see
+        # data_boundary.DataBoundaryPolicy.evaluate. Append-only like the rest.
+        self.sources: list = []
+        self.installed: set = set()
         self._load()
 
     def _load(self) -> None:
@@ -217,6 +224,8 @@ class _TaintStore:
             self.injection_detected = bool(data.get("injection_detected", False))
             self.injection_event_index = data.get("injection_event_index")
             self.seen_domains = set(data.get("seen_domains", []))
+            self.sources = [x for x in data.get("sources", []) if isinstance(x, dict)]
+            self.installed = set(data.get("installed", []))
         except Exception:
             pass
 
@@ -249,6 +258,19 @@ class _TaintStore:
                     if domain not in domains:
                         domains.append(domain)
                     state["seen_domains"] = sorted(domains)
+                source = fields.get("source")
+                if isinstance(source, dict):
+                    sources = state.get("sources")
+                    if not isinstance(sources, list):
+                        sources = []
+                    sources.append(source)
+                    state["sources"] = sources[-50:]
+                installed = fields.get("installed")
+                if installed:
+                    have = state.get("installed")
+                    if not isinstance(have, list):
+                        have = []
+                    state["installed"] = sorted(set(have) | set(installed))
         except Exception:
             # Never break the tool call being screened over a taint write.
             pass
@@ -264,6 +286,27 @@ class _TaintStore:
 
     def is_new_domain(self, domain: str) -> bool:
         return domain.lower() not in self.seen_domains
+
+    def add_source(self, kind: str, ref: str, host: str, event_index: int) -> None:
+        src = {"kind": kind, "ref": ref[:300], "host": (host or "").lower(), "index": event_index}
+        self.sources.append(src)
+        self._update(source=src)
+
+    def add_installed(self, names: Iterable[str]) -> None:
+        names = {str(n).lower() for n in names if n}
+        if not names:
+            return
+        self.installed |= names
+        self._update(installed=sorted(names))
+
+    def latest_source(self, event_index: int, window: int = 25) -> Optional[Dict[str, Any]]:
+        """Freshest doc/skill source within ``window`` events, or None (decayed)."""
+        for src in reversed(self.sources):
+            idx = src.get("index")
+            if isinstance(idx, int) and event_index - idx > window:
+                return None
+            return src
+        return None
 
 
 def _check_cloaked_secrets_in_text(text: str) -> Optional[str]:
@@ -623,6 +666,8 @@ class PolicyEngine:
         self._manifest_re: Optional[re.Pattern[str]] = None
         self.egress_allowlist = []
         self.egress: EgressPolicy = EgressPolicy()
+        self.data_boundary: DataBoundaryPolicy = DataBoundaryPolicy()
+        self._data_boundary_source: str = "default"
         # Which policy layer last set the egress config. "remote" means the org
         # signed it, which is what makes an enforce verdict authoritative.
         self._egress_source: str = "default"
@@ -836,6 +881,8 @@ class PolicyEngine:
         # observe downgrade (see EgressPolicy.evaluate / runtime.py).
         if "egress" in override_settings or "egress_allowlist" in override_settings:
             self._egress_source = source
+        if "data_boundary" in override_settings:
+            self._data_boundary_source = source
         settings.update(override_settings)
 
     def _load(self, workspace: Optional[Path], policy_path: Optional[Path]) -> None:
@@ -989,6 +1036,23 @@ class PolicyEngine:
         self.egress = EgressPolicy.from_settings(settings, source=self._egress_source)
         for _egress_err in self.egress.errors:
             sys.stderr.write(f"[prismor] egress policy: {_egress_err}\n")
+        # Data boundary (settings.data_boundary): sensitive datum × destination
+        # screening of outbound payloads — see prismor/runtime/data_boundary.py.
+        self.data_boundary = DataBoundaryPolicy.from_settings(
+            settings, source=self._data_boundary_source
+        )
+        for _db_err in self.data_boundary.errors:
+            sys.stderr.write(f"[prismor] data_boundary policy: {_db_err}\n")
+        if self.data_boundary.enabled:
+            _db_raw = settings.get("data_boundary") or {}
+            if isinstance(_db_raw, dict) and _db_raw.get("self_identity_auto", True):
+                try:
+                    from prismor.runtime.data_boundary import discover_self_identity
+                    for _ident in discover_self_identity(self.workspace):
+                        if _ident not in self.data_boundary.self_identity:
+                            self.data_boundary.self_identity.append(_ident)
+                except Exception:
+                    pass
         # Keep the flat list in sync when a modern policy defines the allowlist
         # only under settings.egress, so the MCP static scanner still sees it.
         if not self.egress_allowlist and self.egress.enabled:
@@ -1521,6 +1585,69 @@ class PolicyEngine:
             except Exception as _egress_exc:  # never let egress screening break evaluation
                 sys.stderr.write(f"[prismor] egress evaluation error: {_egress_exc}\n")
 
+        # ── Data boundary: what is being sent, and to whom ─────────────────
+        # Sensitive datum × destination tier. Runs after egress so an explicit
+        # egress deny can mark the destination untrusted, and reads the session's
+        # doc/skill provenance so a call induced by a just-fetched SKILL.md is
+        # annotated (and nudged one rung) — see data_boundary.py.
+        _db_taint = None
+        if self.data_boundary.enabled and not event.get("_script_line") and event_type in ("network", "shell"):
+            try:
+                _db_taint = self._get_taint(session_id)
+                _prov = _db_taint.latest_source(index) if _db_taint is not None else None
+                findings.extend(self.data_boundary.evaluate(
+                    event,
+                    index,
+                    session_id=session_id,
+                    egress_findings=[f for f in findings if f.get("egressHost")],
+                    default_mode=self.default_mode,
+                    device_mode=self.device_mode,
+                    provenance=_prov,
+                    installed_this_session=set(_db_taint.installed) if _db_taint is not None else None,
+                    first_seen=_db_taint.is_new_domain if _db_taint is not None else None,
+                ))
+            except Exception as _db_exc:  # never let data-boundary screening break evaluation
+                sys.stderr.write(f"[prismor] data_boundary evaluation error: {_db_exc}\n")
+
+        # ── Provenance bookkeeping: doc/skill loads and installs ───────────
+        # Cheap and detection-independent: record where instructions came from
+        # so later findings can say "following SKILL.md from <host>".
+        if not event.get("_script_line") and session_id:
+            try:
+                from prismor.runtime.data_boundary import (
+                    doc_source_from_event, installed_binaries_from_command,
+                )
+                _src = doc_source_from_event(event)
+                _inst = (
+                    installed_binaries_from_command(str(event.get("command") or ""))
+                    if event_type == "shell" else set()
+                )
+                if _db_taint is None and (_src or _inst or findings):
+                    _db_taint = self._get_taint(session_id)
+                if _db_taint is not None:
+                    # Annotate this event's own findings with the freshest prior
+                    # source (e.g. the supply-chain warning on `npm i -g` that a
+                    # doc told the agent to run) — before recording this event
+                    # as a source itself.
+                    if findings and event_type in ("shell", "file_write", "network", "tool_result"):
+                        _prev = _db_taint.latest_source(index)
+                        if _prev:
+                            for _f in findings:
+                                _f.setdefault("provenance", {
+                                    "kind": _prev.get("kind"), "ref": _prev.get("ref"),
+                                    "host": _prev.get("host"), "eventIndex": _prev.get("index"),
+                                })
+                    if _inst:
+                        _db_taint.add_installed(_inst)
+                    if _src:
+                        _db_taint.add_source(_src["kind"], _src["ref"], _src.get("host", ""), index)
+                # Shell destinations count as "seen" for first-seen logic.
+                if event_type == "shell" and _db_taint is not None:
+                    for _dom in _extract_domains_from_command(str(event.get("command") or "")):
+                        _db_taint.add_domain(_dom)
+            except Exception:
+                pass
+
         # ── Prompt injection: structural HTML analysis (sanitizer) ─────────
         # The YAML rules match injection keywords in plaintext. This pass
         # catches payloads that survive because they are wrapped in HTML
@@ -1730,7 +1857,7 @@ class PolicyEngine:
                         ) if len(_steps) > 1 else ", ".join(_done["set"])
                         _fid = f"{_rid}-{index}"
                         _pfx = f"{session_id}:{_fid}" if session_id else _fid
-                        findings.append({
+                        _tt_finding = {
                             "id": _pfx,
                             "severity": "CRITICAL",
                             "category": "lethal_trifecta",
@@ -1747,7 +1874,17 @@ class PolicyEngine:
                             "ruleId": _rid,
                             "action": "block",
                             "mode": _tt_mode,
-                        })
+                        }
+                        if _done.get("action") == "redact":
+                            # `-> redact`: rewrite the completing call rather
+                            # than deny it. Category stays lethal_trifecta so
+                            # the floor protection applies; the transform is
+                            # the data-boundary redactor.
+                            _tt_finding["action"] = "modify"
+                            _tt_finding["transform"] = "pii_redact"
+                            _tt_finding["severity"] = "HIGH"
+                            _tt_finding["category"] = "data_boundary"
+                        findings.append(_tt_finding)
                     # A blocked call never executes, so its tags must not enter
                     # the ledger: recording them would mark the forbidden set as
                     # already covered and let every later same-tagged call

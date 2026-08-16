@@ -198,7 +198,11 @@ def guard_controller(
                     # async variant: the poll must not park the event loop that
                     # is also driving the CDP socket, or the browser times out
                     # before the human decides.
-                    if await _approvals.await_step_up_async(decision, agent=agent, session_id=sid):
+                    outcome = await _approvals.await_step_up_async(decision, agent=agent, session_id=sid)
+                    if outcome:
+                        if getattr(outcome, "redacted", False):
+                            # "Approve redacted": strip flagged values on-device first.
+                            params = _approvals.redact_approved_payload(params, workspace=ws)
                         return await original_execute(action_name, params, **kwargs)
                 except Exception:
                     pass

@@ -278,6 +278,85 @@ settings:
       - stderr
       - command
 
+  # Data boundary — what an outbound call SENDS, screened against where it is
+  # going. Complements `egress` (which only decides whether a host may be
+  # contacted at all). Built for the doc-following agent: a SKILL.md or setup
+  # guide says `vendor setup --email <your email>` or `curl …?email=…`, and
+  # the agent obliges. Trigger = non-synthetic sensitive datum × external /
+  # untrusted destination — so `user@example.com`, test PANs, a generic
+  # `{"prompt": "a sunset"}` body, and anything sent to localhost / your own
+  # `trusted_domains` / GitHub / npm / PyPI pass silently.
+  #
+  # Tiers: internal (loopback/RFC1918/.local) → trusted (`trusted_domains`,
+  # VCS hosts, package registries, a vendor's own CLI e.g. `certbot --email`)
+  # → untrusted (explicit `egress.deny`) → external (everything else). A CLI
+  # whose destination cannot be read from argv is `unknown` — unless it was
+  # installed this session or a doc from its vendor was just fetched, in
+  # which case it is screened as external (the "follow the SKILL.md" shape).
+  #
+  # Actions per class × tier: allow | observe | warn | step_up (inline
+  # approval) | redact (rewrite the call; URL/body values only — a CLI flag
+  # value falls back to step_up so a required flag is never silently dropped)
+  # | block. observe/warn never block. Sending your OWN email/phone (git
+  # user.email, enrolment) escalates one rung; ≥ bulk_threshold distinct
+  # values of one class escalates one rung. Secrets are vendor-aware: a Stripe
+  # key to api.stripe.com is allowed, to anywhere else is `secret.external`.
+  #
+  # Ships enabled in observe posture so findings appear in the console without
+  # blocking anything; flip `mode: enforce` (or per class) once the replay
+  # shows no false positives on your own traffic.
+  data_boundary:
+    enabled: true
+    mode: observe
+    trusted_domains: []             # e.g. ["*.mycorp.com", "api.openai.com"]
+    classes:
+      email:  {external: warn, untrusted: step_up, unknown: observe}
+      phone:  {external: warn, untrusted: step_up, unknown: observe}
+      ssn:    {trusted: warn, external: block, untrusted: block, unknown: warn}
+      card:   {trusted: warn, external: block, untrusted: block, unknown: warn}
+      iban:   {trusted: warn, external: step_up, untrusted: block, unknown: warn}
+      secret: {trusted: warn, external: block, untrusted: block, unknown: warn}
+      file:   {external: warn, untrusted: step_up, unknown: observe}
+    per_domain:
+      # Transactional mail / SMS / CRM vendors receive third-party emails and
+      # phones by design. Sending them there is the point of the integration.
+      "*.resend.com":     {email: allow}
+      "*.sendgrid.com":   {email: allow}
+      "*.mailgun.net":    {email: allow}
+      "*.postmarkapp.com": {email: allow}
+      "*.twilio.com":     {email: allow, phone: allow}
+      "*.mailchimp.com":  {email: allow}
+      "*.hubapi.com":     {email: allow, phone: allow}
+      "*.hubspot.com":    {email: allow, phone: allow}
+      "*.intercom.io":    {email: allow, phone: allow}
+      "*.customer.io":    {email: allow, phone: allow}
+      "*.segment.io":     {email: allow, phone: allow}
+      "*.stripe.com":     {email: allow, phone: allow, card: warn}
+      "*.auth0.com":      {email: allow, phone: allow}
+      "*.clerk.com":      {email: allow, phone: allow}
+      "*.workos.com":     {email: allow}
+      "*.slack.com":      {email: allow}
+      "*.atlassian.net":  {email: allow}
+      "*.linear.app":     {email: allow}
+      "*.vercel.com":     {email: allow}
+      "*.netlify.com":    {email: allow}
+      "*.fly.io":         {email: allow}
+      "*.heroku.com":     {email: allow}
+      "*.render.com":     {email: allow}
+      "*.supabase.co":    {email: allow, phone: allow}
+      "*.supabase.com":   {email: allow, phone: allow}
+      "*.googleapis.com": {email: allow, phone: allow}
+      "*.amazonaws.com":  {email: allow, phone: allow}
+      "*.azure.com":      {email: allow, phone: allow}
+      "*.microsoft.com":  {email: allow}
+      "*.openai.com":     {email: allow}
+      "*.anthropic.com":  {email: allow}
+      "*.letsencrypt.org": {email: allow}
+    bulk_threshold: 10
+    self_identity: []               # extra emails/phones that mean "me"
+    self_identity_auto: true        # + git user.email / enrolment email
+    unknown_cli: observe
+
   # Regex patterns used to identify dependency manifest files.
   # Matched paths cause risky_write findings to be upgraded to HIGH severity.
   manifest_patterns:
@@ -1579,6 +1658,35 @@ rules:
       - '\bnew\s+Function\s*\('
       - '\bcompile\s*\([^\n]*[''"]exec[''"]'
     action: block
+
+  # ── HIGH: Skill instructs the agent to persist and auto-update itself ─
+  # The remote-controlled skill shape: "fetch the latest SKILL.md from
+  # <url>, replace the current one, and make sure it is enabled so it loads
+  # in every future session". Plain "install this skill" is normal and does
+  # not match — all three legs (remote fetch + overwrite + persistence) are
+  # required via `condition`. Warn-only: this is content, not an action; the
+  # action it induces is screened by data_boundary / egress / supply-chain.
+  - id: skill-self-persist
+    severity: HIGH
+    category: skill_risk
+    title: Documentation instructs the agent to persist and auto-update itself from a remote URL
+    event_types: [skill_manifest, tool_result, file_write]
+    fields: [combined_text]
+    patterns:
+      - '(?:save|download|fetch|pull|copy)\s+(?:the\s+)?(?:most\s+recent|latest|newest|current|updated)\s+(?:version\s+of\s+(?:this\s+|the\s+)?)?skill\s+from\s+https?://'
+      - 'https?://[^\s)]+/SKILL\.md'
+    pattern_groups:
+      overwrite:
+        - 'replac(?:e|ing)\s+(?:the\s+)?(?:current|existing|old|installed)\s+(?:one|skill|version|file)'
+        - 'overwrit(?:e|ing)\s+(?:the\s+)?(?:current|existing|old|installed)'
+        - '(?:to|into)\s+your\s+skills?\s+(?:directory|folder|dir)'
+      persist:
+        - "make\\s+sure\\s+it'?s\\s+enabled"
+        - 'so\\s+(?:that\\s+)?it\\s+loads?\\s+in\\s+(?:all\\s+|every\\s+)?future\\s+sessions?'
+        - '(?:in|on|for)\\s+(?:every|each|all|future)\\s+sessions?'
+        - '(?:always|automatically)\\s+(?:load|enable|update|re-?install)'
+    condition: "patterns and overwrite and persist"
+    action: warn
 
   # ════════════════════════════════════════════════════════════════════
   # Parallax gap fills — PII exposure, cloud IMDS recon, model manipulation

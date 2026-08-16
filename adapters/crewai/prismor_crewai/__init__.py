@@ -77,6 +77,16 @@ def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_t
     )
 
 
+class _RunWith:
+    """Sentinel from ``_decide``: run the tool, but with these (redacted) args."""
+
+    __slots__ = ("args", "kwargs")
+
+    def __init__(self, args: tuple, kwargs: dict) -> None:
+        self.args = tuple(args)
+        self.kwargs = dict(kwargs)
+
+
 def prismor_guard_tool(
     tool: Any,
     *,
@@ -110,7 +120,15 @@ def prismor_guard_tool(
             if approvals:
                 try:
                     from prismor.runtime.enterprise import approvals as _approvals
-                    if _approvals.await_step_up(decision, agent=agent, session_id=sid):
+                    outcome = _approvals.await_step_up(decision, agent=agent, session_id=sid)
+                    if outcome:
+                        # "Approve redacted": strip the flagged values on-device
+                        # before running (the console only saw masked values).
+                        if getattr(outcome, "redacted", False):
+                            return _RunWith(
+                                _approvals.redact_approved_payload(args, workspace=ws),
+                                _approvals.redact_approved_payload(kwargs, workspace=ws),
+                            )
                         return None  # approved → allowed
                 except Exception:
                     pass
@@ -130,6 +148,8 @@ def prismor_guard_tool(
         @functools.wraps(impl)
         def guarded(*args: Any, __impl=impl, **kwargs: Any) -> Any:
             denial = _decide(args, kwargs)
+            if isinstance(denial, _RunWith):
+                return __impl(*denial.args, **denial.kwargs)
             return denial if denial is not None else __impl(*args, **kwargs)
 
         try:

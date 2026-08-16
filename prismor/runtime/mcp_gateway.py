@@ -681,9 +681,43 @@ class Gateway:
             from prismor.runtime.runtime import log_observe_findings
             log_observe_findings(decision, mode=self.mode, tool_name=name)
         if decision is not None and decision.blocking is not None:
-            self._reply(req_id, _blocked_result("Blocked by Prismor",
-                                                decision.blocking))
-            return
+            verdict = str(decision.blocking.get("action") or "block").lower()
+            handled = False
+            # MODIFY via pii_redact: rewrite the arguments in place and let the
+            # call through — the same transform the Claude hook path applies
+            # to Bash, applied here to MCP tool arguments (data_boundary).
+            if verdict == "modify" and decision.blocking.get("transform") == "pii_redact":
+                try:
+                    from prismor.runtime.enterprise.approvals import redact_approved_payload
+                    redacted = redact_approved_payload(arguments, workspace=self.workspace)
+                    if redacted != arguments:
+                        arguments = redacted
+                        handled = True
+                        sys.stderr.write(
+                            "[prismor-gateway] redacted sensitive values from tool arguments "
+                            f"({decision.blocking.get('ruleId')})\n"
+                        )
+                except Exception:
+                    handled = False
+            # STEP_UP: the gateway is headless, so route through the control-
+            # plane approval queue (blocks the worker until decided). "Approve
+            # redacted" strips the flagged values first.
+            elif verdict == "step_up":
+                try:
+                    from prismor.runtime.enterprise import approvals as _approvals
+                    outcome = _approvals.await_step_up(
+                        decision, event=None, agent=GATEWAY_AGENT, session_id=self.session_id
+                    )
+                    if outcome:
+                        if getattr(outcome, "redacted", False):
+                            arguments = _approvals.redact_approved_payload(arguments, workspace=self.workspace)
+                        handled = True
+                except Exception:
+                    handled = False
+            if not handled:
+                self._reply(req_id, _blocked_result("Blocked by Prismor",
+                                                    decision.blocking))
+                return
 
         result = route.upstream.request(
             "tools/call", {"name": route.tool, "arguments": arguments},

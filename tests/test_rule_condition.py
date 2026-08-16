@@ -53,7 +53,12 @@ class TestBackwardCompatibility(unittest.TestCase):
         # without `condition: "patterns and instruction_file"` it would flag any
         # document that merely discusses directive phrasing — including the
         # policy file that defines the patterns.
-        expected = {"memory-directive-on-write"}
+        #
+        # skill-self-persist needs one for the same reason: it fires on
+        # tool_result / file_write content, and "install this skill" is normal
+        # skill prose — only the remote-fetch AND overwrite AND auto-load
+        # combination is the remote-controlled-instructions shape it targets.
+        expected = {"memory-directive-on-write", "skill-self-persist"}
         engine = PolicyEngine()
         actual = {r.id for r in engine.rules if r.condition is not None}
         self.assertEqual(actual, expected)

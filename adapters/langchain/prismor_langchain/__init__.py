@@ -108,6 +108,16 @@ def _evaluate(*, tool_name, args, kwargs, subject, ws, agent, mode, sid, event_t
     )
 
 
+class _RunWith:
+    """Sentinel from ``_decide``: run the tool, but with these (redacted) args."""
+
+    __slots__ = ("args", "kwargs")
+
+    def __init__(self, args: tuple, kwargs: dict) -> None:
+        self.args = tuple(args)
+        self.kwargs = dict(kwargs)
+
+
 def prismor_guard_tool(
     tool: Any,
     *,
@@ -146,7 +156,17 @@ def prismor_guard_tool(
             if approvals:
                 try:
                     from prismor.runtime.enterprise import approvals as _approvals
-                    if _approvals.await_step_up(decision, agent=agent, session_id=sid):
+                    outcome = _approvals.await_step_up(decision, agent=agent, session_id=sid)
+                    if outcome:
+                        # "Approve redacted": the approver let the call through
+                        # on condition that the flagged values are stripped
+                        # first. Redaction happens here, on-device — the
+                        # console only ever saw masked values.
+                        if getattr(outcome, "redacted", False):
+                            return _RunWith(
+                                _approvals.redact_approved_payload(args, workspace=ws),
+                                _approvals.redact_approved_payload(kwargs, workspace=ws),
+                            )
                         return None  # approved → allowed
                 except Exception:
                     pass
@@ -161,6 +181,8 @@ def prismor_guard_tool(
         @functools.wraps(original_func)
         def guarded_func(*args: Any, **kwargs: Any) -> Any:
             denial = _decide(args, kwargs)
+            if isinstance(denial, _RunWith):
+                return original_func(*denial.args, **denial.kwargs)
             return denial if denial is not None else original_func(*args, **kwargs)
         tool.func = guarded_func
 
@@ -174,6 +196,8 @@ def prismor_guard_tool(
             import asyncio
 
             denial = await asyncio.to_thread(_decide, args, kwargs)
+            if isinstance(denial, _RunWith):
+                return await original_coro(*denial.args, **denial.kwargs)
             return denial if denial is not None else await original_coro(*args, **kwargs)
         tool.coroutine = guarded_coro
 

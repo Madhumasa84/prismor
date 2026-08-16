@@ -224,7 +224,29 @@ def build_record(
         "redacted": not full_capture,
     }
 
+    # Data-boundary context (see prismor/runtime/data_boundary.py): which
+    # classes of data travelled, to which trust tier, and whether the call was
+    # induced by external documentation. All are static labels/enums — no
+    # captured values — so they survive redaction. The destination host and
+    # the doc URL are free text and only ship under full capture.
+    if finding.get("dataClasses"):
+        record["data_classes"] = [str(c) for c in finding.get("dataClasses") or []]
+        record["data_subject"] = finding.get("dataSubject")
+    if finding.get("destTrust"):
+        record["dest_trust"] = finding.get("destTrust")
+    if finding.get("redactionApplied"):
+        record["redaction_applied"] = True
+    _prov = finding.get("provenance")
+    if isinstance(_prov, dict) and _prov.get("kind"):
+        record["provenance_kind"] = str(_prov.get("kind"))
+        if isinstance(_prov.get("eventIndex"), int):
+            record["provenance_seq"] = _prov.get("eventIndex")
+
     if full_capture:
+        if finding.get("destHost"):
+            record["dest_host"] = scrub(str(finding.get("destHost")), scrubbers)
+        if isinstance(_prov, dict) and _prov.get("ref"):
+            record["provenance_ref"] = scrub(str(_prov.get("ref")), scrubbers)
         detail: Dict[str, Any] = {}
         ev = finding.get("evidence")
         if isinstance(ev, str) and ev:

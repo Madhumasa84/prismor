@@ -301,9 +301,13 @@ def _guard_function_tool(
                     from prismor.runtime.enterprise import approvals as _approvals
                     # async variant: the wait runs in a worker thread so this
                     # event loop keeps servicing concurrent tools and streams.
-                    if await _approvals.await_step_up_async(
+                    outcome = await _approvals.await_step_up_async(
                         decision, event=event, agent=agent, session_id=sid
-                    ):
+                    )
+                    if outcome:
+                        if getattr(outcome, "redacted", False):
+                            # "Approve redacted": strip flagged values on-device first.
+                            input_str = _approvals.redact_approved_payload(input_str, workspace=ws)
                         return await original(ctx, input_str)
                 except Exception:
                     pass  # any approval-path error fails closed

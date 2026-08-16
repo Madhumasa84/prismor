@@ -30,7 +30,7 @@ import hashlib
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Tuple, Any, Dict, Optional
 
 from prismor.runtime.enterprise import identity as _identity
 
@@ -108,6 +108,15 @@ def _post_request(ident: Dict[str, Any], body: Dict[str, Any], timeout: float) -
 
 
 def _get_status(ident: Dict[str, Any], approval_id: str, timeout: float) -> Optional[str]:
+    """Current status string, or None on any transport error."""
+    status, _mode = _get_status_ex(ident, approval_id, timeout)
+    return status
+
+
+def _get_status_ex(ident: Dict[str, Any], approval_id: str, timeout: float) -> Tuple[Optional[str], str]:
+    """``(status, decision_mode)``. ``decision_mode`` is ``"redacted"`` when the
+    approver chose "approve with sensitive values stripped" — the runtime then
+    redacts locally before the call runs (see :func:`redact_approved_payload`)."""
     import urllib.request
     import urllib.error
 
@@ -118,9 +127,11 @@ def _get_status(ident: Dict[str, Any], approval_id: str, timeout: float) -> Opti
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        return str(data.get("status") or "").lower() or None
+        status = str(data.get("status") or "").lower() or None
+        mode = str(data.get("decision_mode") or data.get("decisionMode") or "full").lower()
+        return status, mode
     except (urllib.error.URLError, OSError, ValueError):
-        return None
+        return None, "full"
 
 
 def _audit_outcome(
@@ -153,27 +164,61 @@ def _audit_outcome(
         pass
 
 
+class ApprovalOutcome:
+    """Result of a headless step-up: ``approved`` plus whether the approver
+    asked for the sensitive values to be stripped first (``redacted``)."""
+
+    __slots__ = ("approved", "redacted", "approval_id", "status")
+
+    def __init__(self, approved: bool, redacted: bool = False, approval_id: Optional[str] = None,
+                 status: str = "") -> None:
+        self.approved = approved
+        self.redacted = redacted
+        self.approval_id = approval_id
+        self.status = status
+
+    def __bool__(self) -> bool:  # backwards compatible with the old bool return
+        return self.approved
+
+
+def redact_approved_payload(payload: Any, *, workspace: Any = None) -> Any:
+    """Strip classified sensitive values from ``payload`` (str / dict / list of
+    tool arguments) after an "approve redacted" decision. Uses the same
+    classifier as the data-boundary policy so what gets stripped is exactly
+    what the approver saw flagged. Best-effort: on any error the original is
+    returned unchanged (the call was approved; redaction is the extra ask)."""
+    try:
+        from prismor.runtime.data_boundary import redact_payload
+        return redact_payload(payload, workspace=workspace)
+    except Exception:
+        return payload
+
+
 def await_step_up(
     decision: Any,
     *,
     event: Optional[Dict[str, Any]] = None,
     agent: str = "",
     session_id: str = "",
-) -> bool:
+) -> "ApprovalOutcome":
     """Post an approval request for a STEP_UP finding and block until decided.
 
-    Returns True only on an explicit ``approved``. Not enrolled, denied, expired,
-    timeout, or any error → False (the caller must fail closed). Safe to call for
-    any decision — a no-op returning False when the verdict is not STEP_UP.
-    Every resolved request (approved/denied/expired/timeout/request_failed) is
-    recorded on the signed audit trail.
+    Returns an :class:`ApprovalOutcome` that is truthy only on an explicit
+    ``approved`` (so existing ``if await_step_up(...)`` callers keep working).
+    ``outcome.redacted`` is True when the approver chose "approve redacted":
+    the caller should pass its arguments through :func:`redact_approved_payload`
+    before running the tool. Not enrolled, denied, expired, timeout, or any
+    error → falsy (the caller must fail closed). Safe to call for any decision —
+    a no-op returning falsy when the verdict is not STEP_UP. Every resolved
+    request (approved/denied/expired/timeout/request_failed) is recorded on the
+    signed audit trail.
     """
     finding = step_up_finding(decision)
     if finding is None or not enabled():
-        return False
+        return ApprovalOutcome(False)
     ident = _identity.load_identity()
     if not ident or _identity.revoked_backoff_active():
-        return False  # no control plane to approve through → fail closed
+        return ApprovalOutcome(False)  # no control plane to approve through → fail closed
 
     tool = str(finding.get("toolName") or (event or {}).get("type") or "tool")
     body = {
@@ -181,10 +226,23 @@ def await_step_up(
         "tool": tool,
         "reason": str(finding.get("title") or "policy step-up"),
         "rule_id": finding.get("ruleId"),
+        "category": finding.get("category"),
         "severity": finding.get("severity"),
         "session_id": session_id or None,
         "agent": agent or None,
     }
+    # Data-boundary context so the approver sees WHAT is being sent, WHERE,
+    # and which doc induced it — labels only (classes/tier/kind), the masked
+    # evidence the finding already carries, and the destination host.
+    if finding.get("dataClasses"):
+        body["params"] = {
+            "data_classes": list(finding.get("dataClasses") or []),
+            "data_subject": finding.get("dataSubject"),
+            "dest_host": finding.get("destHost"),
+            "dest_trust": finding.get("destTrust"),
+            "masked": str(finding.get("evidence") or "")[:200],
+            "provenance": finding.get("provenance"),
+        }
 
     def _record(status: str, approval_id: Optional[str] = None) -> None:
         _audit_outcome(
@@ -196,11 +254,12 @@ def await_step_up(
     created = _post_request(ident, body, timeout=poll_timeout)
     if not created or not created.get("id"):
         _record("request_failed")
-        return False
+        return ApprovalOutcome(False, status="request_failed")
     approval_id = str(created["id"])
     if str(created.get("status") or "").lower() == _APPROVED:
-        _record("approved", approval_id)
-        return True
+        _mode = str(created.get("decision_mode") or created.get("decisionMode") or "full").lower()
+        _record("approved" if _mode != "redacted" else "approved_redacted", approval_id)
+        return ApprovalOutcome(True, redacted=_mode == "redacted", approval_id=approval_id, status="approved")
 
     deadline = _monotonic() + _timeout()
     interval = _poll_interval()
@@ -208,13 +267,15 @@ def await_step_up(
         time.sleep(interval)
         status = _get_status(ident, approval_id, timeout=poll_timeout)
         if status == _APPROVED:
-            _record("approved", approval_id)
-            return True
+            _st, mode = _get_status_ex(ident, approval_id, timeout=poll_timeout)
+            mode = mode if _st == _APPROVED else "full"
+            _record("approved" if mode != "redacted" else "approved_redacted", approval_id)
+            return ApprovalOutcome(True, redacted=mode == "redacted", approval_id=approval_id, status="approved")
         if status in _DECIDED:  # denied / expired
             _record(status, approval_id)
-            return False
+            return ApprovalOutcome(False, approval_id=approval_id, status=status)
     _record("timeout", approval_id)
-    return False  # timed out → fail closed
+    return ApprovalOutcome(False, approval_id=approval_id, status="timeout")  # timed out → fail closed
 
 
 async def await_step_up_async(
@@ -223,7 +284,7 @@ async def await_step_up_async(
     event: Optional[Dict[str, Any]] = None,
     agent: str = "",
     session_id: str = "",
-) -> bool:
+) -> "ApprovalOutcome":
     """Event-loop-safe :func:`await_step_up`.
 
     The sync poll loop sleeps for up to ``PRISMOR_APPROVAL_TIMEOUT`` seconds;
@@ -231,10 +292,10 @@ async def await_step_up_async(
     event loop - stalling every concurrent tool, LLM stream, and (for
     browser-use) the CDP socket - until a human decides. This variant runs the
     wait in a worker thread instead, so the loop keeps servicing. Same
-    contract: True only on an explicit approval, everything else False.
+    contract: truthy only on an explicit approval, everything else falsy.
     """
     if step_up_finding(decision) is None or not enabled():
-        return False
+        return ApprovalOutcome(False)
     import asyncio
 
     return await asyncio.to_thread(

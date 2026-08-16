@@ -407,6 +407,163 @@
               }
             }
           }
+        },
+        "data_boundary": {
+          "type": "object",
+          "description": "Data boundary: screens what an outbound call SENDS (emails, phones, cards, secrets, files) against where it is going (internal / trusted / external / untrusted). Catches agents that follow third-party docs into shipping the user's own data to a service the user never approved, while letting synthetic/test payloads and trusted destinations through silently.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt in. Defaults to false."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "observe",
+                "enforce"
+              ],
+              "description": "observe logs only; enforce honors step_up/redact/block. observe/warn class actions never block regardless."
+            },
+            "trusted_domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Hosts (glob `*.corp.com`, IP, CIDR) that may receive any class silently. VCS hosts and package registries are trusted by default."
+            },
+            "classes": {
+              "type": "object",
+              "description": "Per data class, the action per destination tier. Classes: email, phone, ssn, card, iban, secret (non-vendor destinations only), file (uploads).",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "internal": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "observe",
+                          "warn",
+                          "step_up",
+                          "redact",
+                          "modify",
+                          "block"
+                        ]
+                      },
+                      "trusted": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "observe",
+                          "warn",
+                          "step_up",
+                          "redact",
+                          "modify",
+                          "block"
+                        ]
+                      },
+                      "external": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "observe",
+                          "warn",
+                          "step_up",
+                          "redact",
+                          "modify",
+                          "block"
+                        ]
+                      },
+                      "untrusted": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "observe",
+                          "warn",
+                          "step_up",
+                          "redact",
+                          "modify",
+                          "block"
+                        ]
+                      },
+                      "unknown": {
+                        "type": "string",
+                        "enum": [
+                          "allow",
+                          "observe",
+                          "warn",
+                          "step_up",
+                          "redact",
+                          "modify",
+                          "block"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "observe",
+                      "warn",
+                      "step_up",
+                      "redact",
+                      "modify",
+                      "block"
+                    ]
+                  }
+                ]
+              }
+            },
+            "per_domain": {
+              "type": "object",
+              "description": "Per-host carve-outs by class, e.g. `api.resend.com: {email: allow}`.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "observe",
+                    "warn",
+                    "step_up",
+                    "redact",
+                    "modify",
+                    "block"
+                  ]
+                }
+              }
+            },
+            "bulk_threshold": {
+              "type": "integer",
+              "minimum": 2,
+              "description": "Distinct values of one class in a single call at/above which the action escalates one rung. Default 10."
+            },
+            "self_identity": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Emails/phones that identify the user; sending them externally escalates one rung. git user.email and enrolment email are added automatically unless self_identity_auto is false."
+            },
+            "self_identity_auto": {
+              "type": "boolean",
+              "description": "Discover the user's own email from git config / enrolment. Default true."
+            },
+            "unknown_cli": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "observe",
+                "warn",
+                "step_up"
+              ],
+              "description": "Posture for a CLI whose destination cannot be inferred from argv. Default observe. Escalated to the external tier automatically when the binary was installed this session or a doc from that vendor was just fetched."
+            }
+          }
         }
       },
       "additionalProperties": false
