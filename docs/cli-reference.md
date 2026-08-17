@@ -51,6 +51,7 @@ prismor
 │   ├─ semantic-check         Hybrid LLM prompt-injection guard
 │   ├─ sandbox <action>       status · check · run — Docker command sandbox
 │   ├─ eval-server            HTTP evaluation endpoint for non-Python adapters
+│   ├─ inference-hook <action> serve · test · secret — Claude Inference Hooks AI security server
 │   ├─ egress <action>        show · report · test · allow · deny · mode — network egress policy
 │   └─ policy <action>        init · validate · show · edit · test
 │
@@ -194,6 +195,16 @@ outside all of this, the same as every other Prismor control.
 | Command | Key flags | Description |
 |---|---|---|
 | `prismor eval-server` | `--port` (default 7071), `--host` (default 127.0.0.1), `--workspace` | HTTP evaluation endpoint (`POST /v1/evaluate`) so non-Python adapters (Vercel AI SDK, anything HTTP) get the same policy pipeline. See [Frameworks overview](frameworks-overview.md) and [Vercel AI SDK](frameworks-vercel-ai.md). |
+
+### inference-hook
+
+| Command | Key flags | Description |
+|---|---|---|
+| `prismor inference-hook serve` | `--host`, `--port` (7072), `--signing-secret`, `--previous-signing-secret`, `--fail-open`, `--mode enforce|shadow`, `--allow-unsigned`, `--api-key`, `--config`, `--workspace`, `-v` | Run the AI security server for [Claude Inference Hooks](inference-hook.md): Anthropic POSTs each governed prompt (claude.ai, Claude Code, Cowork) as a signed frame; Prismor evaluates the transcript and returns `{action: allow|deny}`. Fail-closed by default; any path is the endpoint; `GET /health`. |
+| `prismor inference-hook test` | `--url`, `--secret`, `--sample clean|pci|secret|injection|config-test|all`, `--frame file.json`, `--unsigned`, `--bearer`, `--expect`, `--json` | Send Standard-Webhooks-signed sample frames to a server (or evaluate in-process with no `--url`) and print the verdicts. Exit 0 allow · 1 deny · 2 error/mismatch. |
+| `prismor inference-hook secret` | — | Print a fresh `whsec_` secret for local end-to-end runs. |
+
+`prismor inference-hook-server` remains as an alias for `serve`.
 
 Full policy model, rule schema, and the default rule list: [Prismor](prismor-runtime.md).
 
