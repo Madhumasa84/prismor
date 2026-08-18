@@ -65,6 +65,86 @@ from prismor.runtime.store import (
 
 _DASHBOARD_HTML = Path(__file__).with_name("dashboard.html")
 
+
+def _mirror_server_names(workspace: Path) -> set:
+    """Names of MCP servers configured as Prismor's mirror (built-ins served
+    in-process). Detected by ``mirror:true`` / ``type:mirror`` in a gateway
+    config, or a command that runs ``mcp-gateway --mirror``."""
+    import json as _json
+    from prismor.runtime.mcp_gateway import DEFAULT_GATEWAY_CONFIG
+    names: set = set()
+    candidates = [workspace / ".mcp.json", DEFAULT_GATEWAY_CONFIG,
+                  Path.home() / ".prismor" / "mcp-gateway.json"]
+    for path in candidates:
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        servers = data.get("mcpServers") or data.get("servers") or {}
+        if not isinstance(servers, dict):
+            continue
+        for name, cfg in servers.items():
+            if not isinstance(cfg, dict):
+                continue
+            if cfg.get("mirror") is True or str(cfg.get("type") or "").lower() == "mirror":
+                names.add(str(name))
+            args = cfg.get("args") or []
+            if isinstance(args, list) and "--mirror" in [str(a) for a in args]:
+                names.add(str(name))
+    return names
+
+
+def _mcp_server_inventory(workspace: Path):
+    """One registry of the MCP servers Prismor fronts, each with its tools and
+    current per-tool handling (allow / ask / deny). The mirror server lists the
+    built-ins it serves (static); other servers list the tools that already
+    carry a policy (exact rosters are only known once a tool is called).
+    """
+    from prismor.runtime.agents import load_agents_config
+    from prismor.runtime.scoped_agent import discover_mcp_families
+    from prismor.runtime import mirror
+
+    cfg = load_agents_config(workspace)
+    deny = set(cfg.get("global_deny_tools") or [])
+    ask = set(cfg.get("global_ask_tools") or [])
+
+    def _state(tag: str) -> str:
+        return "deny" if tag in deny else ("ask" if tag in ask else "allow")
+
+    mirror_names = _mirror_server_names(workspace)
+    servers = []
+
+    # The mirror: its tools are the built-ins, tagged by their NATIVE names
+    # (that is how they reach policy), so the grid here drives the same rules
+    # that screen a hooked Bash/Read.
+    for name in sorted(mirror_names):
+        servers.append({
+            "name": name, "kind": "mirror",
+            "tools": [{"name": t, "tag": t, "state": _state(t)}
+                      for t in mirror.mirror_tool_names()],
+        })
+
+    # Other configured servers: name from discovery, tools = whatever already
+    # has a policy under mcp__<server>__*. Tool tags for a real server are
+    # namespaced, so a policy set here scopes to that one server's tool.
+    seen = set(mirror_names)
+    for fam in discover_mcp_families(workspace):
+        # fam is "mcp__<server>__*"
+        if not (fam.startswith("mcp__") and fam.endswith("__*")):
+            continue
+        server = fam[len("mcp__"):-len("__*")]
+        if server in seen:
+            continue
+        seen.add(server)
+        prefix = f"mcp__{server}__"
+        tools = sorted({t for t in (deny | ask) if t.startswith(prefix)})
+        servers.append({
+            "name": server, "kind": "remote", "family": fam,
+            "tools": [{"name": t[len(prefix):], "tag": t, "state": _state(t)}
+                      for t in tools],
+        })
+    return servers
+
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -193,6 +273,14 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/health":
             self._send_json({"status": "ok", "ts": datetime.now(timezone.utc).isoformat()})
+            return
+
+        if path == "/api/mcp-servers":
+            workspace = self._resolve_workspace(qs) or Path.cwd()
+            try:
+                self._send_json({"servers": _mcp_server_inventory(workspace)})
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=500)
             return
 
         if path == "/api/workspaces":

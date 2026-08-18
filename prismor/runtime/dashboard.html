@@ -1035,6 +1035,8 @@
   .tp-allow.on { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
   .tp-ask.on   { background:#fef9c3; color:#a16207; border-color:#fde68a; }
   .tp-deny.on  { background:#fee2e2; color:#b91c1c; border-color:#fecaca; }
+  .mcp-kind { font-size:11px; font-weight:600; color:var(--gray-500); background:var(--gray-100); border-radius:999px; padding:2px 9px; margin-left:2px; }
+  .mcp-kind-mirror { color:#a16207; background:#fef9c3; }
 
   /* ── Session flow page ── */
   .session-hero {
@@ -1635,6 +1637,7 @@
   <button class="tab-btn active" data-tab="overview" data-label="Overview"><svg class="icon"><use href="#i-home"/></svg><span>Overview</span></button>
   <button class="tab-btn" data-tab="agents" data-label="Agents"><svg class="icon"><use href="#i-bot"/></svg><span>Agents</span></button>
   <button class="tab-btn" data-tab="sessions" data-label="Sessions"><svg class="icon"><use href="#i-radio"/></svg><span>Sessions</span></button>
+  <button class="tab-btn" data-tab="mcpservers" data-label="MCP Servers"><svg class="icon"><use href="#i-database"/></svg><span>MCP Servers</span></button>
   <button class="tab-btn" data-tab="mcp" data-label="MCP Playground"><svg class="icon"><use href="#i-database"/></svg><span>MCP Playground</span></button>
   <button class="tab-btn" data-tab="policy" data-label="Policy Control"><svg class="icon"><use href="#i-shield"/></svg><span>Policy Control</span></button>
   <button class="tab-btn" data-tab="fleet" data-label="Fleet"><svg class="icon"><use href="#i-building"/></svg><span>Fleet</span><span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
@@ -1660,6 +1663,13 @@
 </div>
 
 <!-- ═══ PAGE: MCP PLAYGROUND ══════════════════════════════════════ -->
+<div id="page-mcpservers" class="page">
+  <div class="section"><h2>MCP Servers</h2><div class="rule"></div>
+    <span class="hint">Every MCP server Prismor fronts, and how each tool is handled. Allow runs it; Ask requires human approval (step-up); Deny blocks it. Applies across all agents.</span>
+  </div>
+  <div id="mcpServersList"><div class="empty">Loading MCP servers…</div></div>
+</div>
+
 <div id="page-mcp" class="page">
   <div class="section"><h2>MCP Playground</h2><div class="rule"></div>
     <span class="hint">Claude Code tool access — every call is evaluated by Prismor before delivery.</span>
@@ -2610,6 +2620,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       if (_agentsCache) renderAgents(_agentsCache);
       loadAgents();           // silent background refresh
     }
+    if (btn.dataset.tab === 'mcpservers') loadMcpServers();
     if (btn.dataset.tab === 'mcp') loadMcpPlayground();
   });
 });
@@ -2630,6 +2641,60 @@ function renderMcpPlayground(data) {
   const calls = data.delivered || [];
   document.getElementById('mcpDelivered').textContent = calls.length ? 'Delivered: ' + calls.join(', ') : 'No calls delivered yet.';
 }
+// ── MCP Servers: one registry of every server Prismor fronts ──────────────
+async function loadMcpServers() {
+  const el = document.getElementById('mcpServersList');
+  try {
+    const ws = _serverWorkspace || '';
+    const data = await apiFetch('/api/mcp-servers' + (ws ? '?workspace=' + encodeURIComponent(ws) : ''));
+    _mcpServersCache = data.servers || [];
+    renderMcpServers();
+  } catch (e) {
+    el.innerHTML = '<div class="empty" style="color:#b91c1c">Failed to load: ' + safe(e.message) + '</div>';
+  }
+}
+let _mcpServersCache = [];
+function renderMcpServers() {
+  const el = document.getElementById('mcpServersList');
+  const servers = _mcpServersCache;
+  if (!servers.length) { el.innerHTML = '<div class="empty">No MCP servers configured. Point your agent\'s .mcp.json at <code>prismor mcp-gateway</code>.</div>'; return; }
+  el.innerHTML = servers.map(s => {
+    const kindPill = s.kind === 'mirror'
+      ? '<span class="mcp-kind mcp-kind-mirror">mirror · built-ins</span>'
+      : '<span class="mcp-kind">remote</span>';
+    const rows = (s.tools || []).length ? (s.tools || []).map(t => {
+      const st = t.state || 'allow';
+      const btn = (val, label, title) =>
+        '<button class="tp-btn tp-' + val + (st === val ? ' on' : '') + '" title="' + title + '" ' +
+          'onclick="mcpToolSet(\'' + safeAttr(t.tag) + '\',\'' + val + '\')">' + label + '</button>';
+      return '<div class="tp-row"><span class="tp-tool">' + safe(t.name) + '</span>' +
+        '<span class="tp-btns">' + btn('allow','Allow','Runs without prompting') +
+          btn('ask','Ask','Requires human approval (step-up)') +
+          btn('deny','Deny','Blocked in real time') + '</span></div>';
+    }).join('') : '<div class="tp-row" style="color:var(--gray-400);font-size:12px">No tools with a policy yet — they appear here once the agent uses them, or set one on the server\'s tools directly.</div>';
+    return '<div class="card" style="margin-bottom:16px">' +
+      '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
+        '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
+        safe(s.name) + kindPill + '</div>' +
+      '<div class="tp-grid" style="margin-top:12px">' + rows + '</div></div>';
+  }).join('');
+}
+async function mcpToolSet(tag, action) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/tool-policy', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scope:'global', tool: tag, action, workspace: ws})});
+    // Update cache in place for the toggled tag.
+    const deny = new Set(r.deny_tools || []), ask = new Set(r.ask_tools || []);
+    _mcpServersCache.forEach(s => (s.tools||[]).forEach(t => {
+      if (t.tag === tag) t.state = deny.has(tag) ? 'deny' : (ask.has(tag) ? 'ask' : 'allow');
+    }));
+    renderMcpServers();
+    toast('✓ ' + tag + ' → ' + action);
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
+}
+
 async function mcpRequest(body) {
   const result = await apiFetch('/api/mcp-playground', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (result.state) _mcpPlayground = result.state; else _mcpPlayground = result;
