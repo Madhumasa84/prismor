@@ -50,6 +50,10 @@ __all__ = [
     "execute",
     "shape_call_event",
     "shape_result_event",
+    "mark_active",
+    "clear_active",
+    "active_tools",
+    "already_screened",
     "MirrorError",
 ]
 
@@ -377,6 +381,93 @@ _IMPL = {
     "Glob": _run_glob,
     "Grep": _run_grep,
 }
+
+
+# ── active-mirror marker ─────────────────────────────────────────────────────
+#
+# When the mirror is running, a mirrored call is screened twice: once by the
+# gateway (as a native "shell"/"file_read" event) and again by the host's hook
+# layer, which sees the same action arrive as ``mcp__<server>__Bash``. That
+# doubles every telemetry row, pays the policy cost twice, and splits one action
+# across two tool names in the console.
+#
+# The hook layer cannot recognise the gateway by name — the host chose that name
+# in its own .mcp.json and the gateway never learns it. So the running gateway
+# leaves a marker naming the workspace and the tools it serves, and the hook
+# layer skips exactly those. The marker is keyed to a live pid, so a crashed
+# gateway cannot leave behind a rule that silently un-screens real tool calls.
+
+def _marker_path(workspace: Path) -> Path:
+    import hashlib
+    from prismor.runtime.store import prismor_home
+    key = hashlib.sha256(str(Path(workspace).resolve()).encode()).hexdigest()[:16]
+    return prismor_home() / "mirror" / f"{key}.json"
+
+
+def mark_active(workspace: Path, tools: Optional[List[str]] = None) -> None:
+    """Record that a mirror is serving ``tools`` for ``workspace``."""
+    import json
+    path = _marker_path(workspace)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "pid": os.getpid(),
+            "workspace": str(Path(workspace).resolve()),
+            "tools": list(tools or mirror_tool_names()),
+        }))
+    except OSError:
+        pass  # advisory only — never fail a gateway start over the marker
+
+
+def clear_active(workspace: Path) -> None:
+    try:
+        _marker_path(workspace).unlink()
+    except OSError:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # exists, owned by someone else
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def active_tools(workspace: Path) -> List[str]:
+    """Tools currently served by a live mirror for this workspace ([] if none)."""
+    import json
+    path = _marker_path(workspace)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict) or not _pid_alive(data.get("pid")):
+        # Stale marker from a gateway that died. Removing it is the safe
+        # direction: screening resumes rather than staying suppressed.
+        clear_active(workspace)
+        return []
+    tools = data.get("tools")
+    return [str(t) for t in tools] if isinstance(tools, list) else []
+
+
+def already_screened(tool_name: str, workspace: Path) -> bool:
+    """True when this hook-layer tool call is a mirrored built-in that the
+    gateway has already policy-screened and logged.
+
+    Requires a live mirror for this workspace serving a tool of that name, so a
+    third-party MCP server that happens to expose a tool called ``Bash`` is not
+    quietly exempted.
+    """
+    name = str(tool_name or "")
+    if not name.startswith("mcp__"):
+        return False
+    bare = name.rsplit("__", 1)[-1]
+    return bare in active_tools(workspace)
 
 
 def execute(tool: str, arguments: Any, workspace: Path) -> str:

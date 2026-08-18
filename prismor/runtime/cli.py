@@ -1300,6 +1300,21 @@ def main(argv: Optional[List[str]] = None) -> None:
                 workspace = _git_root_or_self(Path(_cwd))
         register_workspace(workspace)
 
+        # A mirrored built-in reaching the hook layer as mcp__<server>__Bash has
+        # already been screened and logged by the gateway that executes it —
+        # there, as a native shell/file event with the right rules applied.
+        # Screening it again doubles every telemetry row and splits one action
+        # across two tool names in the console. Only skipped while a live mirror
+        # for this workspace actually serves a tool of that name.
+        try:
+            from prismor.runtime import mirror as _mirror
+            if _mirror.already_screened(payload.get("tool_name") or "", workspace):
+                sys.exit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
         _agent_event = str(event.get("agent_event") or "")

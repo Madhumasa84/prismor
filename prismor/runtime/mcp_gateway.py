@@ -1330,7 +1330,28 @@ def run_gateway(args, workspace: Path) -> int:
     except (ValueError, OSError):
         pass  # not the main thread / unsupported platform
 
+    # Tell the host's hook layer that these built-ins are already screened here,
+    # so the same call is not evaluated and logged a second time as
+    # mcp__<server>__Bash. Cleared on the way out, and pid-guarded so a crash
+    # cannot leave screening suppressed.
+    mirrored = any(s.local for s in specs)
+    if mirrored:
+        try:
+            from prismor.runtime import mirror as _mirror
+            _mirror.mark_active(workspace)
+        except Exception:
+            pass
+
     sys.stderr.write(
         f"[prismor-gateway] serving {len(specs)} upstream server(s) "
-        f"session={gateway.session_id} mode={gateway.mode}\n")
-    return gateway.serve_stdio()
+        f"session={gateway.session_id} mode={gateway.mode}"
+        f"{' mirror=on' if mirrored else ''}\n")
+    try:
+        return gateway.serve_stdio()
+    finally:
+        if mirrored:
+            try:
+                from prismor.runtime import mirror as _mirror
+                _mirror.clear_active(workspace)
+            except Exception:
+                pass
