@@ -476,7 +476,7 @@ class UpstreamLocal(Upstream):
                 timeout: float = REQUEST_TIMEOUT) -> Dict[str, Any]:
         from prismor.runtime import mirror
         if method == "tools/list":
-            return {"tools": mirror.mirror_tool_definitions()}
+            return {"tools": mirror.mirror_tool_definitions(self.workspace)}
         if method == "tools/call":
             name = str(params.get("name") or "")
             try:

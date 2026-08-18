@@ -1037,6 +1037,14 @@
   .tp-deny.on  { background:#fee2e2; color:#b91c1c; border-color:#fecaca; }
   .mcp-kind { font-size:11px; font-weight:600; color:var(--gray-500); background:var(--gray-100); border-radius:999px; padding:2px 9px; margin-left:2px; }
   .mcp-kind-mirror { color:#a16207; background:#fef9c3; }
+  .mcp-hint { font-size:11.5px; color:var(--gray-500); margin-top:8px; line-height:1.5; }
+  .tp-toggle { position:relative; width:38px; height:22px; border-radius:999px; border:1px solid var(--gray-200); background:var(--gray-100); cursor:pointer; padding:0; transition:background .12s; }
+  .tp-toggle.on { background:#22c55e; border-color:#16a34a; }
+  .tp-toggle.off { background:var(--gray-200); }
+  .tp-toggle:disabled { opacity:.4; cursor:not-allowed; }
+  .tp-knob { position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .12s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .tp-toggle.on .tp-knob { left:18px; }
+  .tp-row-off .tp-tool { color:var(--gray-400); }
 
   /* ── Session flow page ── */
   .session-hero {
@@ -2658,26 +2666,82 @@ function renderMcpServers() {
   const el = document.getElementById('mcpServersList');
   const servers = _mcpServersCache;
   if (!servers.length) { el.innerHTML = '<div class="empty">No MCP servers configured. Point your agent\'s .mcp.json at <code>prismor mcp-gateway</code>.</div>'; return; }
-  el.innerHTML = servers.map(s => {
-    const kindPill = s.kind === 'mirror'
-      ? '<span class="mcp-kind mcp-kind-mirror">mirror · built-ins</span>'
-      : '<span class="mcp-kind">remote</span>';
-    const rows = (s.tools || []).length ? (s.tools || []).map(t => {
-      const st = t.state || 'allow';
-      const btn = (val, label, title) =>
-        '<button class="tp-btn tp-' + val + (st === val ? ' on' : '') + '" title="' + title + '" ' +
-          'onclick="mcpToolSet(\'' + safeAttr(t.tag) + '\',\'' + val + '\')">' + label + '</button>';
-      return '<div class="tp-row"><span class="tp-tool">' + safe(t.name) + '</span>' +
-        '<span class="tp-btns">' + btn('allow','Allow','Runs without prompting') +
-          btn('ask','Ask','Requires human approval (step-up)') +
-          btn('deny','Deny','Blocked in real time') + '</span></div>';
-    }).join('') : '<div class="tp-row" style="color:var(--gray-400);font-size:12px">No tools with a policy yet — they appear here once the agent uses them, or set one on the server\'s tools directly.</div>';
-    return '<div class="card" style="margin-bottom:16px">' +
-      '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
-        '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
-        safe(s.name) + kindPill + '</div>' +
-      '<div class="tp-grid" style="margin-top:12px">' + rows + '</div></div>';
+  el.innerHTML = servers.map(s =>
+    s.kind === 'mirror' ? renderMirrorCard(s) : renderRemoteCard(s)
+  ).join('');
+}
+
+// The mirror: front-of-house controls. An Override switch (replace the native
+// toolkit, or use the host's own tools directly) and a per-tool on/off roster —
+// "this tool I want, this one I don't" — distinct from call-time allow/ask/deny.
+function renderMirrorCard(s) {
+  const override = s.override !== false;
+  const ovBtn = '<button class="en-toggle ' + (override ? 'on' : 'off') + '" ' +
+    'onclick="mcpOverrideSet(\'' + safeAttr(s.name) + '\',' + (override ? 'true' : 'false') + ')">' +
+    (override ? 'Overriding native tools' : 'Using native tools') + '</button>';
+  const rows = (s.tools || []).map(t => {
+    const on = t.enabled !== false;
+    const toggle = '<button class="tp-toggle ' + (on ? 'on' : 'off') + '"' +
+      (override ? '' : ' disabled title="Turn on Override to serve mirror tools"') +
+      ' onclick="mcpToolEnable(\'' + safeAttr(s.name) + '\',\'' + safeAttr(t.name) + '\',' + (on ? 'true' : 'false') + ')">' +
+      '<span class="tp-knob"></span></button>';
+    return '<div class="tp-row' + (override ? '' : ' tp-row-off') + '">' +
+      '<span class="tp-tool">' + safe(t.name) + '</span>' + toggle + '</div>';
   }).join('');
+  return '<div class="card" style="margin-bottom:16px">' +
+    '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
+      '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
+      safe(s.name) + '<span class="mcp-kind mcp-kind-mirror">mirror · built-ins</span>' +
+      '<span style="margin-left:auto">' + ovBtn + '</span></div>' +
+    '<div class="mcp-hint">' + (override
+      ? 'The mirror serves the tools switched on below in place of the agent\'s own. Disable natives at deploy (Claude Code <code>--tools ""</code>) so these take over.'
+      : 'Off — the agent uses its own built-in tools directly; the mirror serves nothing and does not govern them.') + '</div>' +
+    '<div class="tp-grid" style="margin-top:10px">' + rows + '</div></div>';
+}
+
+function renderRemoteCard(s) {
+  const rows = (s.tools || []).length ? (s.tools || []).map(t => {
+    const st = t.state || 'allow';
+    const btn = (val, label, title) =>
+      '<button class="tp-btn tp-' + val + (st === val ? ' on' : '') + '" title="' + title + '" ' +
+        'onclick="mcpToolSet(\'' + safeAttr(t.tag) + '\',\'' + val + '\')">' + label + '</button>';
+    return '<div class="tp-row"><span class="tp-tool">' + safe(t.name) + '</span>' +
+      '<span class="tp-btns">' + btn('allow','Allow','Runs without prompting') +
+        btn('ask','Ask','Requires human approval (step-up)') +
+        btn('deny','Deny','Blocked in real time') + '</span></div>';
+  }).join('') : '<div class="tp-row" style="color:var(--gray-400);font-size:12px">No tools with a policy yet — they appear here once the agent uses them.</div>';
+  return '<div class="card" style="margin-bottom:16px">' +
+    '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
+      '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
+      safe(s.name) + '<span class="mcp-kind">remote</span></div>' +
+    '<div class="tp-grid" style="margin-top:12px">' + rows + '</div></div>';
+}
+
+async function mcpOverrideSet(server, current) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/mcp-config', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({override: !current, workspace: ws})});
+    const s = _mcpServersCache.find(x => x.name === server);
+    if (s) s.override = r.override;
+    renderMcpServers();
+    toast('✓ ' + server + (r.override ? ' overriding native tools' : ' using native tools'));
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
+}
+
+async function mcpToolEnable(server, tool, current) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/mcp-config', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tool, enabled: !current, workspace: ws})});
+    const dis = new Set(r.disabled_tools || []);
+    const s = _mcpServersCache.find(x => x.name === server);
+    if (s) (s.tools||[]).forEach(t => { if (t.name === tool) t.enabled = !dis.has(tool); });
+    renderMcpServers();
+    toast('✓ ' + tool + (current ? ' removed' : ' added'));
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
 }
 async function mcpToolSet(tag, action) {
   try {

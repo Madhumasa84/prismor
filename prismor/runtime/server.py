@@ -116,11 +116,17 @@ def _mcp_server_inventory(workspace: Path):
 
     # The mirror: its tools are the built-ins, tagged by their NATIVE names
     # (that is how they reach policy), so the grid here drives the same rules
-    # that screen a hooked Bash/Read.
+    # that screen a hooked Bash/Read. It also carries two front-of-house
+    # controls: `override` (replace the native toolkit or not) and a per-tool
+    # `enabled` roster (which built-ins the mirror exposes at all).
+    mcfg = mirror.mirror_config(workspace)
+    disabled = set(mcfg["disabled_tools"])
     for name in sorted(mirror_names):
         servers.append({
             "name": name, "kind": "mirror",
-            "tools": [{"name": t, "tag": t, "state": _state(t)}
+            "override": mcfg["override"],
+            "tools": [{"name": t, "tag": t, "state": _state(t),
+                       "enabled": t not in disabled}
                       for t in mirror.mirror_tool_names()],
         })
 
@@ -525,6 +531,30 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                                  "tool": tool, "agent": agent,
                                  "deny_tools": lists["deny_tools"],
                                  "ask_tools": lists["ask_tools"]})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
+        # POST /api/mcp-config — mirror roster + override switch
+        if path == "/api/mcp-config":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except Exception as exc:
+                self._send_json({"error": f"invalid JSON: {exc}"}, status=400)
+                return
+            try:
+                from prismor.runtime import mirror
+                ws_str = body.get("workspace")
+                workspace = Path(ws_str) if ws_str else (_SERVER_WORKSPACE or Path.cwd())
+                cfg = mirror.set_mirror_config(
+                    workspace,
+                    override=body.get("override"),
+                    tool=body.get("tool"),
+                    enabled=body.get("enabled"),
+                )
+                self._send_json({"ok": True, "override": cfg["override"],
+                                 "disabled_tools": cfg["disabled_tools"]})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return

@@ -47,6 +47,10 @@ from typing import Any, Dict, List, Optional, Tuple
 __all__ = [
     "MIRROR_SERVER_NAME",
     "mirror_tool_definitions",
+    "mirror_tool_names",
+    "mirror_config",
+    "enabled_tool_names",
+    "set_mirror_config",
     "execute",
     "shape_call_event",
     "shape_result_event",
@@ -156,14 +160,104 @@ _PATH_ARG = {"Read": "file_path", "Write": "file_path", "Edit": "file_path"}
 _MIRRORABLE = frozenset(name for name, _d, _s in _DEFS)
 
 
-def mirror_tool_definitions() -> List[Dict[str, Any]]:
-    """MCP ``tools/list`` entries for the mirrored built-ins."""
-    return [{"name": name, "description": desc, "inputSchema": schema}
-            for name, desc, schema in _DEFS]
-
-
 def mirror_tool_names() -> List[str]:
     return [name for name, _d, _s in _DEFS]
+
+
+# ── mirror roster + override config ──────────────────────────────────────────
+#
+# Two front-of-house controls, separate from the allow/ask/deny call-time
+# policy:
+#
+#   override      Does the mirror REPLACE the host's native toolkit, or not?
+#                 When off, the mirror serves nothing — the agent uses its own
+#                 built-ins directly (ungoverned by the mirror) and there are no
+#                 duplicate Bash/Read tools competing in the model's tool list.
+#                 When on, the mirror serves the enabled roster below (the
+#                 deployment is expected to have disabled the natives so these
+#                 take their place).
+#   roster        Which built-ins the mirror exposes at all. A tool switched off
+#                 is simply not advertised in tools/list — "this tool I want,
+#                 this one I don't", distinct from denying a call at runtime.
+#
+# Stored in ``<workspace>/.prismor/mirror.json`` so the running gateway and the
+# dashboard agree on one file. Missing file → the safe default: override on,
+# every tool enabled (today's behaviour).
+
+def _mirror_config_path(workspace: Path) -> Path:
+    return Path(workspace) / ".prismor" / "mirror.json"
+
+
+def mirror_config(workspace: Optional[Path]) -> Dict[str, Any]:
+    """Return ``{"override": bool, "disabled_tools": [names]}`` for a workspace.
+
+    Never raises: a missing or malformed file yields the default (override on,
+    nothing disabled), because the mirror must keep serving even if an operator
+    hand-edits the file into invalid JSON.
+    """
+    cfg = {"override": True, "disabled_tools": []}
+    if workspace is None:
+        return cfg
+    import json as _json
+    try:
+        raw = _json.loads(_mirror_config_path(workspace).read_text(encoding="utf-8"))
+    except Exception:
+        return cfg
+    if isinstance(raw, dict):
+        if isinstance(raw.get("override"), bool):
+            cfg["override"] = raw["override"]
+        dis = raw.get("disabled_tools")
+        if isinstance(dis, list):
+            cfg["disabled_tools"] = [str(t) for t in dis if str(t) in _MIRRORABLE]
+    return cfg
+
+
+def enabled_tool_names(workspace: Optional[Path]) -> List[str]:
+    """Tools the mirror should advertise/execute for this workspace: the roster
+    minus disabled tools, or nothing at all when override is off."""
+    cfg = mirror_config(workspace)
+    if not cfg["override"]:
+        return []
+    disabled = set(cfg["disabled_tools"])
+    return [t for t in mirror_tool_names() if t not in disabled]
+
+
+def set_mirror_config(workspace: Path, *, override: Optional[bool] = None,
+                      tool: Optional[str] = None, enabled: Optional[bool] = None
+                      ) -> Dict[str, Any]:
+    """Update the mirror roster/override for a workspace and return the new config.
+
+    ``override`` sets the replace-natives switch. ``tool``+``enabled`` toggle one
+    built-in's roster membership. Either may be given independently.
+    """
+    import json as _json
+    cfg = mirror_config(workspace)
+    if override is not None:
+        cfg["override"] = bool(override)
+    if tool is not None:
+        if tool not in _MIRRORABLE:
+            raise MirrorError(f"unknown mirror tool: {tool}")
+        disabled = set(cfg["disabled_tools"])
+        if enabled is False:
+            disabled.add(tool)
+        elif enabled is True:
+            disabled.discard(tool)
+        cfg["disabled_tools"] = [t for t in mirror_tool_names() if t in disabled]
+    path = _mirror_config_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(cfg, indent=2))
+    return cfg
+
+
+def mirror_tool_definitions(workspace: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """MCP ``tools/list`` entries for the mirrored built-ins the workspace has
+    enabled. With no workspace (or default config) this is the full set."""
+    if workspace is None:
+        allowed = set(mirror_tool_names())
+    else:
+        allowed = set(enabled_tool_names(workspace))
+    return [{"name": name, "description": desc, "inputSchema": schema}
+            for name, desc, schema in _DEFS if name in allowed]
 
 
 # ── event shaping ────────────────────────────────────────────────────────────
@@ -546,5 +640,10 @@ def execute(tool: str, arguments: Any, workspace: Path) -> str:
     impl = _IMPL.get(tool)
     if impl is None:
         raise MirrorError(f"unknown mirrored tool: {tool}")
+    # Roster guard (defense in depth): tools/list already hides disabled tools,
+    # but a client could still call a name it cached. A disabled tool — or any
+    # tool while override is off — is not ours to run.
+    if tool not in enabled_tool_names(workspace):
+        raise MirrorError(f"tool '{tool}' is not enabled on this Prismor mirror")
     args = arguments if isinstance(arguments, dict) else {}
     return _truncate(impl(args, Path(workspace)))
