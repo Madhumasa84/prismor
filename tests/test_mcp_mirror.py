@@ -255,6 +255,16 @@ def test_withhold_fires_on_enforce_injection_finding():
     assert got is not None and got["ruleId"] == "html-injection"
 
 
+def test_withhold_catches_semantic_injection_category():
+    """The opt-in semantic layer emits prompt_injection_semantic, not
+    prompt_injection — the withhold set must include it or paraphrased
+    injections the regex misses would be scanned and then let through."""
+    findings = [{"category": "prompt_injection_semantic", "mode": "enforce",
+                 "action": "block", "ruleId": "semantic-guard-hybrid"}]
+    got = _result_withhold_finding(findings)
+    assert got is not None and got["ruleId"] == "semantic-guard-hybrid"
+
+
 def test_withhold_ignores_observe_mode_findings():
     findings = [{"category": "prompt_injection", "mode": "observe",
                  "action": "block", "ruleId": "prompt-injection"}]

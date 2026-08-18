@@ -1064,8 +1064,9 @@ class Gateway:
 #: poisoned tool result is dangerous because of what it makes the MODEL do next
 #: (follow an injected instruction) or what it leaks (a secret the redactor did
 #: not mask); both are worth stopping even though the tool already ran.
-_WITHHOLD_CATEGORIES = frozenset({"prompt_injection", "secret_access",
-                                  "secret_exfiltration", "data_boundary", "pii"})
+_WITHHOLD_CATEGORIES = frozenset({"prompt_injection", "prompt_injection_semantic",
+                                  "secret_access", "secret_exfiltration",
+                                  "data_boundary", "pii"})
 _WITHHOLD_ACTION_RANK = {"block": 0, "step_up": 1, "defer": 2, "modify": 3}
 
 
