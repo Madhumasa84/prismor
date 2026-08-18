@@ -151,6 +151,10 @@ _DEFS: List[Tuple[str, str, Dict[str, Any]]] = [
 #: Tools whose *arguments* name a path we screen, and the argument that holds it.
 _PATH_ARG = {"Read": "file_path", "Write": "file_path", "Edit": "file_path"}
 
+#: Names that could ever belong to a mirrored built-in. Lets the hook hot path
+#: reject an ordinary MCP tool without touching the filesystem.
+_MIRRORABLE = frozenset(name for name, _d, _s in _DEFS)
+
 
 def mirror_tool_definitions() -> List[Dict[str, Any]]:
     """MCP ``tools/list`` entries for the mirrored built-ins."""
@@ -438,36 +442,83 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def active_tools(workspace: Path) -> List[str]:
-    """Tools currently served by a live mirror for this workspace ([] if none)."""
+def _live_markers() -> List[Dict[str, Any]]:
+    """Every marker whose gateway process is still alive. Stale ones are
+    deleted on sight: screening must resume when a gateway dies, never stay
+    silently suppressed."""
     import json
-    path = _marker_path(workspace)
+    from prismor.runtime.store import prismor_home
+    out: List[Dict[str, Any]] = []
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return []
-    if not isinstance(data, dict) or not _pid_alive(data.get("pid")):
-        # Stale marker from a gateway that died. Removing it is the safe
-        # direction: screening resumes rather than staying suppressed.
-        clear_active(workspace)
-        return []
-    tools = data.get("tools")
-    return [str(t) for t in tools] if isinstance(tools, list) else []
+        entries = list((prismor_home() / "mirror").glob("*.json"))
+    except OSError:
+        return out
+    for path in entries:
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        if not isinstance(data, dict) or not _pid_alive(data.get("pid")):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        out.append(data)
+    return out
 
 
-def already_screened(tool_name: str, workspace: Path) -> bool:
+def _within(inner: str, outer: str) -> bool:
+    if not inner or not outer:
+        return False
+    try:
+        a, b = Path(inner).resolve(), Path(outer).resolve()
+    except OSError:
+        return False
+    return a == b or b in a.parents
+
+
+def active_tools(workspace: Path) -> List[str]:
+    """Tools served by a live mirror covering this workspace ([] if none)."""
+    ws = str(workspace)
+    tools: List[str] = []
+    for data in _live_markers():
+        mws = str(data.get("workspace") or "")
+        if _within(mws, ws) or _within(ws, mws):
+            for t in data.get("tools") or []:
+                if str(t) not in tools:
+                    tools.append(str(t))
+    return tools
+
+
+def already_screened(tool_name: str, workspace: Path, cwd: str = "") -> bool:
     """True when this hook-layer tool call is a mirrored built-in that the
     gateway has already policy-screened and logged.
 
-    Requires a live mirror for this workspace serving a tool of that name, so a
-    third-party MCP server that happens to expose a tool called ``Bash`` is not
-    quietly exempted.
+    The hook layer's idea of "workspace" routinely differs from the gateway's:
+    a global hook install reports the home directory or a git root, while the
+    gateway reports whatever ``--workspace`` it was handed. So a marker matches
+    when either path contains the other, and the agent's actual ``cwd`` is
+    tried first as the most precise signal.
+
+    Still requires a *live* mirror serving a tool of that name, so a
+    third-party MCP server exposing a tool called ``Bash`` is not quietly
+    exempted.
     """
     name = str(tool_name or "")
     if not name.startswith("mcp__"):
-        return False
+        return False           # native tools: the hook layer owns them
     bare = name.rsplit("__", 1)[-1]
-    return bare in active_tools(workspace)
+    if bare not in _MIRRORABLE:
+        return False           # cheap reject before touching the filesystem
+    for probe in (cwd, str(workspace)):
+        if probe and bare in active_tools(Path(probe)):
+            return True
+    return False
 
 
 def execute(tool: str, arguments: Any, workspace: Path) -> str:

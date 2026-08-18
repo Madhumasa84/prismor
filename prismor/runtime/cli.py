@@ -1308,7 +1308,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         # for this workspace actually serves a tool of that name.
         try:
             from prismor.runtime import mirror as _mirror
-            if _mirror.already_screened(payload.get("tool_name") or "", workspace):
+            if _mirror.already_screened(payload.get("tool_name") or "", workspace,
+                                        cwd=str(payload.get("cwd") or "")):
                 sys.exit(0)
         except SystemExit:
             raise

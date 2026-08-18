@@ -39,11 +39,33 @@ def test_native_and_unrelated_mcp_tools_are_never_skipped(ws):
     assert mirror.already_screened("", ws) is False
 
 
-def test_marker_is_per_workspace(ws, tmp_path):
+def test_unrelated_workspace_is_not_covered(ws, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     mirror.mark_active(ws)
     assert mirror.already_screened("mcp__prismor__Bash", other) is False
+
+
+def test_a_global_hook_install_still_matches(ws):
+    """The hook layer's workspace routinely differs from the gateway's — a
+    global install reports the home directory while the gateway reports the
+    project. Exact-equality keying silently disabled the dedup entirely."""
+    mirror.mark_active(ws)
+    assert mirror.already_screened("mcp__prismor__Bash", ws.parent) is True
+
+
+def test_agent_cwd_is_used_when_the_hook_workspace_is_unrelated(ws, tmp_path):
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    mirror.mark_active(ws)
+    assert mirror.already_screened("mcp__prismor__Bash", other, cwd=str(ws)) is True
+
+
+def test_a_subdirectory_of_the_mirrored_workspace_matches(ws):
+    sub = ws / "pkg" / "mod"
+    sub.mkdir(parents=True)
+    mirror.mark_active(ws)
+    assert mirror.already_screened("mcp__prismor__Read", ws, cwd=str(sub)) is True
 
 
 def test_clearing_restores_screening(ws):
