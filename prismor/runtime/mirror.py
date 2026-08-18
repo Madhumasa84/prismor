@@ -1,0 +1,392 @@
+"""Mirrored built-in tools — Prismor-executed replacements for an agent's
+native Bash/Read/Write/Edit/Glob/Grep/WebFetch surface.
+
+Why this exists
+---------------
+Hooks (``PreToolUse``) only see a tool call *before* it runs, and only in hosts
+that implement a hook protocol. That leaves two gaps:
+
+1. **No result-side control.** A hook can deny ``Read(config.py)``, but it
+   cannot hand the model a *redacted* version of the file. Denial is the only
+   verb, so a file holding one hardcoded DSN is either fully readable or fully
+   unreadable. Every credential that lives outside ``.env`` — hardcoded in
+   source, printed by a build script, echoed in a stack trace — reaches the
+   model intact.
+2. **No coverage without hooks.** Codex, Cursor and most SDK agents expose no
+   hook protocol at all, so there is nothing to interpose (see
+   ``discover``/shadow-AI). MCP, by contrast, is universal.
+
+Mirroring closes both. The agent's own tools are switched off (Claude Code:
+``--tools ""``; SDK: ``disallowed_tools``) and these MCP look-alikes take their
+place, so the tool *executes inside Prismor*: policy runs before, the real
+output is redacted after, and the whole thing is one telemetry event.
+
+Design notes
+------------
+* **Names and schemas are deliberately identical to the host's built-ins.** The
+  model has strong priors about a tool called ``Bash`` with a ``command``
+  field; renaming them to ``prismor_run_shell`` throws that away and measurably
+  degrades tool selection. Keep them verbatim.
+* **Events are shaped like native tool events**, not like MCP calls — ``shell``
+  / ``file_read`` / ``file_write`` / ``network``, matching ``hooks.py``. This is
+  the point of the module: a mirrored ``Bash`` is screened by the same real
+  rules as a hooked ``Bash``, not by a second, weaker MCP-only ruleset.
+* Tools the host owns cannot be mirrored: ``Task``/``Agent`` (subagent
+  spawning), ``Skill``, ``ToolSearch``, ``AskUserQuestion``, ``TodoWrite``.
+  They stay native, or stay off.
+"""
+from __future__ import annotations
+
+import fnmatch
+import os
+import re
+import subprocess
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+__all__ = [
+    "MIRROR_SERVER_NAME",
+    "mirror_tool_definitions",
+    "execute",
+    "shape_call_event",
+    "shape_result_event",
+    "MirrorError",
+]
+
+MIRROR_SERVER_NAME = "prismor"
+
+#: Hard ceiling on what one mirrored call may hand back to the model. MCP has
+#: no streaming for tool results, and an unbounded `Read` of a multi-MB file
+#: would blow the context window in a single call. The native tools impose
+#: their own limits; mirroring has to impose them too or it is a regression.
+MAX_RESULT_CHARS = 120_000
+MAX_GREP_MATCHES = 200
+MAX_GLOB_HITS = 500
+DEFAULT_READ_LIMIT = 2000
+DEFAULT_BASH_TIMEOUT_MS = 120_000
+MAX_BASH_TIMEOUT_MS = 600_000
+
+
+class MirrorError(RuntimeError):
+    """A tool-level failure (bad path, missing file) — reported to the model as
+    an ordinary tool error, distinct from a policy block."""
+
+
+# ── tool definitions ─────────────────────────────────────────────────────────
+
+_DEFS: List[Tuple[str, str, Dict[str, Any]]] = [
+    ("Bash",
+     "Executes a bash command in the workspace and returns its combined output. "
+     "Use for running builds, tests, git, and other shell work.",
+     {"type": "object",
+      "properties": {
+          "command": {"type": "string", "description": "The command to execute"},
+          "description": {"type": "string",
+                          "description": "Clear, concise description of what this command does"},
+          "timeout": {"type": "number",
+                      "description": "Optional timeout in milliseconds (max 600000)"},
+      },
+      "required": ["command"]}),
+
+    ("Read",
+     "Reads a file from the local filesystem. Returns content in cat -n format "
+     "with line numbers starting at 1.",
+     {"type": "object",
+      "properties": {
+          "file_path": {"type": "string", "description": "The absolute path to the file to read"},
+          "offset": {"type": "number", "description": "The line number to start reading from"},
+          "limit": {"type": "number", "description": "The number of lines to read"},
+      },
+      "required": ["file_path"]}),
+
+    ("Write",
+     "Writes a file to the local filesystem, overwriting it if it already exists. "
+     "For partial changes prefer Edit.",
+     {"type": "object",
+      "properties": {
+          "file_path": {"type": "string", "description": "The absolute path to the file to write"},
+          "content": {"type": "string", "description": "The content to write to the file"},
+      },
+      "required": ["file_path", "content"]}),
+
+    ("Edit",
+     "Performs exact string replacement in a file. old_string must match the file "
+     "exactly, including indentation, and must be unique unless replace_all is set.",
+     {"type": "object",
+      "properties": {
+          "file_path": {"type": "string", "description": "The absolute path to the file to modify"},
+          "old_string": {"type": "string", "description": "The text to replace"},
+          "new_string": {"type": "string", "description": "The text to replace it with"},
+          "replace_all": {"type": "boolean", "description": "Replace all occurrences"},
+      },
+      "required": ["file_path", "old_string", "new_string"]}),
+
+    ("Glob",
+     "Fast file pattern matching. Supports glob patterns like '**/*.py'. "
+     "Returns matching file paths sorted alphabetically.",
+     {"type": "object",
+      "properties": {
+          "pattern": {"type": "string", "description": "The glob pattern to match files against"},
+          "path": {"type": "string", "description": "The directory to search in (defaults to workspace)"},
+      },
+      "required": ["pattern"]}),
+
+    ("Grep",
+     "Search file contents with a regular expression. Returns matching lines as "
+     "path:line:content.",
+     {"type": "object",
+      "properties": {
+          "pattern": {"type": "string", "description": "The regular expression to search for"},
+          "path": {"type": "string", "description": "File or directory to search in"},
+          "glob": {"type": "string", "description": "Glob filter for files to search, e.g. '*.py'"},
+          "-i": {"type": "boolean", "description": "Case insensitive search"},
+      },
+      "required": ["pattern"]}),
+]
+
+#: Tools whose *arguments* name a path we screen, and the argument that holds it.
+_PATH_ARG = {"Read": "file_path", "Write": "file_path", "Edit": "file_path"}
+
+
+def mirror_tool_definitions() -> List[Dict[str, Any]]:
+    """MCP ``tools/list`` entries for the mirrored built-ins."""
+    return [{"name": name, "description": desc, "inputSchema": schema}
+            for name, desc, schema in _DEFS]
+
+
+def mirror_tool_names() -> List[str]:
+    return [name for name, _d, _s in _DEFS]
+
+
+# ── event shaping ────────────────────────────────────────────────────────────
+#
+# These produce the *native* event shapes from hooks.py so a mirrored call is
+# screened by the same rules as a hooked one. Getting this wrong is the whole
+# failure mode: a mirrored Bash that arrives as `type: tool_result` is screened
+# by injection rules instead of shell rules, and every command rule silently
+# stops applying.
+
+def shape_call_event(tool: str, arguments: Any) -> Optional[Dict[str, Any]]:
+    """Native-shaped PreToolUse body for a mirrored tool, or None if unknown."""
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool == "Bash":
+        return {"type": "shell", "command": str(args.get("command") or "")}
+    if tool == "Read":
+        return {"type": "file_read", "path": str(args.get("file_path") or "")}
+    if tool == "Write":
+        return {"type": "file_write",
+                "path": str(args.get("file_path") or ""),
+                "content": str(args.get("content") or "")}
+    if tool == "Edit":
+        # A single Edit has no "content" key; new_string is the written text.
+        # Missing this makes every content-based check blind to edits.
+        return {"type": "file_write",
+                "path": str(args.get("file_path") or ""),
+                "content": str(args.get("new_string") or "")}
+    if tool in ("Glob", "Grep"):
+        return {"type": "file_read",
+                "path": str(args.get("path") or args.get("pattern") or "")}
+    return None
+
+
+def shape_result_event(tool: str, arguments: Any, output: str) -> Optional[Dict[str, Any]]:
+    """Native-shaped PostToolUse body carrying the real output for scanning."""
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool == "Bash":
+        return {"type": "shell", "command": str(args.get("command") or ""),
+                "stdout": output, "stderr": ""}
+    if tool in ("Read", "Glob", "Grep"):
+        return {"type": "file_read", "path": str(args.get("file_path")
+                                                 or args.get("path") or ""),
+                "response": output}
+    if tool in ("Write", "Edit"):
+        return {"type": "file_write", "path": str(args.get("file_path") or ""),
+                "content": str(args.get("content") or args.get("new_string") or ""),
+                "response": output}
+    return None
+
+
+# ── execution ────────────────────────────────────────────────────────────────
+
+def _truncate(text: str) -> str:
+    if len(text) <= MAX_RESULT_CHARS:
+        return text
+    return (text[:MAX_RESULT_CHARS]
+            + f"\n\n[truncated by Prismor: {len(text) - MAX_RESULT_CHARS} more characters]")
+
+
+def _resolve(raw: str, workspace: Path) -> Path:
+    p = Path(str(raw)).expanduser()
+    if not p.is_absolute():
+        p = workspace / p
+    return p
+
+
+def _run_bash(args: Dict[str, Any], workspace: Path) -> str:
+    command = str(args.get("command") or "")
+    if not command.strip():
+        raise MirrorError("command is required")
+    try:
+        timeout_ms = float(args.get("timeout") or DEFAULT_BASH_TIMEOUT_MS)
+    except (TypeError, ValueError):
+        timeout_ms = DEFAULT_BASH_TIMEOUT_MS
+    timeout_s = max(1.0, min(timeout_ms, MAX_BASH_TIMEOUT_MS) / 1000.0)
+    try:
+        proc = subprocess.run(command, shell=True, cwd=str(workspace),
+                              capture_output=True, text=True, timeout=timeout_s,
+                              env=dict(os.environ))
+    except subprocess.TimeoutExpired:
+        raise MirrorError(f"command timed out after {timeout_s:.0f}s")
+    parts: List[str] = []
+    if proc.stdout:
+        parts.append(proc.stdout)
+    if proc.stderr:
+        parts.append(f"[stderr]\n{proc.stderr}")
+    if proc.returncode != 0:
+        parts.append(f"[exit code {proc.returncode}]")
+    return "\n".join(parts) if parts else "(no output)"
+
+
+def _run_read(args: Dict[str, Any], workspace: Path) -> str:
+    path = _resolve(args.get("file_path") or "", workspace)
+    if not path.exists():
+        raise MirrorError(f"file does not exist: {path}")
+    if path.is_dir():
+        raise MirrorError(f"path is a directory, not a file: {path}")
+    try:
+        text = path.read_text(errors="replace")
+    except OSError as exc:
+        raise MirrorError(f"could not read {path}: {exc}")
+    lines = text.splitlines()
+    try:
+        offset = max(0, int(args.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        limit = int(args.get("limit") or DEFAULT_READ_LIMIT)
+    except (TypeError, ValueError):
+        limit = DEFAULT_READ_LIMIT
+    selected = lines[offset:offset + max(1, limit)]
+    if not selected:
+        return "(file is empty or offset is past end of file)"
+    return "\n".join(f"{offset + i + 1}\t{line}" for i, line in enumerate(selected))
+
+
+def _run_write(args: Dict[str, Any], workspace: Path) -> str:
+    path = _resolve(args.get("file_path") or "", workspace)
+    content = str(args.get("content") or "")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    except OSError as exc:
+        raise MirrorError(f"could not write {path}: {exc}")
+    return f"Wrote {len(content)} bytes to {path}"
+
+
+def _run_edit(args: Dict[str, Any], workspace: Path) -> str:
+    path = _resolve(args.get("file_path") or "", workspace)
+    if not path.exists():
+        raise MirrorError(f"file does not exist: {path}")
+    old = str(args.get("old_string") or "")
+    new = str(args.get("new_string") or "")
+    if not old:
+        raise MirrorError("old_string is required and must not be empty")
+    try:
+        src = path.read_text(errors="replace")
+    except OSError as exc:
+        raise MirrorError(f"could not read {path}: {exc}")
+    count = src.count(old)
+    if count == 0:
+        raise MirrorError("old_string not found in file")
+    if count > 1 and not args.get("replace_all"):
+        raise MirrorError(
+            f"old_string is not unique ({count} matches); add more surrounding "
+            "context or set replace_all")
+    updated = src.replace(old, new) if args.get("replace_all") else src.replace(old, new, 1)
+    try:
+        path.write_text(updated)
+    except OSError as exc:
+        raise MirrorError(f"could not write {path}: {exc}")
+    return f"Edited {path} ({count if args.get('replace_all') else 1} replacement(s))"
+
+
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache"}
+
+
+def _walk_files(base: Path, pattern: str = "**/*"):
+    for path in base.glob(pattern):
+        if not path.is_file():
+            continue
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        yield path
+
+
+def _run_glob(args: Dict[str, Any], workspace: Path) -> str:
+    base = _resolve(args.get("path") or ".", workspace)
+    if not base.is_dir():
+        raise MirrorError(f"not a directory: {base}")
+    hits = sorted(str(p) for p in _walk_files(base, str(args.get("pattern") or "*")))
+    if not hits:
+        return "No files found"
+    out = hits[:MAX_GLOB_HITS]
+    if len(hits) > MAX_GLOB_HITS:
+        out.append(f"[{len(hits) - MAX_GLOB_HITS} more matches not shown]")
+    return "\n".join(out)
+
+
+def _run_grep(args: Dict[str, Any], workspace: Path) -> str:
+    raw = str(args.get("pattern") or "")
+    flags = re.IGNORECASE if args.get("-i") else 0
+    try:
+        rx = re.compile(raw, flags)
+    except re.error as exc:
+        raise MirrorError(f"invalid regular expression: {exc}")
+    target = _resolve(args.get("path") or ".", workspace)
+    file_glob = str(args.get("glob") or "")
+    if target.is_file():
+        candidates = [target]
+    elif target.is_dir():
+        candidates = list(_walk_files(target))
+    else:
+        raise MirrorError(f"path does not exist: {target}")
+    out: List[str] = []
+    for path in candidates:
+        if file_glob and not fnmatch.fnmatch(path.name, file_glob):
+            continue
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if "\x00" in text[:1024]:
+            continue  # binary
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                out.append(f"{path}:{lineno}:{line[:400]}")
+                if len(out) >= MAX_GREP_MATCHES:
+                    out.append(f"[stopped at {MAX_GREP_MATCHES} matches]")
+                    return "\n".join(out)
+    return "\n".join(out) if out else "No matches found"
+
+
+_IMPL = {
+    "Bash": _run_bash,
+    "Read": _run_read,
+    "Write": _run_write,
+    "Edit": _run_edit,
+    "Glob": _run_glob,
+    "Grep": _run_grep,
+}
+
+
+def execute(tool: str, arguments: Any, workspace: Path) -> str:
+    """Run a mirrored tool. Raises MirrorError on tool-level failure.
+
+    Policy screening happens in the gateway around this call, not here — this
+    function is the execution primitive only.
+    """
+    impl = _IMPL.get(tool)
+    if impl is None:
+        raise MirrorError(f"unknown mirrored tool: {tool}")
+    args = arguments if isinstance(arguments, dict) else {}
+    return _truncate(impl(args, Path(workspace)))

@@ -3159,6 +3159,14 @@ def build_parser() -> argparse.ArgumentParser:
     gw_parser.add_argument("--namespace", choices=["plain", "none"], default="plain",
                            help="plain=<server>__<tool> (default); none=raw tool names "
                            "(single-upstream shim only)")
+    gw_parser.add_argument("--mirror", action="store_true",
+                           help="Also serve Prismor's mirrored built-in tools "
+                                "(Bash, Read, Write, Edit, Glob, Grep). Disable the "
+                                "agent's own built-ins so it uses these instead "
+                                "(Claude Code: --tools \"\"; SDK: disallowed_tools) — "
+                                "then every file and shell action is policy-screened "
+                                "and its output redacted, including in agents that "
+                                "have no hook support.")
 
     # ── hook-dispatch (internal) ───────────────────────────────────────
     hook_dispatch = subparsers.add_parser("hook-dispatch", help="(internal) Called by IDE hooks")

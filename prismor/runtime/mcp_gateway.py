@@ -74,10 +74,17 @@ class UpstreamSpec:
     url: str = ""
     transport: str = ""       # "stdio" | "http" | "sse" (informational)
     headers: Dict[str, str] = field(default_factory=dict)
+    #: In-process mirrored built-ins (see runtime/mirror.py) — no child
+    #: process, no socket. Served by UpstreamLocal.
+    local: bool = False
 
     @property
     def remote(self) -> bool:
         return bool(self.url)
+
+
+#: Upstream name for the in-process mirrored built-ins.
+MIRROR_SPEC_NAME = "builtins"
 
 
 class GatewayConfigError(ValueError):
@@ -108,6 +115,9 @@ def load_gateway_config(path: Path) -> List[UpstreamSpec]:
 
 
 def _spec_from_entry(name: str, cfg: Dict[str, Any]) -> UpstreamSpec:
+    # {"mirror": true} / {"type": "mirror"} — the in-process built-ins.
+    if cfg.get("mirror") is True or str(cfg.get("type") or "").lower() == "mirror":
+        return UpstreamSpec(name=name, local=True, transport="local")
     meta = _mcp_endpoint_meta(cfg)
     if meta["url"]:
         headers = cfg.get("headers") if isinstance(cfg.get("headers"), dict) else {}
@@ -440,10 +450,63 @@ class UpstreamHttp(Upstream):
             pass
 
 
+class UpstreamLocal(Upstream):
+    """The mirrored built-ins, served in-process.
+
+    Same ``Upstream`` contract as a spawned stdio server, but there is no child
+    process and no transport: ``request`` dispatches straight into
+    ``runtime.mirror``. Modelling the mirror as just another upstream is what
+    lets it inherit the gateway's whole pipeline — pre-call policy, result
+    scanning, redaction, telemetry, trifecta tagging — instead of growing a
+    second, weaker enforcement path beside it.
+    """
+
+    def __init__(self, spec: UpstreamSpec, workspace: Path,
+                 on_notification: Optional[Callable[[str, Dict[str, Any]], None]] = None):
+        super().__init__(spec, on_notification)
+        self.workspace = workspace
+
+    def initialize(self, client_params: Dict[str, Any]) -> Dict[str, Any]:
+        return {"protocolVersion": str(client_params.get("protocolVersion")
+                                       or PROTOCOL_VERSION_FALLBACK),
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "prismor-mirror", "version": _gateway_version()}}
+
+    def request(self, method: str, params: Dict[str, Any],
+                timeout: float = REQUEST_TIMEOUT) -> Dict[str, Any]:
+        from prismor.runtime import mirror
+        if method == "tools/list":
+            return {"tools": mirror.mirror_tool_definitions()}
+        if method == "tools/call":
+            name = str(params.get("name") or "")
+            try:
+                text = mirror.execute(name, params.get("arguments") or {},
+                                      self.workspace)
+            except mirror.MirrorError as exc:
+                # A tool-level failure, not a policy block: report it the way a
+                # native tool would so the model can correct itself and retry.
+                return {"content": [{"type": "text", "text": f"Error: {exc}"}],
+                        "isError": True}
+            except Exception as exc:  # unexpected — still must not kill the server
+                return {"content": [{"type": "text",
+                                     "text": f"Error: mirrored tool failed: {exc}"}],
+                        "isError": True}
+            return {"content": [{"type": "text", "text": text}], "isError": False}
+        if method == "ping":
+            return {}
+        raise UpstreamError(f"prismor-mirror does not support {method}", -32601)
+
+    def notify(self, method: str, params: Dict[str, Any]) -> None:
+        return None
+
+
 def make_upstream(spec: UpstreamSpec,
                   on_notification: Optional[Callable[[str, Dict[str, Any]], None]] = None,
                   guard: Optional[Callable[[UpstreamSpec], None]] = None,
+                  workspace: Optional[Path] = None,
                   ) -> Upstream:
+    if spec.local:
+        return UpstreamLocal(spec, workspace or Path.cwd(), on_notification)
     if spec.remote:
         return UpstreamHttp(spec, on_notification, guard)
     return UpstreamStdio(spec, on_notification)
@@ -524,7 +587,7 @@ class Gateway:
         self._connect_lock = threading.Lock()
         self.upstreams: List[Upstream] = [
             make_upstream(s, self._make_notification_handler(s.name),
-                          self._egress_guard)
+                          self._egress_guard, workspace=workspace)
             for s in specs
         ]
         self._routes: Dict[str, _Route] = {}
@@ -635,8 +698,13 @@ class Gateway:
 
     # ── tools/list ───────────────────────────────────────────────────────
 
-    def _client_tool_name(self, server: str, tool: str) -> str:
-        if self.namespace == "none":
+    def _client_tool_name(self, server: str, tool: str, local: bool = False) -> str:
+        # Mirrored built-ins are never namespaced. The host already prefixes
+        # MCP tools ("mcp__prismor__Bash"); adding the gateway's own prefix on
+        # top gives "mcp__prismor__prismor__Bash" and buries the one signal the
+        # model relies on to recognise the tool. Collisions are impossible in
+        # practice because every non-local server keeps its prefix.
+        if local or self.namespace == "none":
             return tool
         return f"{server}__{tool}"
 
@@ -654,13 +722,14 @@ class Gateway:
                 if not isinstance(tool, dict) or not tool.get("name"):
                     continue
                 original = str(tool["name"])
-                exposed = self._client_tool_name(up.spec.name, original)
+                exposed = self._client_tool_name(up.spec.name, original,
+                                                 local=up.spec.local)
                 routes[exposed] = _Route(upstream=up, server=up.spec.name,
                                          tool=original,
                                          meta_tags=_extract_meta_tags(tool))
                 entry = dict(tool)
                 entry["name"] = exposed
-                if self.namespace != "none":
+                if self.namespace != "none" and not up.spec.local:
                     desc = str(tool.get("description") or "")
                     entry["description"] = f"[{up.spec.name}] {desc}".strip()
                 tools.append(entry)
@@ -743,9 +812,18 @@ class Gateway:
             "tools/call", {"name": route.tool, "arguments": arguments},
             timeout=CALL_TIMEOUT)
 
+        # Mirrored built-ins execute inside Prismor, so their output can be
+        # *repaired* rather than only refused: strip credential material before
+        # the model sees it. This is the capability a PreToolUse hook cannot
+        # have — a hook sees the request, never the file contents — and it is
+        # why a secret hardcoded in ordinary source (not just .env) stops
+        # leaking. Redact before scanning so the scan sees what the model will.
+        if route.upstream.spec.local:
+            result = self._redact_result(result)
+
         # Post-call: the response is untrusted content — scan before the model
         # ever sees it (prompt injection, poisoned tool output, secrets).
-        decision = self._evaluate(self._build_result_event(route, result))
+        decision = self._evaluate(self._build_result_event(route, result, arguments))
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
             log_observe_findings(decision, mode=self.mode, tool_name=name)
@@ -755,6 +833,49 @@ class Gateway:
             return
 
         self._reply(req_id, result)
+
+    def _redact_result(self, result: Any) -> Any:
+        """Mask registered cloak secrets and classified data-boundary values in
+        a mirrored tool's output.
+
+        Best-effort by design: a redaction failure must not fail the call
+        closed, because the pre-call policy has already run and the scan below
+        still gets a vote. Two passes, cheapest first — the cloak store is an
+        exact-value substring swap, the data-boundary classifier is pattern
+        work over the same text.
+        """
+        if not isinstance(result, dict):
+            return result
+        content = result.get("content")
+        if not isinstance(content, list):
+            return result
+        changed = False
+        out: List[Any] = []
+        for block in content:
+            if not (isinstance(block, dict) and isinstance(block.get("text"), str)):
+                out.append(block)
+                continue
+            text = original = block["text"]
+            try:
+                from prismor.runtime.cloaking.runtime import scrub_text
+                text = scrub_text(text)
+            except Exception:
+                pass
+            try:
+                from prismor.runtime.data_boundary import redact_payload
+                redacted = redact_payload(text, workspace=self.workspace)
+                if isinstance(redacted, str):
+                    text = redacted
+            except Exception:
+                pass
+            if text != original:
+                changed = True
+                block = {**block, "text": text}
+            out.append(block)
+        if not changed:
+            return result
+        sys.stderr.write("[prismor-gateway] redacted sensitive values from mirrored tool output\n")
+        return {**result, "content": out}
 
     def _egress_guard(self, spec: UpstreamSpec) -> None:
         """Screen a remote upstream's URL before the gateway dials it.
@@ -847,12 +968,21 @@ class Gateway:
     # ── event builders ───────────────────────────────────────────────────
 
     def _event_base(self, route: _Route, agent_event: str) -> Dict[str, Any]:
+        # A mirrored built-in reports under its NATIVE name ("Bash", "Read"),
+        # not "mcp__prismor__Bash". The tool is the same tool — only the
+        # transport changed — so every existing rule, deny list, allow entry
+        # and console filter written against "Bash" must keep matching. Naming
+        # it as an MCP tool would silently exempt it from all of them.
+        tool_name = (route.tool if route.upstream.spec.local
+                     else f"mcp__{route.server}__{route.tool}")
         metadata: Dict[str, Any] = {
             "cwd": str(self.workspace),
             # The REAL server name — matches trifecta globs, tool denies,
             # and control-plane parseToolName. See module docstring.
-            "tool_name": f"mcp__{route.server}__{route.tool}",
+            "tool_name": tool_name,
         }
+        if route.upstream.spec.local:
+            metadata["mirrored"] = True
         if route.meta_tags:
             # Server-declared tags ride on the event; trifecta consumes them
             # as a classification tier below the explicit org map.
@@ -867,6 +997,14 @@ class Gateway:
 
     def _build_call_event(self, route: _Route, arguments: Any) -> Dict[str, Any]:
         base = self._event_base(route, "PreToolUse")
+        if route.upstream.spec.local:
+            # Native event shape ("shell"/"file_read"/"file_write") so the
+            # mirrored tool is screened by the real command and path rules
+            # rather than the generic MCP-payload path.
+            from prismor.runtime import mirror
+            shaped = mirror.shape_call_event(route.tool, arguments)
+            if shaped is not None:
+                return {**base, **shaped}
         try:
             args_text = json.dumps(arguments, default=str)
         except Exception:
@@ -880,8 +1018,15 @@ class Gateway:
                     "outbound_payload": args_text, **mcp_meta}
         return {**base, "type": "tool_result", "response": args_text, **mcp_meta}
 
-    def _build_result_event(self, route: _Route, result: Any) -> Dict[str, Any]:
+    def _build_result_event(self, route: _Route, result: Any,
+                            arguments: Any = None) -> Dict[str, Any]:
         base = self._event_base(route, "PostToolUse")
+        if route.upstream.spec.local:
+            from prismor.runtime import mirror
+            shaped = mirror.shape_result_event(
+                route.tool, arguments, _extract_mcp_response_text(result))
+            if shaped is not None:
+                return {**base, **shaped}
         event = {**base, "type": "tool_result",
                  "response": _extract_mcp_response_text(result),
                  "mcp_server": route.server, "mcp_tool": route.tool}
@@ -1158,7 +1303,16 @@ def run_gateway(args, workspace: Path) -> int:
     if not specs:
         config = getattr(args, "config", None)
         path = Path(config).expanduser() if config else DEFAULT_GATEWAY_CONFIG
-        specs = load_gateway_config(path)
+        # --mirror alone is a complete, useful configuration (guarded built-ins
+        # with no downstream MCP servers), so a missing config is not an error
+        # in that case.
+        if getattr(args, "mirror", False) and not path.exists():
+            specs = []
+        else:
+            specs = load_gateway_config(path)
+    if getattr(args, "mirror", False) and not any(s.local for s in specs):
+        specs.append(UpstreamSpec(name=MIRROR_SPEC_NAME, local=True,
+                                  transport="local"))
 
     gateway = Gateway(specs, workspace=workspace,
                       mode=getattr(args, "mode", "observe") or "observe",
