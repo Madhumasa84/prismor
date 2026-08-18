@@ -1023,6 +1023,18 @@
   .agent-ctrl:last-child { border-bottom:none; }
   .agent-ctrl > label:first-child { width:150px; font-size:12px; font-weight:600; color:var(--gray-700); flex-shrink:0; }
   .agent-ctrl-hint { font-size:11px; color:var(--gray-400); }
+  /* ── Per-tool three-state grid (Allow / Ask / Deny) ── */
+  .tp-block { align-items:flex-start; flex-direction:column; gap:8px; }
+  .tp-grid { width:100%; border:1px solid var(--gray-100); border-radius:10px; overflow:hidden; }
+  .tp-row { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-bottom:1px solid var(--gray-100); }
+  .tp-row:last-child { border-bottom:none; }
+  .tp-tool { font-family:var(--font-mono,monospace); font-size:12.5px; color:var(--gray-800); }
+  .tp-btns { display:inline-flex; gap:4px; }
+  .tp-btn { font-family:var(--font-ui); font-size:11px; font-weight:600; padding:4px 12px; border-radius:999px; border:1px solid var(--gray-200); background:var(--gray-50,#f8fafc); color:var(--gray-400); cursor:pointer; transition:all .12s; }
+  .tp-btn:hover { border-color:var(--gray-300); color:var(--gray-600); }
+  .tp-allow.on { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
+  .tp-ask.on   { background:#fef9c3; color:#a16207; border-color:#fde68a; }
+  .tp-deny.on  { background:#fee2e2; color:#b91c1c; border-color:#fecaca; }
 
   /* ── Session flow page ── */
   .session-hero {
@@ -3412,7 +3424,53 @@ function renderAgentControls(agentName){
     iamBlock+
     '<div class="agent-ctrl"><label>Agent enabled</label>'+
       '<button class="en-toggle '+(a.enabled?'on':'off')+'" onclick="agentToggleBtn(\''+safeAttr(a.name)+'\','+(a.enabled?'true':'false')+')">'+(a.enabled?'Enabled':'Disabled')+'</button>'+
-      '<span class="agent-ctrl-hint">off = kill switch: every tool call from this agent is denied until re-enabled</span></div>';
+      '<span class="agent-ctrl-hint">off = kill switch: every tool call from this agent is denied until re-enabled</span></div>'+
+    renderToolPolicyGrid(a);
+}
+
+// Built-ins Prismor mirrors over MCP (prismor mcp-gateway --mirror). Shown for
+// every agent so the grid matches the tools an agent actually holds even before
+// it has exercised each one.
+const MIRROR_BUILTINS = ['Bash','Read','Write','Edit','Glob','Grep'];
+
+// Per-tool three-state control: Allow / Ask (human approval) / Deny. The middle
+// state maps to a step_up finding the gateway routes to the approvals queue.
+function renderToolPolicyGrid(a){
+  const deny = new Set(a.deny_tools || []);
+  const ask  = new Set(a.ask_tools  || []);
+  // Union of what we know this agent can touch: its capabilities (if the API
+  // surfaced them), whatever already has a policy, and the mirror built-ins.
+  const tools = Array.from(new Set([
+    ...MIRROR_BUILTINS, ...(a.capabilities||[]), ...deny, ...ask,
+  ])).sort();
+  const state = t => deny.has(t) ? 'deny' : (ask.has(t) ? 'ask' : 'allow');
+  const btn = (t, val, label, title) =>
+    '<button class="tp-btn tp-'+val+(state(t)===val?' on':'')+'" title="'+title+'" '+
+      'onclick="toolPolicySet(\''+safeAttr(a.name)+'\',\''+safeAttr(t)+'\',\''+val+'\')">'+label+'</button>';
+  const rows = tools.map(t =>
+    '<div class="tp-row"><span class="tp-tool">'+safe(t)+'</span>'+
+      '<span class="tp-btns">'+
+        btn(t,'allow','Allow','Runs without prompting')+
+        btn(t,'ask','Ask','Requires human approval (step-up)')+
+        btn(t,'deny','Deny','Blocked in real time')+
+      '</span></div>').join('');
+  return '<div class="agent-ctrl tp-block"><label>Tool permissions</label>'+
+    '<div class="tp-grid">'+rows+'</div>'+
+    '<span class="agent-ctrl-hint">Per-tool handling for this agent. Ask routes the call '+
+    'to the approvals queue; a headless gateway waits and fails closed if unanswered.</span></div>';
+}
+
+async function toolPolicySet(agent, tool, action){
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/tool-policy', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scope:'agent', agent, tool, action, workspace: ws})});
+    const a = (_agentsCache?.agents||[]).find(x=>x.name===agent);
+    if (a){ a.deny_tools = r.deny_tools || []; a.ask_tools = r.ask_tools || []; }
+    renderAgentControls(agent);
+    toast('✓ '+tool+' → '+action);
+  } catch(e){ toast('✗ '+e.message, true); loadAgents(); }
 }
 function renderAgentSessions(agentName){
   const rows = _allSessionsCache.filter(s=>s.agent===agentName);

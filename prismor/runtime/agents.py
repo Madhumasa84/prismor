@@ -102,6 +102,8 @@ def load_agents_config(workspace: Optional[Path] = None) -> Dict[str, Any]:
             # load_agents_config otherwise only pulls the ``agents`` map.
             if project_cfg.get("global_deny_tools"):
                 config["global_deny_tools"] = project_cfg["global_deny_tools"]
+            if project_cfg.get("global_ask_tools"):
+                config["global_ask_tools"] = project_cfg["global_ask_tools"]
 
     _CONFIG_CACHE[cache_key] = config
     return config
@@ -119,6 +121,7 @@ class AgentControl:
     mode: Optional[str] = None   # None = inherit global mode; "observe"/"enforce"
     iam_profile: Optional[str] = None  # IAM profile name to enforce for this agent
     deny_tools: tuple = ()  # tool tags blocked for this agent (per-agent + global union)
+    ask_tools: tuple = ()   # tool tags requiring human approval (step_up) for this agent
     last_seen: Optional[str] = None
     # Which layer disabled the agent: "local" (agents.yaml), "org" (the signed
     # remote policy's settings.agent_controls), "both", or None when enabled.
@@ -158,8 +161,11 @@ def resolve_agent_control(
     remote = (remote_controls or {}).get(name)
     remote = remote if isinstance(remote, dict) else {}
     _global_deny = tuple(config.get("global_deny_tools") or ())
+    _global_ask = tuple(config.get("global_ask_tools") or ())
     if not entry and not remote:
-        return AgentControl(name=name, deny_tools=_global_deny)
+        # deny wins over ask: a tool on both lists is denied, never merely asked.
+        _ask = tuple(t for t in _global_ask if t not in _global_deny)
+        return AgentControl(name=name, deny_tools=_global_deny, ask_tools=_ask)
 
     local_enabled = bool(entry.get("enabled", True))
     remote_enabled = bool(remote.get("enabled", True))
@@ -170,13 +176,20 @@ def resolve_agent_control(
         else "local" if not local_enabled
         else None
     )
+    _merged_deny = tuple(dict.fromkeys([
+        *_global_deny, *(entry.get("deny_tools") or ()), *(remote.get("deny_tools") or ())
+    ]))
     return AgentControl(
         name=name,
         framework=entry.get("framework", ""),
         enabled=local_enabled and remote_enabled,
         mode=remote_mode or entry.get("mode") or None,
         iam_profile=remote.get("iam_profile") or entry.get("iam_profile") or None,
-        deny_tools=tuple(dict.fromkeys([*_global_deny, *(entry.get("deny_tools") or ()), *(remote.get("deny_tools") or ())])),
+        deny_tools=_merged_deny,
+        # ask = union of all ask lists MINUS anything denied (deny wins).
+        ask_tools=tuple(t for t in dict.fromkeys([
+            *_global_ask, *(entry.get("ask_tools") or ()), *(remote.get("ask_tools") or ())
+        ]) if t not in _merged_deny),
         last_seen=entry.get("last_seen"),
         disabled_by=disabled_by,
     )
@@ -234,7 +247,7 @@ def upsert_agent(name: str, workspace: Path, **fields: Any) -> AgentControl:
     agents = existing.setdefault("agents", {})
     entry: Dict[str, Any] = agents.get(name, {})
 
-    ALLOWED_FIELDS = {"enabled", "mode", "iam_profile", "framework", "last_seen", "deny_tools"}
+    ALLOWED_FIELDS = {"enabled", "mode", "iam_profile", "framework", "last_seen", "deny_tools", "ask_tools"}
     for k, v in fields.items():
         if k in ALLOWED_FIELDS:
             if v is None and k in entry:
@@ -428,52 +441,64 @@ def make_disabled_finding(
 
 def set_tool_policy(
     workspace: Path, scope: str, tool: str, action: str, agent: Optional[str] = None
-) -> List[str]:
-    """Deny/allow a tool tag at ``agent`` or ``global`` scope in agents.yaml.
+) -> Dict[str, List[str]]:
+    """Set a tool tag's handling at ``agent`` or ``global`` scope in agents.yaml.
 
-    ``scope``: "agent" (writes ``agents.<agent>.deny_tools``) or "global"
-    (writes top-level ``global_deny_tools`` applied to every agent).
-    ``action``: "deny" adds the tag to the deny list; "allow" removes it.
-    Returns the resulting deny list. This is a pure denylist — allowing a tool
-    only lifts a previously-set deny, it never restricts other tools.
+    Three states, matching the console's per-tool control:
+
+    * ``allow`` — the tool runs (lifts any deny/ask on it).
+    * ``ask``   — the call requires human approval (a step_up finding → the
+      approvals queue). Written to ``ask_tools``.
+    * ``deny``  — the call is blocked. Written to ``deny_tools``.
+
+    The three are mutually exclusive per tool: setting one clears the tool from
+    the other list, so a tool is never both denied and asked (deny would win at
+    eval time anyway, but keeping the lists disjoint keeps the UI honest).
+
+    ``scope``: "global" (top-level ``global_deny_tools`` / ``global_ask_tools``,
+    applied to every agent) or "agent" (``agents.<agent>.{deny,ask}_tools``).
+    Returns ``{"deny_tools": [...], "ask_tools": [...]}`` for the chosen scope.
     """
     tool = (tool or "").strip()
     if not tool:
         raise ValueError("tool required")
+    if action not in ("allow", "ask", "deny"):
+        raise ValueError(f"action must be allow|ask|deny, got {action!r}")
     project_path = workspace / ".prismor" / _PROJECT_AGENTS_FILE
     existing: Dict[str, Any] = {}
     if project_path.exists():
         loaded = _load_yaml(project_path)
         if loaded:
             existing = loaded
+
+    def _apply(container: Dict[str, Any], deny_key: str, ask_key: str) -> Dict[str, List[str]]:
+        deny = [t for t in (container.get(deny_key) or []) if t != tool]
+        ask = [t for t in (container.get(ask_key) or []) if t != tool]
+        if action == "deny":
+            deny.append(tool)
+        elif action == "ask":
+            ask.append(tool)
+        # "allow" leaves the tool off both lists.
+        for key, lst in ((deny_key, deny), (ask_key, ask)):
+            if lst:
+                container[key] = lst
+            else:
+                container.pop(key, None)
+        return {"deny_tools": deny, "ask_tools": ask}
+
     if scope == "global":
-        cur = list(existing.get("global_deny_tools") or [])
-        if action == "deny" and tool not in cur:
-            cur.append(tool)
-        elif action == "allow":
-            cur = [t for t in cur if t != tool]
-        if cur:
-            existing["global_deny_tools"] = cur
-        else:
-            existing.pop("global_deny_tools", None)
-        result = cur
+        result = _apply(existing, "global_deny_tools", "global_ask_tools")
     else:
         if not agent:
             raise ValueError("agent required for agent scope")
         agents = existing.setdefault("agents", {})
         entry: Dict[str, Any] = agents.get(agent, {}) or {}
-        cur = list(entry.get("deny_tools") or [])
-        if action == "deny" and tool not in cur:
-            cur.append(tool)
-        elif action == "allow":
-            cur = [t for t in cur if t != tool]
-        if cur:
-            entry["deny_tools"] = cur
+        result = _apply(entry, "deny_tools", "ask_tools")
+        if entry:
+            agents[agent] = entry
         else:
-            entry.pop("deny_tools", None)
-        agents[agent] = entry
+            agents.pop(agent, None)
         existing["agents"] = agents
-        result = cur
     _write_project_config(workspace, existing)
     return result
 

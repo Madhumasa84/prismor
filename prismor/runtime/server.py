@@ -364,6 +364,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                         "mode": ctrl.mode if ctrl else None,
                         "iam_profile": ctrl.iam_profile if ctrl else None,
                         "deny_tools": list(ctrl.deny_tools) if ctrl else [],
+                        "ask_tools": list(ctrl.ask_tools) if ctrl else [],
                         "last_seen": stats.get("last_seen") or (ctrl.last_seen if ctrl else None),
                         "total_calls": stats.get("total_calls", 0),
                         "blocked_calls": stats.get("blocked_calls", 0),
@@ -431,9 +432,11 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
                 action = body.get("action") or "deny"
                 tool = body.get("tool") or ""
                 agent = body.get("agent") or None
-                deny = set_tool_policy(workspace, scope, tool, action, agent=agent)
+                lists = set_tool_policy(workspace, scope, tool, action, agent=agent)
                 self._send_json({"ok": True, "scope": scope, "action": action,
-                                 "tool": tool, "agent": agent, "deny_tools": deny})
+                                 "tool": tool, "agent": agent,
+                                 "deny_tools": lists["deny_tools"],
+                                 "ask_tools": lists["ask_tools"]})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
