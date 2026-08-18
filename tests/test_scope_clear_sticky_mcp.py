@@ -240,7 +240,8 @@ def test_discover_mcp_families_reads_claude_configs(home, tmp_path, monkeypatch)
     fams = sa.discover_mcp_families(ws, "claude")
     assert set(fams) == {"mcp__repo-local__*", "mcp__get-an-expert__*", "mcp__notion__*", POSTHOG_FAMILY}
     tools = sa.available_tools_for_scope(ws, "claude")
-    assert tools[:7] == sa.BUILTIN_SCOPE_TOOLS and POSTHOG_FAMILY in tools
+    n = len(sa.BUILTIN_SCOPE_TOOLS)
+    assert tools[:n] == sa.BUILTIN_SCOPE_TOOLS and POSTHOG_FAMILY in tools
 
 
 def test_static_fallback_allows_family_named_in_prompt():
