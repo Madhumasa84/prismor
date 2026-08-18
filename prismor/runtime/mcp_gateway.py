@@ -827,9 +827,18 @@ class Gateway:
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
             log_observe_findings(decision, mode=self.mode, tool_name=name)
-        if decision is not None and decision.blocking is not None:
+        # `decision.blocking` is set by should_block, which only fires on
+        # PRE-action events — a hook cannot un-ring a bell after the tool has
+        # run. The gateway is the exception: it is still holding the response
+        # and has not handed it to the model, so a post-action finding is
+        # genuinely actionable here. Withhold on an enforce-mode block finding
+        # even though the hook-oriented should_block declined to.
+        withhold = decision.blocking if decision is not None else None
+        if withhold is None and decision is not None and self.mode == "enforce":
+            withhold = _result_withhold_finding(decision.findings)
+        if withhold is not None:
             self._reply(req_id, _blocked_result(
-                "[Prismor] response withheld", decision.blocking))
+                "[Prismor] response withheld", withhold))
             return
 
         self._reply(req_id, result)
@@ -1049,6 +1058,38 @@ class Gateway:
                 # client-allocated and unambiguous).
                 self._send({"jsonrpc": "2.0", "method": method, "params": params})
         return _handler
+
+
+#: Result-side finding categories the gateway withholds a response over. A
+#: poisoned tool result is dangerous because of what it makes the MODEL do next
+#: (follow an injected instruction) or what it leaks (a secret the redactor did
+#: not mask); both are worth stopping even though the tool already ran.
+_WITHHOLD_CATEGORIES = frozenset({"prompt_injection", "secret_access",
+                                  "secret_exfiltration", "data_boundary", "pii"})
+_WITHHOLD_ACTION_RANK = {"block": 0, "step_up": 1, "defer": 2, "modify": 3}
+
+
+def _result_withhold_finding(findings: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Strongest enforce-mode finding that justifies withholding a tool result.
+
+    ``should_block`` deliberately returns nothing on a post-action event — a
+    hook cannot recall a tool that already ran. The gateway can: it still holds
+    the response. So it makes its own post-call decision here, restricted to the
+    finding categories where withholding the *output* is the actual mitigation
+    (injection, leaked secrets), and only for findings the policy already put in
+    enforce mode. Returns None when nothing qualifies (observe-only findings,
+    inert-context matches, unrelated categories).
+    """
+    eligible = [
+        f for f in (findings or [])
+        if str(f.get("mode", "observe")).lower() == "enforce"
+        and not f.get("contextInert")
+        and f.get("category") in _WITHHOLD_CATEGORIES
+    ]
+    if not eligible:
+        return None
+    return min(eligible, key=lambda f: _WITHHOLD_ACTION_RANK.get(
+        str(f.get("action") or "block").lower(), 0))
 
 
 def _blocked_result(prefix: str, blocking: Dict[str, Any]) -> Dict[str, Any]:

@@ -198,15 +198,31 @@ def shape_call_event(tool: str, arguments: Any) -> Optional[Dict[str, Any]]:
 
 
 def shape_result_event(tool: str, arguments: Any, output: str) -> Optional[Dict[str, Any]]:
-    """Native-shaped PostToolUse body carrying the real output for scanning."""
+    """PostToolUse body carrying the real output for scanning.
+
+    Post-call, the shape is deliberately NOT the same as the pre-call shape.
+    Pre-call, a Read is a ``file_read`` so the path/secret-access rules decide
+    whether the read is allowed. Post-call, the *contents* are untrusted data
+    flowing back to the model — indistinguishable from a WebFetch body or an
+    MCP tool result — so they must go through the ``tool_result`` path, which is
+    where the HTML-comment injection sanitizer and the prompt-injection rules
+    live. Shaping a read result as ``file_read`` (as an earlier version did)
+    routed it around that scan entirely: a SKILL.md or CONTRIBUTING.md carrying
+    a hidden ``<!-- ignore all instructions … -->`` reached the model unflagged.
+    The originating path rides along as ``mcp_tool``/``path`` for provenance.
+    """
     args = arguments if isinstance(arguments, dict) else {}
     if tool == "Bash":
+        # Shell stdout is also untrusted output returning to the model; keep the
+        # shell shape (command rules already fired pre-call) but the tool_result
+        # scan below does not see it. Command-injection via stdout is a rarer
+        # vector than a poisoned doc; left as shell for now, tracked separately.
         return {"type": "shell", "command": str(args.get("command") or ""),
                 "stdout": output, "stderr": ""}
     if tool in ("Read", "Glob", "Grep"):
-        return {"type": "file_read", "path": str(args.get("file_path")
-                                                 or args.get("path") or ""),
-                "response": output}
+        path = str(args.get("file_path") or args.get("path") or "")
+        return {"type": "tool_result", "response": output,
+                "path": path, "mcp_tool": tool}
     if tool in ("Write", "Edit"):
         return {"type": "file_write", "path": str(args.get("file_path") or ""),
                 "content": str(args.get("content") or args.get("new_string") or ""),
