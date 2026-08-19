@@ -351,3 +351,29 @@ def test_without_prior_allow_the_command_says_headless_will_stall(tmp_path, monk
     ws = tmp_path / "proj"; ws.mkdir()
     assert mirror_cli.mirror_on(ws, scope="project") == 0
     assert "--allow-tools" in capsys.readouterr().out
+
+
+def test_no_split_brain_warning_for_one_install_spelled_two_ways(tmp_path, monkeypatch):
+    """The hook installer and older builds disagree on whether PYTHONPATH names
+    the package or its parent. Both spellings are the SAME install, and a
+    warning that fires on every ordinary pipx setup is one nobody reads."""
+    from prismor.runtime import mirror_cli
+    site = tmp_path / "site-packages"
+    (site / "prismor" / "runtime").mkdir(parents=True)
+    home = tmp_path / "home"; (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    (home / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"hooks": [{"type": "command",
+                    "command": f'PRISMOR_HOME="{home}/.prismor" PYTHONPATH="{site}/prismor" '
+                               f'python3 -m prismor.runtime.immunity_cli hook-dispatch --agent claude'}]}]}}))
+    # An installed tree can also carry a nested prismor/prismor/runtime; the
+    # resolution must not mistake that for a second installation.
+    (site / "prismor" / "prismor" / "runtime").mkdir(parents=True)
+    entry = {"env": {"PYTHONPATH": str(site), "PRISMOR_HOME": str(home / ".prismor")}}
+    assert mirror_cli._coherence_warnings(tmp_path, entry) == []
+
+    # A genuinely different checkout still warns.
+    other = tmp_path / "other"; (other / "prismor" / "runtime").mkdir(parents=True)
+    entry["env"]["PYTHONPATH"] = str(other)
+    warns = mirror_cli._coherence_warnings(tmp_path, entry)
+    assert warns and "install-hooks" in warns[0]

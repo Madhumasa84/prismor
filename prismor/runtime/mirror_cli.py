@@ -335,6 +335,32 @@ def _hook_installs(workspace: Path) -> List[Tuple[Path, str, str]]:
     return out
 
 
+def _package_dir(pythonpath: str) -> Optional[Path]:
+    """Where the ``prismor`` package actually lives for a given PYTHONPATH.
+
+    The same installation is spelled two ways in the wild: the hook installer
+    writes the directory CONTAINING the package for a source checkout, but an
+    older installed build wrote the package directory itself
+    (``.../site-packages/prismor``). Comparing the raw strings reports every
+    ordinary pipx install as a version mismatch — a warning that always fires
+    is one nobody reads, so resolve both to the package and compare that.
+    """
+    if not pythonpath:
+        return None
+    try:
+        base = Path(pythonpath).expanduser().resolve()
+    except OSError:
+        return None
+    # `base` first: an installed tree can contain a nested prismor/prismor/
+    # (a real packaging artifact on this machine), so checking base/"prismor"
+    # first resolves .../site-packages/prismor to .../site-packages/prismor/
+    # prismor and reports a mismatch against itself.
+    for candidate in (base, base / "prismor"):
+        if (candidate / "runtime").is_dir():
+            return candidate
+    return base
+
+
 def _coherence_warnings(workspace: Path, entry: Dict[str, Any]) -> List[str]:
     """Flag a split-brain install: the hook layer running a DIFFERENT Prismor
     than the one behind the mirror.
@@ -362,7 +388,8 @@ def _coherence_warnings(workspace: Path, entry: Dict[str, Any]) -> List[str]:
                       or os.environ.get("PRISMOR_HOME")
                       or (Path.home() / ".prismor"))
     for path, hook_pp, hook_home in _hook_installs(workspace):
-        if hook_pp and mirror_path and Path(hook_pp) != Path(mirror_path):
+        hook_pkg, mirror_pkg = _package_dir(hook_pp), _package_dir(mirror_path)
+        if hook_pkg and mirror_pkg and hook_pkg != mirror_pkg:
             warnings.append(
                 "the Claude Code hook in {p} runs Prismor from{pad}  {a}{pad}"
                 "but the mirror serves from{pad}  {b}{pad}"
