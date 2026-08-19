@@ -401,10 +401,48 @@ def _resolve(raw: str, workspace: Path) -> Path:
     return p
 
 
+def _decloak_command(command: str) -> str:
+    """Substitute ``@@SECRET:name@@`` placeholders just before execution.
+
+    Cloaking normally runs as a Claude Code PreToolUse hook whose matcher is
+    the exact string ``Bash``. Mirroring renames the tool to
+    ``mcp__prismor-tools__Bash``, so that hook stops firing and a placeholder
+    would reach the shell literally — the command fails, or worse, the literal
+    ``@@SECRET:...@@`` is sent to whatever API the command calls. Turning the mirror
+    on must not quietly disable Cloak.
+
+    Doing it here rather than widening the hook's matcher is deliberate: the
+    hook rewrites the tool INPUT, so a hook-decloaked command would hand the
+    real secret to the gateway, which would then screen it, log it, and write
+    it to the audit trail — the exact exposure Cloak exists to prevent. Here
+    the substitution happens after policy has judged the placeholder form and
+    immediately before the shell runs, so the real value lives only in the
+    subprocess. Output is masked back to placeholders by the gateway's result
+    redaction.
+
+    Fails closed on an unregistered placeholder: executing a command with a
+    literal placeholder still in it is never what the caller meant.
+    """
+    if "@@SECRET:" not in command:
+        return command
+    try:
+        from prismor.runtime.cloaking.runtime import decloak_text
+    except Exception:
+        return command
+    try:
+        return decloak_text(command)
+    except KeyError as exc:
+        raise MirrorError(
+            f"command references an unregistered secret placeholder: {exc.args[0]}. "
+            f"Register it with `prismor cloak add {exc.args[0]}`, or run "
+            f"`prismor cloak list` to see the registered names.")
+
+
 def _run_bash(args: Dict[str, Any], workspace: Path) -> str:
     command = str(args.get("command") or "")
     if not command.strip():
         raise MirrorError("command is required")
+    command = _decloak_command(command)
     try:
         timeout_ms = float(args.get("timeout") or DEFAULT_BASH_TIMEOUT_MS)
     except (TypeError, ValueError):

@@ -830,8 +830,13 @@ class Gateway:
         # have — a hook sees the request, never the file contents — and it is
         # why a secret hardcoded in ordinary source (not just .env) stops
         # leaking. Redact before scanning so the scan sees what the model will.
-        if route.upstream.spec.local and not passthrough:
-            result = self._redact_result(result)
+        if route.upstream.spec.local:
+            # Cloak masking runs even while paused: `prismor pause` suspends
+            # ENFORCEMENT, and the hook-layer scrubber does not consult pause
+            # either, so a paused mirror must not start pushing raw secret
+            # values into the model's context. Data-boundary redaction IS
+            # policy, so it goes with the rest of enforcement.
+            result = self._redact_result(result, data_boundary=not passthrough)
 
         # Post-call: the response is untrusted content — scan before the model
         # ever sees it (prompt injection, poisoned tool output, secrets).
@@ -920,7 +925,7 @@ class Gateway:
                 "(takes effect on the next session)")
         return "\n\n".join(lines)
 
-    def _redact_result(self, result: Any) -> Any:
+    def _redact_result(self, result: Any, *, data_boundary: bool = True) -> Any:
         """Mask registered cloak secrets and classified data-boundary values in
         a mirrored tool's output.
 
@@ -947,13 +952,14 @@ class Gateway:
                 text = scrub_text(text)
             except Exception:
                 pass
-            try:
-                from prismor.runtime.data_boundary import redact_payload
-                redacted = redact_payload(text, workspace=self.workspace)
-                if isinstance(redacted, str):
-                    text = redacted
-            except Exception:
-                pass
+            if data_boundary:
+                try:
+                    from prismor.runtime.data_boundary import redact_payload
+                    redacted = redact_payload(text, workspace=self.workspace)
+                    if isinstance(redacted, str):
+                        text = redacted
+                except Exception:
+                    pass
             if text != original:
                 changed = True
                 block = {**block, "text": text}

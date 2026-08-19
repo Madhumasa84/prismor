@@ -14,6 +14,10 @@ from prismor.runtime import mirror
 from prismor.runtime.mcp_gateway import Gateway, UpstreamSpec
 from prismor.runtime.runtime import Decision
 
+#: built at import time so this file never contains a literal placeholder,
+#: which Prismor's own decloak hook would try to resolve and fail closed on.
+PLACEHOLDER = "@@" + "SECRET:" + "DEMO_TOKEN" + "@@"
+
 
 @pytest.fixture()
 def ws(tmp_path):
@@ -68,17 +72,63 @@ def test_pause_passes_the_call_through(ws, monkeypatch):
     gw.close()
 
 
-def test_pause_skips_redaction_too(ws, monkeypatch):
-    """Paused = Prismor stops interfering. A redacted read is interference."""
+def test_pause_does_not_turn_off_secret_masking(ws, monkeypatch):
+    """`prismor pause` suspends ENFORCEMENT, not Cloak.
+
+    Corrects an earlier reading of pause as "stop interfering with everything".
+    The hook-layer scrubber never consults the pause marker, so if the mirror
+    did, the same command would leak a raw secret into the model's context over
+    one transport and not the other — and pausing would quietly become a way to
+    exfiltrate. Policy-driven data-boundary redaction does stop; cloak masking
+    of registered values does not.
+    """
     monkeypatch.setattr("prismor.runtime.pause.active_state",
                         lambda: {"paused": True, "until": None})
     monkeypatch.setattr("prismor.runtime.runtime.evaluate_tool_call",
                         lambda **k: Decision(allow=True))
     monkeypatch.setattr("prismor.runtime.cloaking.runtime._read_secret_map",
-                        lambda: {"X": "hello"})
+                        lambda: {"X": "hello-secret-value"})
+    (ws / "f.txt").write_text("token=hello-secret-value\n")
     gw, sent = _gateway(ws)
     gw._handle_tools_call_safe(2, {"name": "Read", "arguments": {"file_path": str(ws / "f.txt")}})
-    assert "hello" in sent[-1]["result"]["content"][0]["text"]
+    text = sent[-1]["result"]["content"][0]["text"]
+    assert "hello-secret-value" not in text, "a paused mirror must still mask registered secrets"
+    assert "SECRET" in text
+    gw.close()
+
+
+def test_mirrored_bash_decloaks_placeholders(ws, monkeypatch):
+    """The cloak hook matches the exact tool name "Bash", so mirroring
+    (mcp__prismor-tools__Bash) silently stopped substituting placeholders and
+    the literal reached the shell."""
+    monkeypatch.setattr("prismor.runtime.cloaking.runtime._read_secret_map",
+                        lambda: {"DEMO_TOKEN": "s3cr3t-value-1234"})
+    out = mirror.execute("Bash", {"command": "echo " + PLACEHOLDER}, ws)
+    assert "s3cr3t-value-1234" in out
+
+
+def test_unregistered_placeholder_fails_closed(ws, monkeypatch):
+    monkeypatch.setattr("prismor.runtime.cloaking.runtime._read_secret_map", lambda: {})
+    with pytest.raises(mirror.MirrorError, match="unregistered secret placeholder"):
+        mirror.execute("Bash", {"command": "echo " + PLACEHOLDER}, ws)
+
+
+def test_decloaked_value_never_reaches_policy_or_the_model(ws, monkeypatch):
+    """The placeholder form is what gets screened and logged; the real value
+    exists only in the subprocess, and the output is masked back."""
+    monkeypatch.setattr("prismor.runtime.cloaking.runtime._read_secret_map",
+                        lambda: {"DEMO_TOKEN": "s3cr3t-value-1234"})
+    seen = []
+
+    def _eval(**k):
+        seen.append(json.dumps(k["event"]))
+        return Decision(allow=True)
+    monkeypatch.setattr("prismor.runtime.runtime.evaluate_tool_call", _eval)
+    gw, sent = _gateway(ws)
+    gw._handle_tools_call_safe(2, {"name": "Bash",
+                                   "arguments": {"command": "echo " + PLACEHOLDER}})
+    assert not any("s3cr3t-value-1234" in ev for ev in seen), "policy saw the real secret"
+    assert "s3cr3t-value-1234" not in json.dumps(sent[-1]), "the model saw the real secret"
     gw.close()
 
 
