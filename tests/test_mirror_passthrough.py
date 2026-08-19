@@ -216,3 +216,138 @@ def test_default_prismor_home_is_not_written_into_the_entry(tmp_path, monkeypatc
     assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
     entry = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"][mirror.MIRROR_SERVER_NAME]
     assert "PRISMOR_HOME" not in entry["env"]
+
+
+def test_on_refuses_to_disable_natives_when_the_server_cannot_start(tmp_path, monkeypatch, capsys):
+    """The worst outcome is a half-install: natives denied, mirror broken, agent
+    with no tools and no explanation. Preflight has to fail closed."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (False, "boom"))
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 1
+    out = capsys.readouterr().out
+    assert "failed to start" in out and "Nothing was changed" in out
+    assert not (tmp_path / ".mcp.json").exists()
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_preflight_really_starts_the_server_and_lists_tools(tmp_path, monkeypatch):
+    """End-to-end through the actual entry the command writes: spawn it, speak
+    MCP, get the roster back."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / "home"))
+    entry = mirror_cli._server_entry(tmp_path, "enforce", "project")
+    ok, detail = mirror_cli._preflight(entry, timeout=60.0)
+    assert ok, detail
+    assert "Bash" in detail and "Read" in detail
+
+
+# ── host-side approval (the trap that made `on` a no-tools install) ──────────
+
+def test_on_approves_only_this_server_in_local_settings(tmp_path, monkeypatch):
+    """A project .mcp.json server does not load until a human approves it, and
+    a project file cannot vouch for itself. Verified against Claude Code
+    2.1.210: with this key the mirror connects; without it the agent gets no
+    tools at all, because the natives are already denied."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash, Read"))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.local.json").write_text(
+        json.dumps({"enabledMcpjsonServers": ["some-other"], "permissions": {"allow": ["WebFetch"]}}))
+
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
+    local = json.loads((tmp_path / ".claude" / "settings.local.json").read_text())
+    assert local["enabledMcpjsonServers"] == ["some-other", "prismor-tools"]
+    assert local["permissions"] == {"allow": ["WebFetch"]}, "unrelated local settings must survive"
+    # Never the blanket grant: that would auto-trust every server any repo declares.
+    assert "enableAllProjectMcpServers" not in local
+
+    assert mirror_cli.mirror_off(tmp_path) == 0
+    local = json.loads((tmp_path / ".claude" / "settings.local.json").read_text())
+    assert local["enabledMcpjsonServers"] == ["some-other"]
+
+
+def test_off_removes_a_local_settings_file_it_created(tmp_path, monkeypatch):
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
+    assert (tmp_path / ".claude" / "settings.local.json").exists()
+    assert mirror_cli.mirror_off(tmp_path) == 0
+    assert not (tmp_path / ".claude" / "settings.local.json").exists()
+
+
+def test_on_respects_an_explicit_human_no(tmp_path, monkeypatch, capsys):
+    """If the human disabled this server, `on` must not flip it back — it warns
+    instead, so they are not left silently toolless."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.local.json").write_text(
+        json.dumps({"disabledMcpjsonServers": ["prismor-tools"]}))
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
+    out = capsys.readouterr().out
+    assert "could not auto-approve" in out and "disabledMcpjsonServers" in out
+    local = json.loads((tmp_path / ".claude" / "settings.local.json").read_text())
+    assert "enabledMcpjsonServers" not in local
+
+
+# ── tool permissions (the second reason `on` produced a toolless agent) ──────
+
+def test_existing_allow_posture_is_carried_onto_the_mirrored_names(tmp_path, monkeypatch):
+    """Claude Code gates MCP tools behind the same prompt as any other tool, and
+    the mirror renames them, so every allow rule for Bash stops applying."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    home = tmp_path / "home"; (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    # User had Bash/Read allowed outright, Glob only for one pattern.
+    (home / ".claude" / "settings.json").write_text(json.dumps(
+        {"permissions": {"allow": ["Bash", "Read", "Glob(src/**)", "WebFetch"]}}))
+    ws = tmp_path / "proj"; ws.mkdir()
+
+    assert mirror_cli.mirror_on(ws, scope="project") == 0
+    # The grant lands in the human's LOCAL settings: a project's shared
+    # settings.json may restrict but may not widen its own authority, so an
+    # allow rule written there is ignored by the host (verified live).
+    local = json.loads((ws / ".claude" / "settings.local.json").read_text())
+    allow = local["permissions"]["allow"]
+    assert allow == ["mcp__prismor-tools__Bash", "mcp__prismor-tools__Read"]
+    shared = json.loads((ws / ".claude" / "settings.json").read_text())
+    assert "allow" not in shared.get("permissions", {})
+    assert shared["permissions"]["deny"], "the restriction still belongs in the shared file"
+    # A pattern-scoped rule has no meaning over MCP, so it is NOT widened.
+    assert not any("Glob" in a for a in allow)
+    # And nothing is invented for tools the human never allowed.
+    assert not any("Write" in a for a in allow)
+
+    assert mirror_cli.mirror_off(ws) == 0
+    local = json.loads((ws / ".claude" / "settings.local.json").read_text()) \
+        if (ws / ".claude" / "settings.local.json").exists() else {}
+    assert "allow" not in local.get("permissions", {})
+
+
+def test_allow_tools_flag_pre_allows_everything_for_headless(tmp_path, monkeypatch):
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    home = tmp_path / "home"; (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    ws = tmp_path / "proj"; ws.mkdir()
+    assert mirror_cli.mirror_on(ws, scope="project", allow_tools=True) == 0
+    allow = json.loads((ws / ".claude" / "settings.local.json").read_text())["permissions"]["allow"]
+    assert sorted(allow) == sorted(f"mcp__prismor-tools__{t}" for t in mirror.mirror_tool_names())
+
+
+def test_without_prior_allow_the_command_says_headless_will_stall(tmp_path, monkeypatch, capsys):
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    home = tmp_path / "home"; (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    ws = tmp_path / "proj"; ws.mkdir()
+    assert mirror_cli.mirror_on(ws, scope="project") == 0
+    assert "--allow-tools" in capsys.readouterr().out

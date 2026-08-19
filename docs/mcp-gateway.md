@@ -122,13 +122,37 @@ prismor mirror status        # configured? governing / pass-through / paused? li
 prismor mirror off           # hand the built-ins back to the agent (next session)
 ```
 
-`on` adds a `prismor-tools` server to `.mcp.json` and the native tool names to
-`permissions.deny` in `.claude/settings.json` (backing both up as
-`*.pre-mirror.bak` first, and touching nothing else in either file). `off`
-removes exactly those entries. Use `--scope user` for `~/.claude.json` +
-`~/.claude/settings.json` instead of the project files, `--mode observe` to log
-without blocking. Other hosts: run `prismor mcp-gateway --mirror` as an MCP
-server and disable the host's own tools (SDK: `disallowed_tools`).
+Switching a host over takes four coordinated changes, and missing any one of
+them leaves the agent with *no* file or shell tools — the natives are denied but
+the replacement never loads. `on` does all four, backing up each file it touches
+as `*.pre-mirror.bak` and changing nothing else in them:
+
+| # | Change | File | Why it is required |
+|---|---|---|---|
+| 1 | `prismor-tools` server entry | `.mcp.json` | serves the mirrored built-ins |
+| 2 | natives denied | `.claude/settings.json` | so the model reaches for the mirror, not its own tools |
+| 3 | `enabledMcpjsonServers: ["prismor-tools"]` | `.claude/settings.local.json` | a project-declared MCP server does not load until a human trusts it — and a project file cannot vouch for itself, so putting this in the shared `settings.json` does nothing |
+| 4 | `mcp__prismor-tools__*` allowed | `.claude/settings.json` | MCP tools sit behind the same permission prompt as any tool, and renaming `Bash` invalidates every allow rule the human had |
+
+Step 4 translates rather than grants: a native that was already allowed gets its
+mirrored twin allowed, one that was not keeps prompting exactly as before.
+Headless runs (`claude -p`, CI) cannot answer a prompt at all — use
+`prismor mirror on --allow-tools` there to pre-allow the whole roster.
+
+`off` removes exactly those four. Use `--scope user` to configure every project
+instead of this one, `--mode observe` to log without blocking. Other hosts: run
+`prismor mcp-gateway --mirror` as an MCP server and disable the host's own tools
+(SDK: `disallowed_tools`).
+
+**One Prismor, not two.** The hook layer and the gateway both see a mirrored
+call and stay consistent only because they share code: the gateway drops a
+marker the hook reads (screened once, not twice) and the hook maps
+`mcp__prismor-tools__Bash` back to `Bash` (so a session scope judges it as the
+tool it really is). If `prismor install-hooks` wired an older or different
+checkout, both agreements break — the scope denies what the gateway allows, and
+`prismor pause` reaches only one layer. `mirror on` and `mirror status` compare
+the two and warn; the fix is to re-run `prismor install-hooks` from the same
+install.
 
 **Getting out of the way — no restart needed.** Both are read on every call:
 

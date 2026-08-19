@@ -2829,6 +2829,15 @@ def build_parser() -> argparse.ArgumentParser:
             "--no-open", action="store_true",
             help="Don't open a browser tab (headless server only)",
         )
+        # main() already resolves --workspace for every command by scanning
+        # argv, and run_server is handed the result — but argparse rejected the
+        # flag here, so `prismor dashboard --workspace X` died with
+        # "unrecognized arguments" while every sibling command accepted it.
+        _dp.add_argument(
+            "--workspace",
+            help="Workspace whose policy, agents and MCP servers to show "
+                 "(default: $PRISMOR_WORKSPACE, then cwd)",
+        )
 
     # ── eval-server: HTTP evaluation endpoint ───────────────────────────
     _ep = subparsers.add_parser(
@@ -3224,6 +3233,10 @@ def build_parser() -> argparse.ArgumentParser:
                                   "user: ~/.claude.json + ~/.claude/settings.json (every project)")
     mirror_on_p.add_argument("--agent", choices=["claude"], default="claude",
                              help="Host to configure (Claude Code only for now)")
+    mirror_on_p.add_argument("--allow-tools", dest="allow_tools", action="store_true",
+                             help="Pre-allow every mirrored tool instead of only the ones whose "
+                                  "native twin you had already allowed. Needed for headless runs "
+                                  "(`claude -p`, CI), which cannot answer a permission prompt.")
     mirror_off_p = mirror_sub.add_parser("off", help="Hand the built-ins back to the agent (next session)")
     mirror_off_p.add_argument("--scope", choices=["project", "user"], default=None,
                               help="Which install to undo (default: whichever exists)")

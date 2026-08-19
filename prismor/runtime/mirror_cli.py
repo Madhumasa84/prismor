@@ -75,6 +75,85 @@ def _claude_paths(workspace: Path, scope: str) -> Tuple[Path, Path, str]:
     return workspace / ".mcp.json", workspace / ".claude" / "settings.json", "mcpServers"
 
 
+def _local_settings_path(workspace: Path) -> Path:
+    """The human's own, machine-local settings for this project — where Claude
+    Code records which of the project's declared MCP servers they trust.
+    Gitignored by convention, which is what makes it the right place: the
+    approval is this person's, on this machine, not something the repo carries."""
+    return Path(workspace) / ".claude" / "settings.local.json"
+
+
+def _approve_project_server(workspace: Path, server: str) -> Tuple[bool, str]:
+    """Record that ``server`` is approved for ``workspace``.
+
+    A server declared in a project's ``.mcp.json`` does not load until a human
+    approves it — and, deliberately, a project file cannot vouch for itself, so
+    putting ``enableAllProjectMcpServers`` in the shared ``settings.json`` does
+    nothing. Without this step `on` is a trap: the native tools are denied
+    immediately (the deny-list IS honoured from shared settings) while their
+    replacement never loads, and the agent starts with no file or shell tools
+    and no explanation. Verified on a real Claude Code 2.1.210 session: with
+    the approval the mirror reports ``connected`` and serves all six built-ins;
+    without it the model opens by asking the user to grant filesystem
+    permissions it can never be granted.
+
+    Written as ``enabledMcpjsonServers: [server]`` — this one server — never
+    ``enableAllProjectMcpServers``, which would auto-trust every server any
+    repo in this project declares.
+
+    Note this does NOT touch ``~/.claude.json``. That file is owned by the
+    running host, which rewrites it wholesale; an edit there is silently
+    clobbered by the next ``claude`` invocation (observed).
+    """
+    path = _local_settings_path(workspace)
+    try:
+        data = _load_json(path)
+    except Exception as exc:
+        return False, f"could not read {path}: {exc}"
+    disabled = data.get("disabledMcpjsonServers")
+    if isinstance(disabled, list) and server in disabled:
+        # An explicit "no" from the human outranks us; say so rather than
+        # silently flipping their decision.
+        return False, f"{server} is in disabledMcpjsonServers in {path.name} — remove it there first"
+    enabled = data.get("enabledMcpjsonServers")
+    if not isinstance(enabled, list):
+        enabled = []
+    if server in enabled:
+        return True, "already approved"
+    _backup_once(path)
+    data["enabledMcpjsonServers"] = enabled + [server]
+    try:
+        _write_json(path, data)
+    except Exception as exc:
+        return False, f"could not write {path}: {exc}"
+    return True, "approved"
+
+
+def _unapprove_project_server(workspace: Path, server: str) -> bool:
+    """Drop the approval `on` added. Returns True if something changed."""
+    path = _local_settings_path(workspace)
+    try:
+        data = _load_json(path)
+    except Exception:
+        return False
+    enabled = data.get("enabledMcpjsonServers")
+    if not isinstance(enabled, list) or server not in enabled:
+        return False
+    rest = [x for x in enabled if x != server]
+    if rest:
+        data["enabledMcpjsonServers"] = rest
+    else:
+        data.pop("enabledMcpjsonServers", None)
+    try:
+        if data:
+            _write_json(path, data)
+        elif path.exists():
+            path.unlink()  # we created it and it is now empty
+    except Exception:
+        return False
+    return True
+
+
 def _record_path(workspace: Path, scope: str) -> Path:
     """The install record: project scope shares `.prismor/mirror.json` with
     the roster/override config; user scope lives in the Prismor home."""
@@ -176,6 +255,187 @@ def _server_entry(workspace: Path, mode: str, scope: str) -> Dict[str, Any]:
     }
 
 
+def _preflight(entry: Dict[str, Any], timeout: float = 25.0) -> Tuple[bool, str]:
+    """Actually start the server and ask it for its tools before we rely on it.
+
+    `on` denies the host's native Bash/Read/Write. If the server it points at
+    cannot start — wrong interpreter, PYTHONPATH that does not resolve, a
+    syntax error in a half-installed checkout — the agent boots with no file or
+    shell tools at all and no explanation, which is a far worse failure than
+    not installing. So we speak the handshake ourselves first and only write
+    the deny-list once a real tools/list has come back.
+    """
+    import subprocess
+    env = dict(os.environ, **{k: str(v) for k, v in (entry.get("env") or {}).items()})
+    env.pop("PRISMOR_WORKSPACE", None)
+    try:
+        proc = subprocess.Popen(
+            [entry["command"], *entry["args"]],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, text=True, bufsize=1)
+    except OSError as exc:
+        return False, f"cannot run {entry['command']}: {exc}"
+    try:
+        hello = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                 "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                            "clientInfo": {"name": "prismor-preflight", "version": "1"}}}
+        stdin = "\n".join([json.dumps(hello),
+                           json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                           json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})]) + "\n"
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return False, f"server did not answer tools/list within {timeout:.0f}s"
+    except Exception as exc:
+        proc.kill()
+        return False, str(exc)
+    for line in out.splitlines():
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("id") == 2 and isinstance(msg.get("result"), dict):
+            names = [t.get("name") for t in msg["result"].get("tools") or []]
+            served = [n for n in names if n in mirror.mirror_tool_names()]
+            if served:
+                return True, ", ".join(served)
+            return False, "server started but serves none of the mirrored built-ins"
+    tail = " / ".join([l for l in (err or "").splitlines() if l.strip()][-2:])
+    return False, tail or "server exited without answering tools/list"
+
+
+def _hook_installs(workspace: Path) -> List[Tuple[Path, str, str]]:
+    """(settings file, PYTHONPATH, PRISMOR_HOME) for every Prismor hook wired
+    into Claude Code that could screen this workspace's calls."""
+    import re
+    out: List[Tuple[Path, str, str]] = []
+    home = Path.home()
+    for path in (home / ".claude" / "settings.json",
+                 home / ".claude" / "settings.local.json",
+                 Path(workspace) / ".claude" / "settings.json",
+                 Path(workspace) / ".claude" / "settings.local.json"):
+        try:
+            data = _load_json(path)
+        except Exception:
+            continue
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            continue
+        for entries in hooks.values():
+            for entry in entries if isinstance(entries, list) else []:
+                for hook in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+                    cmd = str(hook.get("command") or "")
+                    if "hook-dispatch" not in cmd:
+                        continue
+                    pp = re.search(r'PYTHONPATH="?([^"\s]+)"?', cmd)
+                    ph = re.search(r'PRISMOR_HOME="?([^"\s]+)"?', cmd)
+                    rec = (path, pp.group(1) if pp else "", ph.group(1) if ph else "")
+                    if rec not in out:
+                        out.append(rec)
+    return out
+
+
+def _coherence_warnings(workspace: Path, entry: Dict[str, Any]) -> List[str]:
+    """Flag a split-brain install: the hook layer running a DIFFERENT Prismor
+    than the one behind the mirror.
+
+    Both layers see a mirrored call — the gateway as ``Bash``, the hook as
+    ``mcp__prismor-tools__Bash`` — and they only stay consistent because they
+    share code: the gateway drops a marker the hook reads (so the call is
+    screened once, not twice), and the hook maps the mirrored name back to its
+    native tag (so a session scope judges it as the tool it really is). Point
+    them at two different checkouts and both agreements break: the same call is
+    screened twice, a session scope denies the MCP-shaped name the gateway just
+    allowed, and the agent is stuck behind one layer's block that the other
+    layer's `prismor pause` does not lift.
+
+    Observed on a real box: a stale hook checkout with no mirror.py and no
+    native-alias mapping denied every mirrored Bash/Read/Glob with "not in
+    scope for this session" while the gateway was allowing them — the agent
+    gave up and asked the human for filesystem permissions it could not be
+    granted.
+    """
+    warnings: List[str] = []
+    pad = "\n            "
+    mirror_path = str((entry.get("env") or {}).get("PYTHONPATH") or "")
+    mirror_home = str((entry.get("env") or {}).get("PRISMOR_HOME")
+                      or os.environ.get("PRISMOR_HOME")
+                      or (Path.home() / ".prismor"))
+    for path, hook_pp, hook_home in _hook_installs(workspace):
+        if hook_pp and mirror_path and Path(hook_pp) != Path(mirror_path):
+            warnings.append(
+                "the Claude Code hook in {p} runs Prismor from{pad}  {a}{pad}"
+                "but the mirror serves from{pad}  {b}{pad}"
+                "Two versions screening one call can disagree — a scope that denies{pad}"
+                "mcp__{srv}__Bash while the gateway allows Bash leaves the agent stuck,{pad}"
+                "and `prismor pause` may reach only one of them.{pad}"
+                "Fix: re-run `prismor install-hooks` from this install.".format(
+                    p=path, a=hook_pp, b=mirror_path,
+                    srv=mirror.MIRROR_SERVER_NAME, pad=pad))
+        effective_home = hook_home or str(Path.home() / ".prismor")
+        if Path(effective_home) != Path(mirror_home):
+            warnings.append(
+                "the hook in {p} uses PRISMOR_HOME={a}{pad}"
+                "but the mirror uses {b}. They will not share the already-screened{pad}"
+                "marker (every mirrored call screened and logged twice) nor the pause{pad}"
+                "marker (`prismor pause` reaching only one of them).".format(
+                    p=path, a=effective_home, b=mirror_home, pad=pad))
+    return warnings
+
+
+def _effective_allow_entries(workspace: Path) -> List[str]:
+    """Every permissions.allow entry that applies to this workspace, across the
+    user and project settings files Claude Code merges."""
+    out: List[str] = []
+    home = Path.home()
+    for path in (home / ".claude" / "settings.json",
+                 home / ".claude" / "settings.local.json",
+                 Path(workspace) / ".claude" / "settings.json",
+                 Path(workspace) / ".claude" / "settings.local.json"):
+        try:
+            data = _load_json(path)
+        except Exception:
+            continue
+        perms = data.get("permissions")
+        allow = perms.get("allow") if isinstance(perms, dict) else None
+        for item in allow if isinstance(allow, list) else []:
+            if str(item) not in out:
+                out.append(str(item))
+    return out
+
+
+def _mirrored_allow_entries(workspace: Path, force: bool) -> List[str]:
+    """Which mirrored tools to pre-allow, carrying over the human's posture.
+
+    Claude Code gates MCP tools behind the same permission prompt as any other
+    tool, and the mirrored built-ins arrive under new names
+    (``mcp__prismor-tools__Bash``), so every allow rule the human had for
+    ``Bash`` stops applying the moment the mirror is on. Left alone that turns a
+    working setup into either six approval prompts or — headless, where nothing
+    can prompt — a dead session: observed on a real `claude -p` run, where the
+    model reported "Claude requested permissions to use
+    mcp__prismor-tools__Bash, but you haven't granted it yet" and gave up.
+
+    So translate, don't grant: a native that was already allowed gets its
+    mirrored twin allowed, and a native that was not stays un-allowed and keeps
+    prompting exactly as before. The agent's authority is unchanged — the same
+    actions, now screened by policy before they run. ``force`` (--allow-tools)
+    is for headless installs that need every mirrored tool usable outright.
+    """
+    existing = _effective_allow_entries(workspace)
+    entries: List[str] = []
+    for tool in mirror.mirror_tool_names():
+        prefixed = f"mcp__{mirror.MIRROR_SERVER_NAME}__{tool}"
+        if prefixed in existing:
+            continue
+        # "Bash" allows the tool outright; "Bash(ls:*)" only allows one pattern
+        # and has no meaning once the tool is served over MCP, so it is not
+        # carried over — the human keeps their prompt for anything narrower.
+        if force or tool in existing:
+            entries.append(prefixed)
+    return entries
+
+
 # ── on / off ─────────────────────────────────────────────────────────────────
 
 def _announce_workspace(workspace: Path) -> None:
@@ -201,7 +461,7 @@ def _announce_workspace(workspace: Path) -> None:
 
 
 def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
-              agent: str = "claude") -> int:
+              agent: str = "claude", allow_tools: bool = False) -> int:
     if agent != "claude":
         print(_c(f"prismor mirror on: agent '{agent}' is not wired yet — Claude Code only for now.", _RED))
         print(_c("  Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable "
@@ -210,6 +470,19 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
     _announce_workspace(workspace)
     mcp_path, settings_path, key = _claude_paths(workspace, scope)
     existing = _read_record(workspace, scope)
+    entry = _server_entry(workspace, mode, scope)
+
+    # 0. Prove the server works BEFORE anything is denied (see _preflight).
+    print(f"  {_c('checking', _DIM)}  starting the mirror server once to verify it serves tools...")
+    ok, detail = _preflight(entry)
+    if not ok:
+        print(_c(f"  prismor mirror on: the mirror server failed to start — {detail}", _RED))
+        print(_c("  Nothing was changed. The agent keeps its native tools.", _DIM))
+        print(_c(f"  Try it by hand:  {entry['command']} {' '.join(entry['args'])}", _DIM))
+        return 1
+    print(f"  {_c('ok', _GREEN)}        serves: {detail}")
+    for warn in _coherence_warnings(workspace, entry):
+        print(f"  {_c('warning', _YELLOW)}   {warn}")
 
     # 1. MCP server entry.
     try:
@@ -224,7 +497,7 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
         print(_c(f"prismor mirror on: {mcp_path} has an unrecognised '{key}' block — not touching it.", _RED))
         return 1
     _backup_once(mcp_path)
-    servers[mirror.MIRROR_SERVER_NAME] = _server_entry(workspace, mode, scope)
+    servers[mirror.MIRROR_SERVER_NAME] = entry
     _write_json(mcp_path, mcp)
 
     # 2. Disable the natives. Only add what is missing, and remember exactly
@@ -252,7 +525,51 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
     deny.extend(added)
     _write_json(settings_path, settings)
 
-    # 3. Governing, and the record `off` will need.
+    # 2b. Carry the human's existing allow posture onto the new tool names.
+    #
+    # This goes in settings.local.json, NOT the shared settings.json next to
+    # the deny above. A project's shared settings can RESTRICT but cannot
+    # GRANT: Claude Code honours a deny from a repo file (a repo may tighten
+    # itself) and ignores an allow (a repo may not widen its own authority) —
+    # the same asymmetry that makes enableAllProjectMcpServers useless there.
+    # Verified the hard way on a live session: with the allow rules in
+    # settings.json every mirrored call came back "Claude requested
+    # permissions ... but you haven't granted it yet"; moving the identical
+    # list to settings.local.json made them run.
+    #
+    # The split is also the right one to keep: the deny is committed with the
+    # project (everyone working here gets the mirror), the grant is per
+    # developer, per machine, and gitignored.
+    allow_added = _mirrored_allow_entries(workspace, allow_tools)
+    if allow_added:
+        lpath = _local_settings_path(workspace)
+        try:
+            local = _load_json(lpath)
+        except Exception as exc:
+            print(_c(f"prismor mirror on: cannot read {lpath}: {exc}", _RED))
+            return 1
+        lperms = local.get("permissions")
+        if not isinstance(lperms, dict):
+            lperms = local["permissions"] = {}
+        lallow = lperms.get("allow")
+        if not isinstance(lallow, list):
+            lallow = lperms["allow"] = []
+        lallow.extend(allow_added)
+        _backup_once(lpath)
+        _write_json(lpath, local)
+
+    # 3. Tell Claude Code this server is approved for this project, or the
+    #    host will leave it "Pending approval" and the agent gets no tools.
+    approved = False
+    approve_note = ""
+    if scope != "user":  # user-scope servers are the human's own config already
+        approved, approve_note = _approve_project_server(workspace, mirror.MIRROR_SERVER_NAME)
+        if not approved:
+            print(_c(f"  warning   could not auto-approve the server: {approve_note}", _YELLOW))
+            print(_c("            Run `claude` once in this project and approve "
+                     f"{mirror.MIRROR_SERVER_NAME}, or the agent starts with no tools.", _DIM))
+
+    # 4. Governing, and the record `off` will need.
     mirror.set_mirror_config(workspace, override=True)
     prior_added = list((existing or {}).get("deny_added") or [])
     _write_record(workspace, scope, {
@@ -262,6 +579,8 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
         # Union with a previous install's additions: a re-run must not forget
         # the entries the first run added just because they now pre-exist.
         "deny_added": sorted(set(prior_added) | set(added)),
+        "allow_added": sorted(set((existing or {}).get("allow_added") or []) | set(allow_added)),
+        "approved_in_claude_state": bool(approved and approve_note == "approved"),
         "at": time.time(),
     })
 
@@ -269,6 +588,16 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
     print(f"  {_c('server', _DIM)}    {mcp_path}  →  {mirror.MIRROR_SERVER_NAME}")
     print(f"  {_c('natives', _DIM)}   {settings_path}  →  denied: "
           + ", ".join(mirror.NATIVE_TOOLS_TO_DISABLE))
+    if approved:
+        print(f"  {_c('approved', _DIM)}  {_local_settings_path(workspace)}  →  "
+              f"{mirror.MIRROR_SERVER_NAME} trusted in this project")
+    if allow_added:
+        print(f"  {_c('allowed', _DIM)}   {_local_settings_path(workspace).name}  →  tool permissions carried over: "
+              + ", ".join(a.rsplit("__", 1)[-1] for a in allow_added))
+    else:
+        print(f"  {_c('note', _DIM)}      the mirrored tools are not pre-allowed — Claude Code will ask "
+              f"once per tool.\n            Headless runs cannot answer that: use "
+              f"{_c('prismor mirror on --allow-tools', _BOLD)}.")
     print()
     print(f"  {_c('Start a new Claude Code session for it to take effect.', _BOLD)}")
     print(f"  {_c('If it gets in your way:', _DIM)}  prismor pause          (lifts enforcement 24h, no restart)")
@@ -300,12 +629,14 @@ def mirror_off(workspace: Path, *, scope: Optional[str] = None) -> int:
             return 1
 
         removed_deny: List[str] = []
+        extra_notes: List[str] = []
         if rec:
             spath = Path(rec.get("settings_path") or settings_path)
             try:
                 settings = _load_json(spath)
                 perms = settings.get("permissions")
                 deny = perms.get("deny") if isinstance(perms, dict) else None
+                changed = False
                 if isinstance(deny, list):
                     ours = set(rec.get("deny_added") or [])
                     kept = [x for x in deny if str(x) not in ours]
@@ -314,12 +645,40 @@ def mirror_off(workspace: Path, *, scope: Optional[str] = None) -> int:
                         perms["deny"] = kept
                         if not kept:
                             del perms["deny"]
-                        if not perms:
-                            del settings["permissions"]
-                        _write_json(spath, settings)
+                        changed = True
+                if changed:
+                    if isinstance(perms, dict) and not perms:
+                        del settings["permissions"]
+                    _write_json(spath, settings)
             except Exception as exc:
                 print(_c(f"prismor mirror off: could not update {spath}: {exc}", _RED))
                 return 1
+            ours_allow = set(rec.get("allow_added") or [])
+            if ours_allow:
+                lpath = _local_settings_path(workspace)
+                try:
+                    local = _load_json(lpath)
+                    lperms = local.get("permissions")
+                    lallow = lperms.get("allow") if isinstance(lperms, dict) else None
+                    if isinstance(lallow, list):
+                        kept = [x for x in lallow if str(x) not in ours_allow]
+                        if len(kept) != len(lallow):
+                            if kept:
+                                lperms["allow"] = kept
+                            else:
+                                del lperms["allow"]
+                            if not lperms:
+                                del local["permissions"]
+                            extra_notes.append("tool permissions removed from settings.local.json")
+                            if local:
+                                _write_json(lpath, local)
+                            elif lpath.exists():
+                                lpath.unlink()
+                except Exception:
+                    pass
+            if rec.get("approved_in_claude_state"):
+                if _unapprove_project_server(workspace, server):
+                    extra_notes.append(f"server approval for {server} removed from settings.local.json")
             _write_record(workspace, sc, None)
 
         if removed_server or removed_deny or rec:
@@ -329,6 +688,8 @@ def mirror_off(workspace: Path, *, scope: Optional[str] = None) -> int:
                 print(f"  {_c('server', _DIM)}    removed {server} from {mcp_path}")
             if removed_deny:
                 print(f"  {_c('natives', _DIM)}   restored in {settings_path}: " + ", ".join(removed_deny))
+            for note in extra_notes:
+                print(f"  {_c('cleaned', _DIM)}   {note}")
     if not done:
         print("  Prismor mirror was not configured for Claude Code here — nothing to undo.")
         print(_c("  (If you wired it by hand, remove the server from .mcp.json and the deny "
@@ -407,6 +768,9 @@ def mirror_status(workspace: Path) -> int:
         roster.append(t if t not in cfg["disabled_tools"] else _c(f"{t} (off)", _DIM))
     print(f"  {_c('roster', _DIM)}        {' '.join(roster)}")
 
+    for warn in _coherence_warnings(workspace, _server_entry(workspace, "enforce", "project")):
+        print(f"  {_c('warning', _YELLOW)}      {warn}")
+
     live = _live_gateways(workspace)
     if live:
         for m in live:
@@ -424,7 +788,8 @@ def mirror_status(workspace: Path) -> int:
 def run(args, workspace: Path) -> int:
     action = getattr(args, "mirror_command", None) or "status"
     if action == "on":
-        return mirror_on(workspace, mode=args.mode, scope=args.scope, agent=args.agent)
+        return mirror_on(workspace, mode=args.mode, scope=args.scope, agent=args.agent,
+                         allow_tools=getattr(args, "allow_tools", False))
     if action == "off":
         return mirror_off(workspace, scope=getattr(args, "scope", None))
     if action == "passthrough":
