@@ -490,9 +490,10 @@ def test_setup_offers_the_mirror_only_where_it_can_actually_wire_it():
     # A host whose built-ins cannot be switched off is never offered one: the
     # model would simply call the real Bash instead.
     assert not _can_mirror("warp", {"mirror": "unsupported"})
+    assert _can_mirror("opencode", {"mirror": "possible"})
     # ...and neither is a host nobody has wired, however capable it is.
-    assert "opencode" not in INSTALLABLE_AGENTS
-    assert not _can_mirror("opencode", {"mirror": "possible"})
+    assert "amp" not in INSTALLABLE_AGENTS
+    assert not _can_mirror("amp", {"mirror": "possible"})
 
 
 def test_do_install_signature_defaults_to_hooks_only():
@@ -543,3 +544,57 @@ def test_codex_off_only_re_enables_what_it_disabled(tmp_path, monkeypatch):
     assert mirror_cli.mirror_off_codex(tmp_path) == 0
     enabled = [c for c in calls if c[:2] == ("features", "enable")]
     assert enabled == [("features", "enable", "shell_tool")]
+
+
+# ── OpenCode ────────────────────────────────────────────────────────────────
+
+def test_opencode_round_trips_its_project_config(tmp_path, monkeypatch):
+    """One project file declares the server AND grants it — OpenCode has no
+    separate trust gate — so `on` is a single edit and `off` must undo it
+    exactly, leaving unrelated keys alone."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash, Read"))
+    cfg = tmp_path / "opencode.json"
+    cfg.write_text(json.dumps({"model": "anthropic/claude-sonnet-4-5",
+                               "tools": {"webfetch": False}}))
+
+    assert mirror_cli.mirror_on_opencode(tmp_path) == 0
+    data = json.loads(cfg.read_text())
+    # keyed directly under `mcp`, not `mcp.servers` (OpenCode 1.18 rejects that)
+    server = data["mcp"]["prismor-tools"]
+    assert server["type"] == "local" and server["enabled"] is True
+    assert "--mirror" in server["command"]
+    for tool in mirror_cli._OPENCODE_NATIVE_TOOLS:
+        assert data["tools"][tool] is False
+    assert data["model"] == "anthropic/claude-sonnet-4-5", "unrelated config must survive"
+    assert data["tools"]["webfetch"] is False
+    assert (tmp_path / "opencode.json.pre-mirror.bak").exists()
+
+    assert mirror_cli.mirror_off_opencode(tmp_path) == 0
+    data = json.loads(cfg.read_text())
+    assert "mcp" not in data
+    assert data["model"] == "anthropic/claude-sonnet-4-5"
+    # the developer's own disabled tool stays disabled
+    assert data["tools"] == {"webfetch": False}
+
+
+def test_opencode_off_leaves_a_tool_the_developer_disabled(tmp_path, monkeypatch):
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr(mirror_cli, "_preflight", lambda entry, timeout=25.0: (True, "Bash"))
+    cfg = tmp_path / "opencode.json"
+    cfg.write_text(json.dumps({"tools": {"bash": False}}))
+    assert mirror_cli.mirror_on_opencode(tmp_path) == 0
+    assert mirror_cli.mirror_off_opencode(tmp_path) == 0
+    data = json.loads(cfg.read_text())
+    assert data["tools"]["bash"] is False, "on() never disabled it, so off() must not enable it"
+
+
+def test_opencode_is_the_highest_value_mirror_target():
+    """It has no hook protocol, so the mirror is the only interposition point
+    that exists for it — the recommendation must not point at hooks."""
+    from prismor.runtime.integrations.registry import governance
+    from prismor.runtime.mirror_cli import INSTALLABLE_AGENTS
+    g = governance("opencode")
+    assert g["hooks"] is False
+    assert g["recommended"] == "mirror"
+    assert "opencode" in INSTALLABLE_AGENTS

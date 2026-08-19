@@ -273,9 +273,11 @@ agents:
     normalizer: _normalize_opencode
     sources: ["https://opencode.ai/docs/plugins/"]
     mirror:
-      status: possible
+      status: verified
       scope: project
       disable: "tools.<name>: false"
+      verified: "2026-08-19"
+      notes: "no trust gate - the project opencode.json both declares and grants the server"
 
   - id: factory-droid
     name: Factory Droid

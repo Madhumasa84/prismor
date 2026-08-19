@@ -100,7 +100,7 @@ someone silently. Choosing hooks only is the recommended setup and needs no
 action. The confirm screen names both, so you can see what is about to be
 installed before anything is written.
 
-Wired hosts today are **Claude Code** (per project) and **Codex** (machine-wide).
+Wired hosts today are **Claude Code** (per project), **Codex** (machine-wide) and **OpenCode** (per project).
 Other agents in the table can be mirrored by hand with `prismor mcp-gateway
 --mirror`; the one-command setup lands per host as each is verified against a
 real session, because a half-wired host leaves the agent with no tools at all.

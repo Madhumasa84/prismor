@@ -52,7 +52,7 @@ from prismor.runtime import mirror
 #: about what has been verified by driving a real session, since a half-wired
 #: host leaves the agent with no tools at all. `prismor setup` reads this to
 #: decide which agents may be offered the mirror as a choice.
-INSTALLABLE_AGENTS: Tuple[str, ...] = ("claude", "codex")
+INSTALLABLE_AGENTS: Tuple[str, ...] = ("claude", "codex", "opencode")
 
 # ── output helpers (match cli.py's ANSI style, no deps) ──────────────────────
 _RESET = "\033[0m"
@@ -500,6 +500,9 @@ def mirror_on(workspace: Path, *, mode: str = "enforce",
     if agent == "codex":
         _announce_workspace(workspace)
         return mirror_on_codex(workspace, mode=mode)
+    if agent == "opencode":
+        _announce_workspace(workspace)
+        return mirror_on_opencode(workspace, mode=mode)
     if agent not in INSTALLABLE_AGENTS:
         print(_c(f"prismor mirror on: agent '{agent}' is not wired yet.", _RED))
         print(_c(f"  Wired today: {', '.join(INSTALLABLE_AGENTS)}. For anything else, run "
@@ -644,6 +647,9 @@ def mirror_on(workspace: Path, *, mode: str = "enforce",
 def mirror_off(workspace: Path, *, agent: str = "claude") -> int:
     if agent == "codex":
         return mirror_off_codex(workspace)
+    if agent == "opencode":
+        _announce_workspace(workspace)
+        return mirror_off_opencode(workspace)
     _announce_workspace(workspace)
     done = 0
     for sc in ("project",):
@@ -877,6 +883,145 @@ def mirror_off_codex(workspace: Path) -> int:
     print()
     print(f"  {_c('Prismor mirror is off for Codex.', _GREEN)} "
           f"{_c('Start a new Codex session.', _BOLD)}")
+    return 0
+
+
+# ── OpenCode ─────────────────────────────────────────────────────────────────
+#
+# The most valuable host to mirror: OpenCode has no hook protocol, so MCP is the
+# only interposition point that exists for it — without this Prismor cannot see
+# an OpenCode session at all.
+#
+# Everything lives in one project-scoped `opencode.json`, and there is no trust
+# gate: the project file both declares the server and grants it, so `on` is a
+# single file edit. Note the MCP block is keyed directly under `mcp` — NOT
+# `mcp.servers`, which published guidance says and OpenCode 1.18 rejects.
+#
+# Native tool names are lowercase and `tools: {name: false}` removes them from
+# the agent's toolkit (OpenCode also derives a matching `permission: deny` from
+# it, visible in `opencode debug config`).
+
+_OPENCODE_NATIVE_TOOLS = ("bash", "read", "write", "edit", "grep", "glob")
+
+
+def _opencode_config_path(workspace: Path) -> Path:
+    return Path(workspace) / "opencode.json"
+
+
+def mirror_on_opencode(workspace: Path, *, mode: str = "enforce") -> int:
+    entry = _server_entry(workspace, mode)
+    path = _opencode_config_path(workspace)
+
+    print(f"  {_c('checking', _DIM)}  starting the mirror server once to verify it serves tools...")
+    ok, detail = _preflight(entry)
+    if not ok:
+        print(_c(f"  prismor mirror on: the mirror server failed to start — {detail}", _RED))
+        print(_c("  Nothing was changed. OpenCode keeps its native tools.", _DIM))
+        return 1
+    print(f"  {_c('ok', _GREEN)}        serves: {detail}")
+
+    try:
+        cfg = _load_json(path)
+    except Exception as exc:
+        print(_c(f"prismor mirror on: cannot read {path}: {exc}", _RED))
+        return 1
+    mcp = cfg.get("mcp")
+    if mcp is None:
+        mcp = cfg["mcp"] = {}
+    if not isinstance(mcp, dict):
+        print(_c(f"prismor mirror on: {path} has an unrecognised 'mcp' block — not touching it.", _RED))
+        return 1
+    tools = cfg.get("tools")
+    if tools is None:
+        tools = cfg["tools"] = {}
+    if not isinstance(tools, dict):
+        print(_c(f"prismor mirror on: {path} has an unrecognised 'tools' block — not touching it.", _RED))
+        return 1
+
+    _backup_once(path)
+    cfg.setdefault("$schema", "https://opencode.ai/config.json")
+    mcp[mirror.MIRROR_SERVER_NAME] = {
+        "type": "local",
+        "command": [entry["command"], *entry["args"]],
+        "enabled": True,
+        "environment": dict(entry.get("env") or {}),
+    }
+    disabled = []
+    for tool in _OPENCODE_NATIVE_TOOLS:
+        if tools.get(tool) is not False:
+            tools[tool] = False
+            disabled.append(tool)
+    _write_json(path, cfg)
+
+    _write_record(workspace, {
+        "agent": "opencode", "scope": "project", "mode": mode,
+        "server": mirror.MIRROR_SERVER_NAME,
+        "config_path": str(path),
+        "tools_disabled": disabled,
+        "at": time.time(),
+    })
+    mirror.set_mirror_config(workspace, override=True)
+
+    print(f"  {_c('Prismor mirror is on for OpenCode', _GREEN)} (this project, {mode} mode)")
+    print(f"  {_c('server', _DIM)}    {path}  →  mcp.{mirror.MIRROR_SERVER_NAME}")
+    if disabled:
+        print(f"  {_c('natives', _DIM)}   disabled: {', '.join(disabled)}")
+    print()
+    print(f"  {_c('Start a new OpenCode session for it to take effect.', _BOLD)}")
+    print(f"  {_c('Verify with', _DIM)} {_c('opencode mcp list', _BOLD)} "
+          f"{_c('(expect: prismor-tools connected).', _DIM)}")
+    print(f"  {_c('If it gets in your way:', _DIM)}  prismor pause")
+    print(f"  {_c('To go back to native tools:', _DIM)}  prismor mirror off --agent opencode")
+    return 0
+
+
+def mirror_off_opencode(workspace: Path) -> int:
+    rec = _read_record(workspace) or {}
+    path = Path(rec.get("config_path") or _opencode_config_path(workspace))
+    server = rec.get("server") or mirror.MIRROR_SERVER_NAME
+    try:
+        cfg = _load_json(path)
+    except Exception as exc:
+        print(_c(f"prismor mirror off: cannot read {path}: {exc}", _RED))
+        return 1
+
+    changed = False
+    mcp = cfg.get("mcp")
+    if isinstance(mcp, dict) and server in mcp:
+        del mcp[server]
+        if not mcp:
+            del cfg["mcp"]
+        changed = True
+        print(f"  {_c('server', _DIM)}    removed mcp.{server} from {path}")
+
+    tools = cfg.get("tools")
+    # Re-enable only what `on` turned off; a tool the developer had already
+    # disabled themselves is not ours to switch back on.
+    restored = []
+    if isinstance(tools, dict):
+        for tool in (rec.get("tools_disabled") or []):
+            if tools.get(tool) is False:
+                del tools[tool]
+                restored.append(tool)
+        if not tools:
+            cfg.pop("tools", None)
+    if restored:
+        changed = True
+        print(f"  {_c('natives', _DIM)}   restored: {', '.join(restored)}")
+
+    if changed:
+        if list(cfg.keys()) == ["$schema"]:
+            cfg = {}
+        if cfg:
+            _write_json(path, cfg)
+        elif path.exists():
+            path.unlink()
+        _write_record(workspace, None)
+    else:
+        print("  Prismor mirror was not configured for OpenCode here — nothing to undo.")
+        return 0
+    print()
+    print(f"  {_c('Start a new OpenCode session — it uses its native tools again.', _BOLD)}")
     return 0
 
 

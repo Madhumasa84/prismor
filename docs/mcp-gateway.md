@@ -182,6 +182,27 @@ Verified on codex-cli 0.145.0: `config.py` came back as
 `postgres://[REDACTED:secret]@db.internal…` and a `.env` read was blocked —
 result-side redaction Codex has never had (see prismor#152).
 
+### OpenCode
+
+```bash
+prismor mirror on --agent opencode     # this project
+prismor mirror off --agent opencode
+```
+
+The highest-value host to mirror: OpenCode has no hook protocol, so MCP is the
+only interposition point that exists for it - without this Prismor cannot see an
+OpenCode session at all.
+
+Everything is one project-scoped `opencode.json`, and there is **no trust gate** -
+the project file both declares the server and grants it. Note the MCP block is
+keyed directly under `mcp`, **not** `mcp.servers`, which published guidance says
+and OpenCode 1.18 rejects.
+
+Verified on OpenCode 1.18.16: after `on`, `opencode mcp list` reports
+`prismor-tools connected` and `opencode debug agent build` shows
+`bash, read, write, edit, grep, glob` all disabled; `off` restores them and
+leaves any tool the developer had disabled themselves alone.
+
 Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable the
 host's own built-ins yourself. The server is host-agnostic — only the config
 wiring is per-host, and `prismor mirror status` lists what is wired today.
