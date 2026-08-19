@@ -136,6 +136,31 @@ prismor cloak run -- curl https://api.example.com -H "Authorization: Bearer @@SE
 
 Secrets live under `$PRISMOR_HOME/secrets/` (default `~/.prismor/secrets/`) with the directory at `0700` and each file at `0600`. The directory should be **excluded from backups and sync** (Time Machine, iCloud, Dropbox). Override the location with `PRISMOR_SECRETS_DIR`.
 
+### Writing the literal placeholder syntax (escape form)
+
+`decloak.sh` runs over the whole Bash command string and fails closed on any
+`@@SECRET:name@@` it cannot resolve. That is correct for execution, but it also
+fires when you are merely *writing about* the syntax — a doc, a commit message,
+or a test fixture. To write the literal placeholder, escape the colon with a
+backslash:
+
+```bash
+git commit -m "docs: explain the @@SECRET\:name@@ placeholder form"
+```
+
+The placeholder regex skips `@@SECRET\:name@@` (a name may not contain a
+backslash) and no substitution touches it, so the escaped text is emitted
+verbatim and the guard does not fire. Fail-closed stays the default: a real,
+unresolved placeholder is still denied.
+
+**The backslash is part of what you write.** Nothing rewrites it on the way
+out, so the commit message above lands as `docs: explain the @@SECRET\:name@@
+placeholder form` — backslash included. The escape lets you write *about* the
+syntax through Bash; it does not produce the unescaped literal. When a file
+must contain the exact unescaped text (a fixture asserting on the real
+placeholder, say), build it in-process rather than through a Bash command
+string — in Python, `"@@" + "SECRET:" + name + "@@"` never reaches the hook.
+
 ---
 
 ## The user-prompt boundary
