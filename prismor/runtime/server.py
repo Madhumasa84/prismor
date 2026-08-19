@@ -121,10 +121,29 @@ def _mcp_server_inventory(workspace: Path):
     # `enabled` roster (which built-ins the mirror exposes at all).
     mcfg = mirror.mirror_config(workspace)
     disabled = set(mcfg["disabled_tools"])
+    # A `prismor pause` outranks the switch: the mirror is passing through
+    # regardless of what the switch says, and the card must say so rather than
+    # show "Governing" while nothing is being blocked.
+    paused = None
+    try:
+        from prismor.runtime import pause as _pause
+        paused = _pause.active_state()
+    except Exception:
+        paused = None
+    paused_until = ""
+    if paused and paused.get("until"):
+        try:
+            from datetime import datetime as _dt
+            paused_until = _dt.fromtimestamp(float(paused["until"])).strftime("%H:%M")
+        except Exception:
+            paused_until = ""
     for name in sorted(mirror_names):
         servers.append({
             "name": name, "kind": "mirror",
             "override": mcfg["override"],
+            "paused": paused is not None,
+            "paused_until": paused_until,
+            "paused_by_org": bool(paused and paused.get("source") == "org"),
             "tools": [{"name": t, "tag": t, "state": _state(t),
                        "enabled": t not in disabled}
                       for t in mirror.mirror_tool_names()],

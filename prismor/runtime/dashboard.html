@@ -2671,31 +2671,49 @@ function renderMcpServers() {
   ).join('');
 }
 
-// The mirror: front-of-house controls. An Override switch (replace the native
-// toolkit, or use the host's own tools directly) and a per-tool on/off roster —
-// "this tool I want, this one I don't" — distinct from call-time allow/ask/deny.
+// The mirror: front-of-house controls. A Governing / Pass-through switch (screen
+// and redact every mirrored call, or execute them exactly as the natives would
+// while still logging) and a per-tool on/off roster — "this tool I want, this
+// one I don't" — distinct from call-time allow/ask/deny. Pass-through keeps
+// serving the tools: the host's natives were denied by `prismor mirror on`, so a
+// mirror that went silent would leave the agent with no Bash/Read at all.
+// Handing the built-ins back to the agent is a config change + restart, and
+// that lives in the CLI (`prismor mirror off`), not behind a runtime switch.
 function renderMirrorCard(s) {
   const override = s.override !== false;
+  const paused = !!s.paused;
+  const governing = override && !paused;
   const ovBtn = '<button class="en-toggle ' + (override ? 'on' : 'off') + '" ' +
+    (paused ? 'disabled title="Prismor is paused — run prismor resume first" ' : '') +
     'onclick="mcpOverrideSet(\'' + safeAttr(s.name) + '\',' + (override ? 'true' : 'false') + ')">' +
-    (override ? 'Overriding native tools' : 'Using native tools') + '</button>';
+    (paused ? 'Paused' : (override ? 'Governing' : 'Pass-through')) + '</button>';
   const rows = (s.tools || []).map(t => {
     const on = t.enabled !== false;
     const toggle = '<button class="tp-toggle ' + (on ? 'on' : 'off') + '"' +
-      (override ? '' : ' disabled title="Turn on Override to serve mirror tools"') +
       ' onclick="mcpToolEnable(\'' + safeAttr(s.name) + '\',\'' + safeAttr(t.name) + '\',' + (on ? 'true' : 'false') + ')">' +
       '<span class="tp-knob"></span></button>';
-    return '<div class="tp-row' + (override ? '' : ' tp-row-off') + '">' +
+    return '<div class="tp-row' + (governing ? '' : ' tp-row-off') + '">' +
       '<span class="tp-tool">' + safe(t.name) + '</span>' + toggle + '</div>';
   }).join('');
+  let hint;
+  if (paused) {
+    const until = s.paused_until ? ' until ' + safe(s.paused_until) : '';
+    hint = 'Prismor is <b>paused</b>' + until + ' — the mirror passes every call through (logged, not blocked or redacted). ' +
+      'Resume from your terminal: <code>prismor resume</code>.';
+  } else if (override) {
+    hint = 'Governing — every mirrored call is policy-screened before it runs and its output redacted after. ' +
+      'Native tools are switched off in the host by <code>prismor mirror on</code>; ' +
+      '<code>prismor mirror off</code> hands them back (next session).';
+  } else {
+    hint = 'Pass-through — the mirror still serves the tools below but runs them exactly as the natives would ' +
+      '(logged, not blocked or redacted). Flip back to Governing here, or <code>prismor mirror passthrough off</code>.';
+  }
   return '<div class="card" style="margin-bottom:16px">' +
     '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
       '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
       safe(s.name) + '<span class="mcp-kind mcp-kind-mirror">mirror · built-ins</span>' +
       '<span style="margin-left:auto">' + ovBtn + '</span></div>' +
-    '<div class="mcp-hint">' + (override
-      ? 'The mirror serves the tools switched on below in place of the agent\'s own. Disable natives at deploy (Claude Code <code>--tools ""</code>) so these take over.'
-      : 'Off — the agent uses its own built-in tools directly; the mirror serves nothing and does not govern them.') + '</div>' +
+    '<div class="mcp-hint">' + hint + '</div>' +
     '<div class="tp-grid" style="margin-top:10px">' + rows + '</div></div>';
 }
 
@@ -2726,7 +2744,7 @@ async function mcpOverrideSet(server, current) {
     const s = _mcpServersCache.find(x => x.name === server);
     if (s) s.override = r.override;
     renderMcpServers();
-    toast('✓ ' + server + (r.override ? ' overriding native tools' : ' using native tools'));
+    toast('✓ ' + server + (r.override ? ' governing built-ins' : ' passing through (ungoverned)'));
   } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
 }
 

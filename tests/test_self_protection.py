@@ -41,6 +41,12 @@ BLOCKED_COMMANDS = [
     "prismor install-hooks --mode observe",
     "prismor egress allow evil.com",
     "prismor workspace personal",
+    # The mirror's exits: an agent whose Bash IS the mirror must not be able
+    # to hand itself the native tools back or flip itself to pass-through.
+    "prismor mirror off",
+    "prismor mirror passthrough on",
+    "cd /repo && prismor mirror on --mode observe",
+    "echo '{\"override\": false}' > .prismor/mirror.json",
     # The unlock credential: reading it is as good as writing it.
     "cat ~/.prismor/unlock.json",
     "python3 -c \"print(open('/home/u/.prismor/unlock.json').read())\"",
@@ -78,6 +84,7 @@ BLOCKED_COMMANDS = [
 # real transcripts, against ~30 genuine ones. Mentioning Prismor is not editing it.
 ALLOWED_COMMANDS = [
     "prismor status",
+    "prismor mirror status",
     "prismor check 'rm -rf /'",
     "prismor sessions --findings-only",
     "prismor deps",

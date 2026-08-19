@@ -46,10 +46,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
     "MIRROR_SERVER_NAME",
+    "NATIVE_TOOLS_TO_DISABLE",
     "mirror_tool_definitions",
     "mirror_tool_names",
     "mirror_config",
     "enabled_tool_names",
+    "passthrough_state",
     "set_mirror_config",
     "execute",
     "shape_call_event",
@@ -61,7 +63,19 @@ __all__ = [
     "MirrorError",
 ]
 
-MIRROR_SERVER_NAME = "prismor"
+#: Server name `prismor mirror on` registers the mirror under. Deliberately not
+#: plain "prismor": that name is what the hosted mcp.prismor.dev connector is
+#: registered as in most configs, and two servers with one name means one of
+#: them silently wins.
+MIRROR_SERVER_NAME = "prismor-tools"
+
+#: Native tools `prismor mirror on` disables in the host so the mirrored ones
+#: take their place. The mirrored six, plus the host's OTHER file-writing
+#: built-ins: leaving MultiEdit/NotebookEdit native would hand the model an
+#: ungoverned way to write files while Write/Edit are governed — the mirror
+#: would look complete and be trivially bypassed.
+NATIVE_TOOLS_TO_DISABLE: Tuple[str, ...] = (
+    "Bash", "Read", "Write", "Edit", "Glob", "Grep", "MultiEdit", "NotebookEdit")
 
 #: Hard ceiling on what one mirrored call may hand back to the model. MCP has
 #: no streaming for tool results, and an unbounded `Read` of a multi-MB file
@@ -169,20 +183,35 @@ def mirror_tool_names() -> List[str]:
 # Two front-of-house controls, separate from the allow/ask/deny call-time
 # policy:
 #
-#   override      Does the mirror REPLACE the host's native toolkit, or not?
-#                 When off, the mirror serves nothing — the agent uses its own
-#                 built-ins directly (ungoverned by the mirror) and there are no
-#                 duplicate Bash/Read tools competing in the model's tool list.
-#                 When on, the mirror serves the enabled roster below (the
-#                 deployment is expected to have disabled the natives so these
-#                 take their place).
+#   override      Does the mirror GOVERN the built-ins it serves, or pass them
+#                 through untouched?
+#                 On  → every mirrored call is policy-screened, blocked on an
+#                       enforce finding, and its output redacted (the point of
+#                       the mirror).
+#                 Off → PASS-THROUGH: the mirror keeps serving the same tools
+#                       and executes them exactly as the native tool would —
+#                       no blocking, no withholding, no redaction — while still
+#                       logging what it sees (observe). It deliberately does NOT
+#                       stop serving: the host was told to disable its natives
+#                       (`prismor mirror on` writes that deny-list), so a mirror
+#                       that vanished would leave the agent with no Bash/Read at
+#                       all. That is exactly what happened the first time this
+#                       switch was flipped in a live Claude Code session — the
+#                       "serve nothing" semantics turned every tool call into
+#                       "unknown tool" and the session was unusable. Restoring
+#                       the natives is a config change plus a restart, and that
+#                       is `prismor mirror off`, not this switch.
 #   roster        Which built-ins the mirror exposes at all. A tool switched off
 #                 is simply not advertised in tools/list — "this tool I want,
 #                 this one I don't", distinct from denying a call at runtime.
 #
+# A global `prismor pause` has the same runtime effect as override-off, for
+# every workspace at once, with the usual 24h auto-resume; see
+# :func:`passthrough_state`.
+#
 # Stored in ``<workspace>/.prismor/mirror.json`` so the running gateway and the
 # dashboard agree on one file. Missing file → the safe default: override on,
-# every tool enabled (today's behaviour).
+# every tool enabled.
 
 def _mirror_config_path(workspace: Path) -> Path:
     return Path(workspace) / ".prismor" / "mirror.json"
@@ -214,12 +243,34 @@ def mirror_config(workspace: Optional[Path]) -> Dict[str, Any]:
 
 def enabled_tool_names(workspace: Optional[Path]) -> List[str]:
     """Tools the mirror should advertise/execute for this workspace: the roster
-    minus disabled tools, or nothing at all when override is off."""
+    minus disabled tools. Independent of ``override`` — a pass-through mirror
+    still serves its roster (see the module comment above for why)."""
     cfg = mirror_config(workspace)
-    if not cfg["override"]:
-        return []
     disabled = set(cfg["disabled_tools"])
     return [t for t in mirror_tool_names() if t not in disabled]
+
+
+def passthrough_state(workspace: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """Why (if at all) the mirror must currently pass calls through ungoverned.
+
+    Returns ``None`` when the mirror should govern normally, else a dict with a
+    ``source`` of ``"pause"`` (a `prismor pause` / org pause is active — the
+    record is included) or ``"override"`` (this workspace's mirror switch is
+    off). Pause is checked first: it is the broader, human-initiated signal
+    and the message the agent sees should name it.
+
+    Never raises — a broken pause marker must not take the mirror down.
+    """
+    try:
+        from prismor.runtime import pause as _pause
+        rec = _pause.active_state()
+    except Exception:
+        rec = None
+    if rec is not None:
+        return {"source": "pause", "pause": rec}
+    if workspace is not None and not mirror_config(workspace)["override"]:
+        return {"source": "override"}
+    return None
 
 
 def set_mirror_config(workspace: Path, *, override: Optional[bool] = None,
@@ -232,6 +283,16 @@ def set_mirror_config(workspace: Path, *, override: Optional[bool] = None,
     """
     import json as _json
     cfg = mirror_config(workspace)
+    # Keep keys this function does not own (the `install` record written by
+    # `prismor mirror on`) — a roster toggle from the dashboard must not erase
+    # the bookkeeping `prismor mirror off` needs to undo the install cleanly.
+    extra: Dict[str, Any] = {}
+    try:
+        raw = _json.loads(_mirror_config_path(workspace).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            extra = {k: v for k, v in raw.items() if k not in ("override", "disabled_tools")}
+    except Exception:
+        pass
     if override is not None:
         cfg["override"] = bool(override)
     if tool is not None:
@@ -245,7 +306,7 @@ def set_mirror_config(workspace: Path, *, override: Optional[bool] = None,
         cfg["disabled_tools"] = [t for t in mirror_tool_names() if t in disabled]
     path = _mirror_config_path(workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_json.dumps(cfg, indent=2))
+    path.write_text(_json.dumps({**extra, **cfg}, indent=2))
     return cfg
 
 
@@ -641,8 +702,9 @@ def execute(tool: str, arguments: Any, workspace: Path) -> str:
     if impl is None:
         raise MirrorError(f"unknown mirrored tool: {tool}")
     # Roster guard (defense in depth): tools/list already hides disabled tools,
-    # but a client could still call a name it cached. A disabled tool — or any
-    # tool while override is off — is not ours to run.
+    # but a client could still call a name it cached. A disabled tool is not
+    # ours to run. (Override-off is NOT a refusal — it is pass-through; the
+    # gateway decides how much policy to apply, not whether to execute.)
     if tool not in enabled_tool_names(workspace):
         raise MirrorError(f"tool '{tool}' is not enabled on this Prismor mirror")
     args = arguments if isinstance(arguments, dict) else {}

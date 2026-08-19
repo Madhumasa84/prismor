@@ -764,12 +764,23 @@ class Gateway:
         except Exception:
             pass
 
+        # Pass-through? A `prismor pause` (local or org) lifts enforcement for
+        # the whole gateway, exactly as it does for the hook layer — the human
+        # ran it to make Prismor stop interfering, and a gateway that kept
+        # blocking would make the pause a lie. A mirror whose override switch
+        # is off passes its built-ins through as well. Either way the call is
+        # still evaluated and logged: pass-through is observe, not blindness.
+        passthrough = self._passthrough(route)
+
         # Pre-call evaluation.
         decision = self._evaluate(self._build_call_event(route, arguments))
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
-            log_observe_findings(decision, mode=self.mode, tool_name=name)
-        if decision is not None and decision.blocking is not None:
+            log_observe_findings(decision, tool_name=name,
+                                 mode="observe" if passthrough else self.mode)
+        if decision is not None and decision.blocking is not None and passthrough:
+            self._note_passthrough(name, decision.blocking, passthrough)
+        elif decision is not None and decision.blocking is not None:
             verdict = str(decision.blocking.get("action") or "block").lower()
             handled = False
             # MODIFY via pii_redact: rewrite the arguments in place and let the
@@ -804,8 +815,9 @@ class Gateway:
                 except Exception:
                     handled = False
             if not handled:
-                self._reply(req_id, _blocked_result("Blocked by Prismor",
-                                                    decision.blocking))
+                self._reply(req_id, _blocked_result(
+                    "Blocked by Prismor", decision.blocking,
+                    unblock=self._unblock_text(decision.blocking, route)))
                 return
 
         result = route.upstream.request(
@@ -818,7 +830,7 @@ class Gateway:
         # have — a hook sees the request, never the file contents — and it is
         # why a secret hardcoded in ordinary source (not just .env) stops
         # leaking. Redact before scanning so the scan sees what the model will.
-        if route.upstream.spec.local:
+        if route.upstream.spec.local and not passthrough:
             result = self._redact_result(result)
 
         # Post-call: the response is untrusted content — scan before the model
@@ -826,7 +838,13 @@ class Gateway:
         decision = self._evaluate(self._build_result_event(route, result, arguments))
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
-            log_observe_findings(decision, mode=self.mode, tool_name=name)
+            log_observe_findings(decision, tool_name=name,
+                                 mode="observe" if passthrough else self.mode)
+        if passthrough:
+            if decision is not None and decision.blocking is not None:
+                self._note_passthrough(name, decision.blocking, passthrough)
+            self._reply(req_id, result)
+            return
         # `decision.blocking` is set by should_block, which only fires on
         # PRE-action events — a hook cannot un-ring a bell after the tool has
         # run. The gateway is the exception: it is still holding the response
@@ -838,10 +856,69 @@ class Gateway:
             withhold = _result_withhold_finding(decision.findings)
         if withhold is not None:
             self._reply(req_id, _blocked_result(
-                "[Prismor] response withheld", withhold))
+                "[Prismor] response withheld", withhold,
+                unblock=self._unblock_text(withhold, route)))
             return
 
         self._reply(req_id, result)
+
+    # ── pause / pass-through ─────────────────────────────────────────────
+
+    def _passthrough(self, route: "_Route") -> Optional[Dict[str, Any]]:
+        """Reason this call must pass through ungoverned, or None.
+
+        Resolved per call, not at startup: `prismor pause` / `resume` and the
+        dashboard's mirror switch have to take effect on the NEXT tool call,
+        without the host restarting the gateway (Claude Code only re-reads
+        `.mcp.json` on a new session, so "restart to apply" would mean the
+        pause is invisible for the rest of the conversation).
+        """
+        try:
+            from prismor.runtime import mirror as _mirror
+            # The mirror switch is per-workspace and only about built-ins;
+            # a pause applies to every upstream this gateway fronts.
+            return _mirror.passthrough_state(
+                self.workspace if route.upstream.spec.local else None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _note_passthrough(name: str, blocking: Dict[str, Any],
+                          passthrough: Dict[str, Any]) -> None:
+        why = ("prismor is paused" if passthrough.get("source") == "pause"
+               else "mirror override is off (pass-through)")
+        sys.stderr.write(
+            f"[prismor-gateway] would have blocked {name} "
+            f"({blocking.get('ruleId') or blocking.get('title')}) — "
+            f"passing through: {why}\n")
+
+    def _unblock_text(self, blocking: Dict[str, Any], route: "_Route") -> str:
+        """The hook layer tells the human how to lift a block (narrowest first:
+        `prismor allow <rule>` … `prismor pause`). The gateway said nothing,
+        so a mirrored block read as a dead end — the person at the keyboard
+        was left guessing which command undoes it, and the first live session
+        ended with the whole mirror being ripped out by hand. Same text here,
+        plus the mirror's own two exits."""
+        lines: List[str] = []
+        try:
+            from prismor.runtime import unblock as _unblock
+            from prismor.runtime.enterprise import identity as _identity
+            from prismor.runtime.enterprise import workspace_scope as _scope
+            text = _unblock.format_unblock(
+                blocking, workspace=self.workspace, session_id=self.session_id,
+                org_managed=_scope.is_managed(self.workspace),
+                enrolled=_identity.is_enrolled())
+            if text:
+                lines.append(text)
+        except Exception:
+            pass  # best-effort — a block must never depend on its own help text
+        if route.upstream.spec.local:
+            lines.append(
+                "This tool runs through the Prismor mirror. From your own terminal:\n"
+                "  prismor pause          lift enforcement for 24h (no restart needed)\n"
+                "  prismor mirror off     hand Bash/Read/Edit back to the agent's native tools "
+                "(takes effect on the next session)")
+        return "\n\n".join(lines)
 
     def _redact_result(self, result: Any) -> Any:
         """Mask registered cloak secrets and classified data-boundary values in
@@ -1093,7 +1170,8 @@ def _result_withhold_finding(findings: List[Dict[str, Any]]) -> Optional[Dict[st
         str(f.get("action") or "block").lower(), 0))
 
 
-def _blocked_result(prefix: str, blocking: Dict[str, Any]) -> Dict[str, Any]:
+def _blocked_result(prefix: str, blocking: Dict[str, Any],
+                    unblock: str = "") -> Dict[str, Any]:
     parts = [f"{prefix}: [{blocking.get('severity', 'high')}] "
              f"{blocking.get('title', 'policy violation')}"]
     if blocking.get("ruleId"):
@@ -1102,6 +1180,9 @@ def _blocked_result(prefix: str, blocking: Dict[str, Any]) -> Dict[str, Any]:
         parts.append(str(blocking["evidence"]))
     if blocking.get("remediation"):
         parts.append(f"Recommended fix: {blocking['remediation']}")
+    if unblock:
+        parts.append("")
+        parts.append(unblock)
     return {"content": [{"type": "text", "text": "\n".join(parts)}],
             "isError": True}
 
@@ -1390,10 +1471,20 @@ def run_gateway(args, workspace: Path) -> int:
         except Exception:
             pass
 
+    state = ""
+    try:
+        from prismor.runtime import mirror as _mirror
+        pt = _mirror.passthrough_state(workspace if mirrored else None)
+        if pt is not None:
+            state = (" PAUSED (pass-through until `prismor resume`)"
+                     if pt.get("source") == "pause"
+                     else " pass-through (mirror override off)")
+    except Exception:
+        pass
     sys.stderr.write(
         f"[prismor-gateway] serving {len(specs)} upstream server(s) "
         f"session={gateway.session_id} mode={gateway.mode}"
-        f"{' mirror=on' if mirrored else ''}\n")
+        f"{' mirror=on' if mirrored else ''}{state}\n")
     try:
         return gateway.serve_stdio()
     finally:

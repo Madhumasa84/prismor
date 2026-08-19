@@ -36,17 +36,46 @@ def test_re_enabling_restores_the_tool(tmp_path):
     assert "Grep" in mirror.enabled_tool_names(tmp_path)
 
 
-def test_override_off_serves_nothing(tmp_path):
+def test_override_off_still_serves_the_roster(tmp_path):
+    """Override-off is pass-through, not silence. The host's natives were
+    denied by `prismor mirror on`; a mirror that stopped advertising its tools
+    would leave the agent with no Bash/Read at all mid-session."""
     mirror.set_mirror_config(tmp_path, override=False)
-    assert mirror.enabled_tool_names(tmp_path) == []
-    assert mirror.mirror_tool_definitions(tmp_path) == []
+    assert set(mirror.enabled_tool_names(tmp_path)) == set(mirror.mirror_tool_names())
+    assert len(mirror.mirror_tool_definitions(tmp_path)) == len(mirror.mirror_tool_names())
 
 
-def test_override_off_refuses_execution(tmp_path):
+def test_override_off_still_executes(tmp_path):
     (tmp_path / "f.txt").write_text("hi")
     mirror.set_mirror_config(tmp_path, override=False)
-    with pytest.raises(mirror.MirrorError):
-        mirror.execute("Read", {"file_path": str(tmp_path / "f.txt")}, tmp_path)
+    assert "hi" in mirror.execute("Read", {"file_path": str(tmp_path / "f.txt")}, tmp_path)
+
+
+def test_override_off_reports_passthrough(tmp_path, monkeypatch):
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    assert mirror.passthrough_state(tmp_path) is None
+    mirror.set_mirror_config(tmp_path, override=False)
+    assert mirror.passthrough_state(tmp_path) == {"source": "override"}
+
+
+def test_pause_outranks_override(tmp_path, monkeypatch):
+    monkeypatch.setattr("prismor.runtime.pause.active_state",
+                        lambda: {"paused": True, "until": None})
+    st = mirror.passthrough_state(tmp_path)
+    assert st and st["source"] == "pause"
+    # ...and applies with no workspace at all (remote upstreams honour it too).
+    assert mirror.passthrough_state(None)["source"] == "pause"
+
+
+def test_set_config_preserves_install_record(tmp_path):
+    (tmp_path / ".prismor").mkdir()
+    (tmp_path / ".prismor" / "mirror.json").write_text(
+        '{"override": true, "disabled_tools": [], "install": {"scope": "project"}}')
+    mirror.set_mirror_config(tmp_path, tool="Write", enabled=False)
+    import json
+    data = json.loads((tmp_path / ".prismor" / "mirror.json").read_text())
+    assert data["install"] == {"scope": "project"}
+    assert data["disabled_tools"] == ["Write"]
 
 
 def test_override_and_roster_are_independent(tmp_path):

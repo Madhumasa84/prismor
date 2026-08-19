@@ -104,6 +104,55 @@ The model reads the reason and can adapt or ask the user. A flagged tool
 JSON-RPC errors are used only for protocol failures (unknown tool, upstream
 server died).
 
+## Mirrored built-ins (`--mirror`, `prismor mirror`)
+
+Hooks see a tool call before it runs, but they cannot hand the model a
+*redacted* file, and hostless agents have no hooks at all. With `--mirror` the
+gateway also serves Prismor-executed look-alikes of the agent's own
+`Bash` / `Read` / `Write` / `Edit` / `Glob` / `Grep` — same names, same
+schemas — so the tool executes inside Prismor: policy before, the real output
+redacted after, one telemetry event, reported under the native tool name so
+every rule and deny written against `Bash` keeps applying.
+
+For Claude Code there is a one-command switch:
+
+```bash
+prismor mirror on            # register the mirror + deny the native tools (next session)
+prismor mirror status        # configured? governing / pass-through / paused? live gateways?
+prismor mirror off           # hand the built-ins back to the agent (next session)
+```
+
+`on` adds a `prismor-tools` server to `.mcp.json` and the native tool names to
+`permissions.deny` in `.claude/settings.json` (backing both up as
+`*.pre-mirror.bak` first, and touching nothing else in either file). `off`
+removes exactly those entries. Use `--scope user` for `~/.claude.json` +
+`~/.claude/settings.json` instead of the project files, `--mode observe` to log
+without blocking. Other hosts: run `prismor mcp-gateway --mirror` as an MCP
+server and disable the host's own tools (SDK: `disallowed_tools`).
+
+**Getting out of the way — no restart needed.** Both are read on every call:
+
+- `prismor pause` lifts enforcement for the gateway exactly as it does for the
+  hooks: calls still execute, still get evaluated and logged, but nothing is
+  blocked, withheld, or redacted until `prismor resume` (or the 24h
+  auto-resume). This applies to remote MCP servers behind the gateway too.
+- `prismor mirror passthrough on` does the same for just this workspace's
+  mirror, indefinitely — the same switch as the mirror card in
+  `prismor dashboard`. The mirror keeps *serving* its tools while passing
+  through: the host's natives are denied, so a mirror that went silent would
+  leave the agent with no shell or file access mid-session.
+
+A blocked mirrored call tells the agent which of these to ask the human to
+run. The agent cannot run them itself: `prismor mirror on|off|passthrough`,
+`prismor pause`, and writes to `.prismor/mirror.json` are covered by the
+`prismor-self-edit` rule, so an agent whose Bash *is* the mirror cannot hand
+itself the native tools back (see [Policy layers](policy-layers-and-exemptions.md)).
+
+Tools the host owns cannot be mirrored (`Task`/`Agent`, `Skill`,
+`AskUserQuestion`); they stay native. `on` also denies `MultiEdit` and
+`NotebookEdit`, since an ungoverned native file-writer next to a governed
+`Edit` would be a bypass, not a mirror.
+
 ## Policy matching
 
 Events are recorded with `tool_name = mcp__<server>__<tool>` using the **real

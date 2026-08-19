@@ -2452,6 +2452,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
     # ── egress subcommands ─────────────────────────────────────────────
+    if args.command == "mirror":
+        from prismor.runtime import mirror_cli
+        sys.exit(mirror_cli.run(args, workspace))
+
     if args.command == "egress":
         from prismor.runtime import egress_cli
 
@@ -3198,6 +3202,38 @@ def build_parser() -> argparse.ArgumentParser:
                                 "then every file and shell action is policy-screened "
                                 "and its output redacted, including in agents that "
                                 "have no hook support.")
+
+    # ── mirror (governed built-ins over MCP) ───────────────────────────
+    mirror_parser = subparsers.add_parser(
+        "mirror",
+        help="Serve Bash/Read/Write/Edit/Glob/Grep through Prismor instead of the agent's own — "
+             "policy before, redaction after; on/off/status/passthrough",
+        description="The mirror replaces the agent's native built-ins with Prismor-executed "
+        "look-alikes served over MCP, so every shell/file action is policy-screened before it "
+        "runs and its output redacted after. `on` wires it into Claude Code (MCP server + "
+        "native tools denied) for the next session; `off` undoes exactly that. `prismor pause` "
+        "lifts enforcement without a restart; `passthrough on` does the same for just this "
+        "workspace's mirror, indefinitely.",
+    )
+    mirror_sub = mirror_parser.add_subparsers(dest="mirror_command")
+    mirror_on_p = mirror_sub.add_parser("on", help="Wire the mirror into Claude Code (next session)")
+    mirror_on_p.add_argument("--mode", choices=["observe", "enforce"], default="enforce",
+                             help="enforce=block policy violations (default); observe=log only")
+    mirror_on_p.add_argument("--scope", choices=["project", "user"], default="project",
+                             help="project (default): this workspace's .mcp.json + .claude/settings.json; "
+                                  "user: ~/.claude.json + ~/.claude/settings.json (every project)")
+    mirror_on_p.add_argument("--agent", choices=["claude"], default="claude",
+                             help="Host to configure (Claude Code only for now)")
+    mirror_off_p = mirror_sub.add_parser("off", help="Hand the built-ins back to the agent (next session)")
+    mirror_off_p.add_argument("--scope", choices=["project", "user"], default=None,
+                              help="Which install to undo (default: whichever exists)")
+    mirror_sub.add_parser("status", help="Configured? governing, paused or passing through? live gateways?")
+    mirror_pt = mirror_sub.add_parser("passthrough",
+                                      help="Run mirrored built-ins ungoverned (on) or governed (off) — no restart")
+    mirror_pt.add_argument("state", choices=["on", "off"])
+    for _mp in (mirror_on_p, mirror_off_p, mirror_pt):
+        _mp.add_argument("--workspace", help="Workspace path (default: $PRISMOR_WORKSPACE, then cwd)")
+    mirror_sub.choices["status"].add_argument("--workspace", help="Workspace path (default: $PRISMOR_WORKSPACE, then cwd)")
 
     # ── hook-dispatch (internal) ───────────────────────────────────────
     hook_dispatch = subparsers.add_parser("hook-dispatch", help="(internal) Called by IDE hooks")
