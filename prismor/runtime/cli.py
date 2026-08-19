@@ -305,7 +305,22 @@ def main(argv: Optional[List[str]] = None) -> None:
                 break
     if not ws_value:
         ws_value = os.environ.get("PRISMOR_WORKSPACE")
-    workspace = Path(ws_value).resolve() if ws_value else infer_default_workspace(Path.cwd())
+    if ws_value:
+        workspace = Path(ws_value).resolve()
+    else:
+        # os.getcwd() itself can fail — the shell's current directory was
+        # deleted or is unreadable (a removed temp/worktree dir, a permission
+        # change). That must not crash the CLI with a traceback; fall back to
+        # $HOME and tell the user how to be explicit.
+        try:
+            _cwd = Path.cwd()
+        except (FileNotFoundError, PermissionError, OSError):
+            _cwd = Path.home()
+            sys.stderr.write(
+                "[prismor] current directory is unavailable (deleted or "
+                "unreadable); using your home directory. Pass --workspace "
+                "<dir> or set PRISMOR_WORKSPACE to choose explicitly.\n")
+        workspace = infer_default_workspace(_cwd)
 
     # ── eval-server: HTTP evaluation endpoint for non-Python adapters ────
     if args.command == "eval-server":
