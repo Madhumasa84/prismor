@@ -139,10 +139,18 @@ mirrored twin allowed, one that was not keeps prompting exactly as before.
 Headless runs (`claude -p`, CI) cannot answer a prompt at all — use
 `prismor mirror on --allow-tools` there to pre-allow the whole roster.
 
-`off` removes exactly those four. Use `--scope user` to configure every project
-instead of this one, `--mode observe` to log without blocking. Other hosts: run
-`prismor mcp-gateway --mirror` as an MCP server and disable the host's own tools
-(SDK: `disallowed_tools`).
+`off` removes exactly those four. `--mode observe` logs without blocking.
+
+Scope is deliberately the project you are standing in, with no machine-wide or
+agent-wide variant. Fleet-level rollout belongs to the control plane, which
+already pushes device mode, agent kill switches and pause that way — those are
+an administrator's decisions, not a CLI's. (The user-level MCP config is also
+owned and rewritten wholesale by the running host, so an edit there does not
+reliably survive.)
+
+Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable the
+host's own built-ins yourself. The server is host-agnostic — only the config
+wiring above is Claude-specific.
 
 **One Prismor, not two.** The hook layer and the gateway both see a mirrored
 call and stay consistent only because they share code: the gateway drops a

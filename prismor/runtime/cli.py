@@ -3228,9 +3228,6 @@ def build_parser() -> argparse.ArgumentParser:
     mirror_on_p = mirror_sub.add_parser("on", help="Wire the mirror into Claude Code (next session)")
     mirror_on_p.add_argument("--mode", choices=["observe", "enforce"], default="enforce",
                              help="enforce=block policy violations (default); observe=log only")
-    mirror_on_p.add_argument("--scope", choices=["project", "user"], default="project",
-                             help="project (default): this workspace's .mcp.json + .claude/settings.json; "
-                                  "user: ~/.claude.json + ~/.claude/settings.json (every project)")
     mirror_on_p.add_argument("--agent", choices=["claude"], default="claude",
                              help="Host to configure (Claude Code only for now)")
     mirror_on_p.add_argument("--allow-tools", dest="allow_tools", action="store_true",
@@ -3238,8 +3235,6 @@ def build_parser() -> argparse.ArgumentParser:
                                   "native twin you had already allowed. Needed for headless runs "
                                   "(`claude -p`, CI), which cannot answer a permission prompt.")
     mirror_off_p = mirror_sub.add_parser("off", help="Hand the built-ins back to the agent (next session)")
-    mirror_off_p.add_argument("--scope", choices=["project", "user"], default=None,
-                              help="Which install to undo (default: whichever exists)")
     mirror_sub.add_parser("status", help="Configured? governing, paused or passing through? live gateways?")
     mirror_pt = mirror_sub.add_parser("passthrough",
                                       help="Run mirrored built-ins ungoverned (on) or governed (off) — no restart")

@@ -2,11 +2,11 @@
 state they are in.
 
 Subcommands:
-    on  [--mode enforce|observe] [--scope project|user]
+    on  [--mode enforce|observe]
         Register the mirror as an MCP server for Claude Code and disable the
         native tools it replaces (Bash/Read/Write/Edit/Glob/Grep, plus the other
         file-writers MultiEdit/NotebookEdit). Takes effect on the next session.
-    off [--scope project|user]
+    off
         Undo exactly what `on` did: remove the server entry, remove the deny
         entries it added (nothing else in the file is touched), and hand the
         built-ins back to the agent. Takes effect on the next session.
@@ -64,14 +64,20 @@ def _c(text: str, color: str) -> str:
 
 # ── where things live ────────────────────────────────────────────────────────
 
-def _claude_paths(workspace: Path, scope: str) -> Tuple[Path, Path, str]:
-    """(mcp config path, settings path, top-level key holding the server block)
-    for a Claude Code scope. Project scope is `.mcp.json` + `.claude/settings.json`
-    in the workspace; user scope is `~/.claude.json` (where `claude mcp add
-    --scope user` writes) + `~/.claude/settings.json`."""
-    if scope == "user":
-        home = Path.home()
-        return home / ".claude.json", home / ".claude" / "settings.json", "mcpServers"
+def _claude_paths(workspace: Path) -> Tuple[Path, Path, str]:
+    """(mcp config path, settings path, top-level key holding the server block).
+
+    Project scope only, deliberately. A machine-wide or agent-wide mirror is the
+    control plane's job — the console already pushes device mode, agent kill
+    switches and pause that way, and those decisions belong to whoever
+    administers the fleet, not to a CLI run inside one checkout. That leaves
+    this command with exactly one honest scope: the project you are standing in.
+
+    There is also a mechanical reason not to offer a user scope here: the
+    user-level MCP config lives in ``~/.claude.json``, which the running host
+    owns and rewrites wholesale — an edit made there was silently clobbered by
+    the next ``claude`` invocation during testing.
+    """
     return workspace / ".mcp.json", workspace / ".claude" / "settings.json", "mcpServers"
 
 
@@ -154,12 +160,8 @@ def _unapprove_project_server(workspace: Path, server: str) -> bool:
     return True
 
 
-def _record_path(workspace: Path, scope: str) -> Path:
-    """The install record: project scope shares `.prismor/mirror.json` with
-    the roster/override config; user scope lives in the Prismor home."""
-    if scope == "user":
-        from prismor.runtime.pause import prismor_home
-        return prismor_home() / "mirror-install.json"
+def _record_path(workspace: Path) -> Path:
+    """The install record, alongside the roster/override config."""
     return workspace / ".prismor" / "mirror.json"
 
 
@@ -188,17 +190,17 @@ def _backup_once(path: Path) -> Optional[Path]:
     return bak
 
 
-def _read_record(workspace: Path, scope: str) -> Optional[Dict[str, Any]]:
+def _read_record(workspace: Path) -> Optional[Dict[str, Any]]:
     try:
-        data = _load_json(_record_path(workspace, scope))
+        data = _load_json(_record_path(workspace))
     except Exception:
         return None
     rec = data.get("install")
     return rec if isinstance(rec, dict) else None
 
 
-def _write_record(workspace: Path, scope: str, rec: Optional[Dict[str, Any]]) -> None:
-    path = _record_path(workspace, scope)
+def _write_record(workspace: Path, rec: Optional[Dict[str, Any]]) -> None:
+    path = _record_path(workspace)
     try:
         data = _load_json(path)
     except Exception:
@@ -214,7 +216,7 @@ def _write_record(workspace: Path, scope: str, rec: Optional[Dict[str, Any]]) ->
 
 # ── the server entry ─────────────────────────────────────────────────────────
 
-def _server_entry(workspace: Path, mode: str, scope: str) -> Dict[str, Any]:
+def _server_entry(workspace: Path, mode: str) -> Dict[str, Any]:
     """The MCP server block for the mirror.
 
     Same shape as the hook dispatcher (`hooks._dispatcher_command`): the current
@@ -228,8 +230,7 @@ def _server_entry(workspace: Path, mode: str, scope: str) -> Dict[str, Any]:
     repo_root = Path(mirror.__file__).resolve().parent.parent.parent
     args = ["-m", "prismor.runtime.immunity_cli", "mcp-gateway", "--mirror",
             "--mode", mode]
-    if scope != "user":
-        args += ["--workspace", str(workspace)]
+    args += ["--workspace", str(workspace)]
     env = {"PYTHONPATH": str(repo_root)}
     # Pin a relocated Prismor home into the entry. The host launches this server
     # from its own environment, not the shell that ran `prismor mirror on`, so a
@@ -487,7 +488,7 @@ def _announce_workspace(workspace: Path) -> None:
     print(f"  {_c('workspace', _DIM)} {workspace}  {_c('(' + src + ')', _DIM)}")
 
 
-def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
+def mirror_on(workspace: Path, *, mode: str = "enforce",
               agent: str = "claude", allow_tools: bool = False) -> int:
     if agent != "claude":
         print(_c(f"prismor mirror on: agent '{agent}' is not wired yet — Claude Code only for now.", _RED))
@@ -495,9 +496,9 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
                  "the host's own Bash/Read/Write tools (SDK: disallowed_tools).", _DIM))
         return 2
     _announce_workspace(workspace)
-    mcp_path, settings_path, key = _claude_paths(workspace, scope)
-    existing = _read_record(workspace, scope)
-    entry = _server_entry(workspace, mode, scope)
+    mcp_path, settings_path, key = _claude_paths(workspace)
+    existing = _read_record(workspace)
+    entry = _server_entry(workspace, mode)
 
     # 0. Prove the server works BEFORE anything is denied (see _preflight).
     print(f"  {_c('checking', _DIM)}  starting the mirror server once to verify it serves tools...")
@@ -587,20 +588,17 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
 
     # 3. Tell Claude Code this server is approved for this project, or the
     #    host will leave it "Pending approval" and the agent gets no tools.
-    approved = False
-    approve_note = ""
-    if scope != "user":  # user-scope servers are the human's own config already
-        approved, approve_note = _approve_project_server(workspace, mirror.MIRROR_SERVER_NAME)
-        if not approved:
-            print(_c(f"  warning   could not auto-approve the server: {approve_note}", _YELLOW))
-            print(_c("            Run `claude` once in this project and approve "
-                     f"{mirror.MIRROR_SERVER_NAME}, or the agent starts with no tools.", _DIM))
+    approved, approve_note = _approve_project_server(workspace, mirror.MIRROR_SERVER_NAME)
+    if not approved:
+        print(_c(f"  warning   could not auto-approve the server: {approve_note}", _YELLOW))
+        print(_c("            Run `claude` once in this project and approve "
+                 f"{mirror.MIRROR_SERVER_NAME}, or the agent starts with no tools.", _DIM))
 
     # 4. Governing, and the record `off` will need.
     mirror.set_mirror_config(workspace, override=True)
     prior_added = list((existing or {}).get("deny_added") or [])
-    _write_record(workspace, scope, {
-        "agent": agent, "scope": scope, "mode": mode,
+    _write_record(workspace, {
+        "agent": agent, "scope": "project", "mode": mode,
         "server": mirror.MIRROR_SERVER_NAME,
         "mcp_path": str(mcp_path), "settings_path": str(settings_path),
         # Union with a previous install's additions: a re-run must not forget
@@ -611,7 +609,7 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
         "at": time.time(),
     })
 
-    print(f"  {_c('Prismor mirror is on', _GREEN)} ({scope} scope, {mode} mode)")
+    print(f"  {_c('Prismor mirror is on', _GREEN)} (this project, {mode} mode)")
     print(f"  {_c('server', _DIM)}    {mcp_path}  →  {mirror.MIRROR_SERVER_NAME}")
     print(f"  {_c('natives', _DIM)}   {settings_path}  →  denied: "
           + ", ".join(mirror.NATIVE_TOOLS_TO_DISABLE))
@@ -632,13 +630,12 @@ def mirror_on(workspace: Path, *, mode: str = "enforce", scope: str = "project",
     return 0
 
 
-def mirror_off(workspace: Path, *, scope: Optional[str] = None) -> int:
+def mirror_off(workspace: Path) -> int:
     _announce_workspace(workspace)
-    scopes = [scope] if scope else ["project", "user"]
     done = 0
-    for sc in scopes:
-        rec = _read_record(workspace, sc)
-        mcp_path, settings_path, key = _claude_paths(workspace, sc)
+    for sc in ("project",):
+        rec = _read_record(workspace)
+        mcp_path, settings_path, key = _claude_paths(workspace)
         # No record: nothing was installed by us at this scope. Still remove a
         # hand-added server entry that names our server, since that is the
         # obvious intent — but never guess at deny entries.
@@ -706,11 +703,11 @@ def mirror_off(workspace: Path, *, scope: Optional[str] = None) -> int:
             if rec.get("approved_in_claude_state"):
                 if _unapprove_project_server(workspace, server):
                     extra_notes.append(f"server approval for {server} removed from settings.local.json")
-            _write_record(workspace, sc, None)
+            _write_record(workspace, None)
 
         if removed_server or removed_deny or rec:
             done += 1
-            print(f"  {_c('Prismor mirror is off', _GREEN)} ({sc} scope)")
+            print(f"  {_c('Prismor mirror is off', _GREEN)} (this project)")
             if removed_server:
                 print(f"  {_c('server', _DIM)}    removed {server} from {mcp_path}")
             if removed_deny:
@@ -756,9 +753,9 @@ def mirror_status(workspace: Path) -> int:
     print(f"  {_c('Prismor mirror', _BOLD)} — {workspace}")
 
     configured = False
-    for sc in ("project", "user"):
-        rec = _read_record(workspace, sc)
-        mcp_path, _settings_path, key = _claude_paths(workspace, sc)
+    for sc in ("project",):
+        rec = _read_record(workspace)
+        mcp_path, _settings_path, key = _claude_paths(workspace)
         try:
             servers = _load_json(mcp_path).get(key) or {}
         except Exception:
@@ -769,7 +766,7 @@ def mirror_status(workspace: Path) -> int:
             configured = True
             how = "prismor mirror on" if rec else "by hand"
             mode = (rec or {}).get("mode") or "?"
-            print(f"  {_c('Claude Code', _DIM)}   {sc} scope · server {', '.join(names) or (rec or {}).get('server')}"
+            print(f"  {_c('Claude Code', _DIM)}   server {', '.join(names) or (rec or {}).get('server')}"
                   f" · {mode} mode · {how}")
             if rec and rec.get("deny_added"):
                 print(f"  {_c('natives off', _DIM)}   {', '.join(rec['deny_added'])}")
@@ -795,7 +792,7 @@ def mirror_status(workspace: Path) -> int:
         roster.append(t if t not in cfg["disabled_tools"] else _c(f"{t} (off)", _DIM))
     print(f"  {_c('roster', _DIM)}        {' '.join(roster)}")
 
-    for warn in _coherence_warnings(workspace, _server_entry(workspace, "enforce", "project")):
+    for warn in _coherence_warnings(workspace, _server_entry(workspace, "enforce")):
         print(f"  {_c('warning', _YELLOW)}      {warn}")
 
     live = _live_gateways(workspace)
@@ -815,10 +812,10 @@ def mirror_status(workspace: Path) -> int:
 def run(args, workspace: Path) -> int:
     action = getattr(args, "mirror_command", None) or "status"
     if action == "on":
-        return mirror_on(workspace, mode=args.mode, scope=args.scope, agent=args.agent,
+        return mirror_on(workspace, mode=args.mode, agent=args.agent,
                          allow_tools=getattr(args, "allow_tools", False))
     if action == "off":
-        return mirror_off(workspace, scope=getattr(args, "scope", None))
+        return mirror_off(workspace)
     if action == "passthrough":
         return mirror_passthrough(workspace, on=(args.state == "on"))
     return mirror_status(workspace)
