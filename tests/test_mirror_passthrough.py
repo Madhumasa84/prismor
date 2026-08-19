@@ -427,3 +427,52 @@ def test_no_split_brain_warning_for_one_install_spelled_two_ways(tmp_path, monke
     entry["env"]["PYTHONPATH"] = str(other)
     warns = mirror_cli._coherence_warnings(tmp_path, entry)
     assert warns and "install-hooks" in warns[0]
+
+
+# ── governance surfaces (what `prismor setup` shows) ────────────────────────
+
+def test_hooks_are_recommended_wherever_they_exist():
+    """The two surfaces are not interchangeable: hooks cover the agent's whole
+    tool surface, the mirror only holds while the natives stay off. So an agent
+    with hooks must never be steered to the mirror by default."""
+    from prismor.runtime.integrations.registry import load_registry, governance
+    for entry in load_registry():
+        g = governance(entry.id)
+        if g["hooks"]:
+            assert g["recommended"] == "hooks", entry.id
+
+
+def test_agents_that_cannot_disable_natives_are_not_offered_a_mirror():
+    """Mirroring a host that cannot switch its built-ins off is bypassable —
+    the model just calls the real Bash. Better to report no surface than to
+    imply a control that is not there."""
+    from prismor.runtime.integrations.registry import load_registry, governance
+    for entry in load_registry():
+        if str(entry.mirror.get("status")) == "unsupported":
+            assert governance(entry.id)["recommended"] != "mirror", entry.id
+
+
+def test_mirror_only_agents_are_surfaced_to_setup():
+    """They are absent from the wizard's hook list by construction, so without
+    this they look unsupported rather than differently-supported."""
+    from prismor.runtime.setup_wizard import _mirror_only_agents
+    names = _mirror_only_agents()
+    assert "OpenCode" in names
+    assert "Claude Code" not in names, "an agent with hooks must not be listed as MCP-only"
+
+
+def test_registry_mirror_blocks_are_well_formed():
+    from prismor.runtime.integrations.registry import load_registry
+    seen = 0
+    for entry in load_registry():
+        m = entry.mirror
+        if not m:
+            continue
+        seen += 1
+        assert m["status"] in ("verified", "possible", "unsupported"), entry.id
+        if m["status"] in ("verified", "possible"):
+            assert m.get("scope") in ("project", "machine"), entry.id
+            assert m.get("disable"), f"{entry.id}: a usable mirror must say how natives are disabled"
+        else:
+            assert m.get("notes"), f"{entry.id}: an unsupported mirror must say why"
+    assert seen >= 20

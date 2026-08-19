@@ -340,6 +340,8 @@ Scoring table, IOC feed, ecosystem support: [Supply Chain](supply-chain.md).
 
 ## See also
 
+- [Governance surfaces](governance-surfaces.md) — hooks vs the MCP mirror, per agent
+
 - [Prismor](prismor-runtime.md) — policy engine, session logs, audit, modes
 - [Supply Chain](supply-chain.md) — install-time enforcement and scoring
 - [Network Isolation](network-isolation.md) — egress allowlists, raw-IP detection

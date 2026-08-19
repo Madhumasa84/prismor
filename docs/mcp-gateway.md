@@ -106,6 +106,10 @@ server died).
 
 ## Mirrored built-ins (`--mirror`, `prismor mirror`)
 
+> Choosing between this and hooks: see
+> [Governance surfaces](governance-surfaces.md). Short version — hooks
+> wherever the agent has them, the mirror where it does not.
+
 Hooks see a tool call before it runs, but they cannot hand the model a
 *redacted* file, and hostless agents have no hooks at all. With `--mirror` the
 gateway also serves Prismor-executed look-alikes of the agent's own

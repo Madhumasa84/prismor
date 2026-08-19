@@ -493,6 +493,19 @@ def _step_policy_select(rules: List[dict], step: int = 2, total: int = 5):
 
 # ── Step 3: Agent Selection ──────────────────────────────────────────────────
 
+def _mirror_only_agents() -> list:
+    """Coding agents Prismor can only reach through the MCP mirror."""
+    try:
+        from prismor.runtime.integrations.registry import load_registry, governance
+        return [a.name.split(" (")[0] for a in load_registry()
+                if a.kind == "coding-agent" and governance(a.id)["recommended"] == "mirror"]
+    except Exception:
+        return []
+
+
+_MIRROR_ONLY = _mirror_only_agents()
+
+
 def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
     detected = _detect_agents(target)
     agents = [
@@ -514,6 +527,18 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
         agents[0]["on"] = True
     sel = 0
 
+    # How Prismor can reach each agent. Shown here because the two surfaces are
+    # not interchangeable and the difference decides what this wizard installs:
+    # hooks screen the agent's own tools in place, while the MCP mirror replaces
+    # them. See docs/governance-surfaces.md.
+    gov = {}
+    for ag in agents:
+        try:
+            from prismor.runtime.integrations.registry import governance
+            gov[ag["name"]] = governance(ag["name"])
+        except Exception:
+            gov[ag["name"]] = {"surfaces": "", "recommended": "hooks", "mirror": "unknown"}
+
     while True:
         lines = _header_lines(step, total, "AGENTS")
         lines.append(f"  {_w('Select agents to install Prismor hooks for:', DIM)}")
@@ -522,8 +547,45 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
             arrow = _w("▸ ", CYAN) if i == sel else "  "
             dot   = _w("●", GRN) if ag["on"] else _w("○", DIM)
             name  = _pad(_w(ag["label"], BOLD) if i == sel else ag["label"], 18)
-            tag   = _w("detected", GRN) if detected[ag["name"]] else _w("not found", DIM)
-            lines.append(f"  {arrow}{dot}  {name} {tag}")
+            tag   = _pad(_w("detected", GRN) if detected[ag["name"]] else _w("not found", DIM), 11)
+            g = gov.get(ag["name"], {})
+            surface = g.get("surfaces", "")
+            if surface == "hooks + MCP":
+                sfx = _w("hooks", GRN) + _w(" + MCP", DIM)
+            elif surface == "hooks":
+                sfx = _w("hooks", GRN)
+            elif surface == "MCP":
+                sfx = _w("MCP only", YEL)
+            elif surface == "not supported":
+                sfx = _w("no interception", DIM)
+            else:
+                sfx = ""
+            lines.append(f"  {arrow}{dot}  {name} {tag} {sfx}")
+        # Agents with no hook protocol never appear in the list above, because
+        # this wizard installs hooks. Naming them here is the difference between
+        # "Prismor does not support my agent" and "Prismor reaches it a
+        # different way" — without this they are silently invisible.
+        if _MIRROR_ONLY:
+            lines.append(f"  {_w('No hook protocol — govern these with', DIM)} "
+                         f"{_w('prismor mirror on', BOLD)}{_w(':', DIM)}")
+            lines.append(f"    {_w(', '.join(_MIRROR_ONLY), YEL)}")
+            lines.append("")
+        sel_gov = gov.get(agents[sel]["name"], {})
+        if sel_gov.get("recommended") == "mirror":
+            lines.append(f"  {_w('This agent has no hook protocol.', DIM)} "
+                         f"{_w('Hooks cannot be installed for it —', DIM)}")
+            lines.append(f"  {_w('govern it with', DIM)} {_w('prismor mirror on', BOLD)} "
+                         f"{_w('(serves its built-ins over MCP instead).', DIM)}")
+        elif sel_gov.get("recommended") == "none":
+            lines.append(f"  {_w('No interception surface: no hooks, and its built-in tools', DIM)}")
+            lines.append(f"  {_w('cannot be switched off, so an MCP mirror would be bypassable.', DIM)}")
+        elif sel_gov.get("mirror") in ("verified", "possible"):
+            lines.append(f"  {_w('Hooks are the recommended surface and are what this wizard installs.', DIM)}")
+            lines.append(f"  {_w('It can also run its built-ins through MCP', DIM)} "
+                         f"({_w('prismor mirror on', BOLD)}{_w(') — adds output redaction.', DIM)}")
+        else:
+            lines.append(f"  {_w('Hooks are the recommended surface and are what this wizard installs.', DIM)}")
+            lines.append("")
         lines.append("")
         lines.append(_control_line([
             ("↑↓", "move"), ("space", "toggle"),
