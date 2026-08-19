@@ -1346,10 +1346,16 @@ def run_gateway(args, workspace: Path) -> int:
         config = getattr(args, "config", None)
         path = Path(config).expanduser() if config else DEFAULT_GATEWAY_CONFIG
         # --mirror alone is a complete, useful configuration (guarded built-ins
-        # with no downstream MCP servers), so a missing config is not an error
-        # in that case.
-        if getattr(args, "mirror", False) and not path.exists():
-            specs = []
+        # with no downstream MCP servers), so a config that is missing OR
+        # present-but-empty ({"mcpServers": {}}) is not an error in that case —
+        # the mirror is appended below regardless. Without this, a serverless
+        # config aborts the whole gateway and the host (e.g. Codex) sees zero
+        # tools even though the mirror was requested.
+        if getattr(args, "mirror", False):
+            try:
+                specs = load_gateway_config(path) if path.exists() else []
+            except GatewayConfigError:
+                specs = []
         else:
             specs = load_gateway_config(path)
     if getattr(args, "mirror", False) and not any(s.local for s in specs):
