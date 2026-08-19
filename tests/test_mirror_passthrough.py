@@ -476,3 +476,40 @@ def test_registry_mirror_blocks_are_well_formed():
         else:
             assert m.get("notes"), f"{entry.id}: an unsupported mirror must say why"
     assert seen >= 20
+
+
+# ── setup: the mirror is opt-in, hooks are what you get by default ──────────
+
+def test_setup_offers_the_mirror_only_where_it_can_actually_wire_it():
+    """A toggle that cannot complete is worse than no toggle: a half-install
+    leaves the agent with no tools at all."""
+    from prismor.runtime.setup_wizard import _can_mirror
+    from prismor.runtime.mirror_cli import INSTALLABLE_AGENTS
+    assert _can_mirror("claude", {"mirror": "verified"})
+    # Codex's host supports substitution, but `prismor mirror on` cannot wire it yet.
+    assert "codex" not in INSTALLABLE_AGENTS
+    assert not _can_mirror("codex", {"mirror": "verified"})
+    # ...and never for a host whose built-ins cannot be switched off.
+    assert not _can_mirror("warp", {"mirror": "unsupported"})
+
+
+def test_do_install_signature_defaults_to_hooks_only():
+    """Every caller that does not ask for the mirror must get hooks only —
+    installing it by default would replace the agent's tools without consent."""
+    import inspect
+    from prismor.runtime.setup_wizard import _do_install
+    sig = inspect.signature(_do_install)
+    assert sig.parameters["mirror_agents"].default is None
+
+
+def test_non_interactive_setup_never_installs_the_mirror():
+    """`prismor setup --non-interactive` has no screen to opt in on, so it must
+    not silently replace an agent's toolkit."""
+    import re
+    from pathlib import Path
+    import prismor.runtime.setup_wizard as w
+    src = Path(w.__file__).read_text()
+    # the non-interactive branch calls _do_install without mirror_agents
+    calls = re.findall(r"_do_install\(([^)]*)\)", src, re.S)
+    assert calls, "no _do_install call sites found"
+    assert any("mirror_agents" not in c for c in calls), "non-interactive path must stay hooks-only"

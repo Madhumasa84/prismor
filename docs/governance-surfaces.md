@@ -79,6 +79,31 @@ permissions per project, so `prismor mirror on` governs one project. Codex reads
 its MCP servers and feature flags only from the user-level config, so mirroring
 it is machine-wide — the command says so before it changes anything.
 
+## Choosing at setup time
+
+`prismor setup` installs **hooks**. On the agent screen each agent shows the
+surfaces available to it, and for agents where Prismor can wire the mirror,
+`m` toggles it on for that agent:
+
+```
+  > *  Claude Code       detected    hooks   (m: add MCP mirror)
+    *  Codex             detected    hooks
+    o  OpenHands         not found   hooks
+
+  No hook protocol - govern these with prismor mirror on:
+    OpenCode, Amp, Kilocode
+```
+
+The mirror is **off by default and stays off unless you ask for it**: it
+replaces the agent's own tools, which is not something a wizard should do to
+someone silently. Choosing hooks only is the recommended setup and needs no
+action. The confirm screen names both, so you can see what is about to be
+installed before anything is written.
+
+`prismor setup --non-interactive` never installs the mirror -- there is no
+screen to opt in on, so it stays hooks-only. Use `prismor mirror on` for that
+case.
+
 ## Practical notes
 
 - **Hooks are what `prismor setup` installs.** The mirror is a separate,

@@ -47,6 +47,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from prismor.runtime import mirror
 
+#: Agents `prismor mirror on` can wire up end to end today. The gateway itself
+#: is host-agnostic, so this is a statement about the CONFIG wiring only — and
+#: about what has been verified by driving a real session, since a half-wired
+#: host leaves the agent with no tools at all. `prismor setup` reads this to
+#: decide which agents may be offered the mirror as a choice.
+INSTALLABLE_AGENTS: Tuple[str, ...] = ("claude",)
+
 # ── output helpers (match cli.py's ANSI style, no deps) ──────────────────────
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
