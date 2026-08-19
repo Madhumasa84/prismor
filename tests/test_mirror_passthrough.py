@@ -486,11 +486,13 @@ def test_setup_offers_the_mirror_only_where_it_can_actually_wire_it():
     from prismor.runtime.setup_wizard import _can_mirror
     from prismor.runtime.mirror_cli import INSTALLABLE_AGENTS
     assert _can_mirror("claude", {"mirror": "verified"})
-    # Codex's host supports substitution, but `prismor mirror on` cannot wire it yet.
-    assert "codex" not in INSTALLABLE_AGENTS
-    assert not _can_mirror("codex", {"mirror": "verified"})
-    # ...and never for a host whose built-ins cannot be switched off.
+    assert _can_mirror("codex", {"mirror": "verified"})
+    # A host whose built-ins cannot be switched off is never offered one: the
+    # model would simply call the real Bash instead.
     assert not _can_mirror("warp", {"mirror": "unsupported"})
+    # ...and neither is a host nobody has wired, however capable it is.
+    assert "opencode" not in INSTALLABLE_AGENTS
+    assert not _can_mirror("opencode", {"mirror": "possible"})
 
 
 def test_do_install_signature_defaults_to_hooks_only():
@@ -513,3 +515,31 @@ def test_non_interactive_setup_never_installs_the_mirror():
     calls = re.findall(r"_do_install\(([^)]*)\)", src, re.S)
     assert calls, "no _do_install call sites found"
     assert any("mirror_agents" not in c for c in calls), "non-interactive path must stay hooks-only"
+
+
+def test_codex_is_wired_and_declares_machine_scope():
+    """Codex reads MCP servers and [features] only from the user-level config,
+    so mirroring it cannot be scoped to one project — the command has to say so
+    rather than let someone discover it later."""
+    from prismor.runtime.mirror_cli import INSTALLABLE_AGENTS, _CODEX_NATIVE_FEATURES
+    from prismor.runtime.integrations.registry import governance
+    assert "codex" in INSTALLABLE_AGENTS
+    assert governance("codex")["scope"] == "machine"
+    # unified_exec is a SECOND shell surface; disabling only shell_tool leaves
+    # the model a way around the mirror.
+    assert "shell_tool" in _CODEX_NATIVE_FEATURES
+    assert "unified_exec" in _CODEX_NATIVE_FEATURES
+
+
+def test_codex_off_only_re_enables_what_it_disabled(tmp_path, monkeypatch):
+    """A feature the user had already turned off for their own reasons is not
+    ours to switch back on."""
+    from prismor.runtime import mirror_cli
+    calls = []
+    monkeypatch.setattr(mirror_cli, "_codex", lambda *a: (calls.append(a) or (True, "")))
+    monkeypatch.setattr(mirror_cli, "_codex_record_path", lambda: tmp_path / "rec.json")
+    (tmp_path / "rec.json").write_text(json.dumps(
+        {"server": "prismor-tools", "features_disabled": ["shell_tool"]}))
+    assert mirror_cli.mirror_off_codex(tmp_path) == 0
+    enabled = [c for c in calls if c[:2] == ("features", "enable")]
+    assert enabled == [("features", "enable", "shell_tool")]

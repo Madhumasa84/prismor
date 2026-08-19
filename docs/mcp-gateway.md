@@ -152,9 +152,39 @@ an administrator's decisions, not a CLI's. (The user-level MCP config is also
 owned and rewritten wholesale by the running host, so an edit there does not
 reliably survive.)
 
+### Codex
+
+```bash
+prismor mirror on --agent codex        # machine-wide
+prismor mirror off --agent codex
+```
+
+Wired through Codex's own CLI (`codex mcp add`, `codex features disable`) rather
+than by editing `config.toml`, so the vendor's supported writer owns its own
+file. Two differences from Claude Code, both stated by the command before it
+changes anything:
+
+- **Machine-wide, not per project.** Codex reads MCP servers and `[features]`
+  only from the user-level config — a project-scoped `.codex/config.toml` is
+  ignored for features — so there is no project variant to offer.
+- **The sandbox gates mirrored calls, not approvals.** A mirrored tool runs
+  inside Prismor, outside Codex's OS sandbox, so a restrictive sandbox cancels
+  it with `user cancelled MCP tool call`, and `approval_policy="never"` does
+  *not* change that. Run Codex with a sandbox mode that permits the call. This
+  is a real trade: mirroring Codex swaps its OS-level sandboxing for Prismor's
+  policy and redaction.
+
+Both `shell_tool` **and** `unified_exec` are disabled: `unified_exec` is a
+second shell surface, and leaving it on lets the model route around the mirror.
+`off` re-enables only the features `on` actually turned off.
+
+Verified on codex-cli 0.145.0: `config.py` came back as
+`postgres://[REDACTED:secret]@db.internal…` and a `.env` read was blocked —
+result-side redaction Codex has never had (see prismor#152).
+
 Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable the
 host's own built-ins yourself. The server is host-agnostic — only the config
-wiring above is Claude-specific.
+wiring is per-host, and `prismor mirror status` lists what is wired today.
 
 **One Prismor, not two.** The hook layer and the gateway both see a mirrored
 call and stay consistent only because they share code: the gateway drops a

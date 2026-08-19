@@ -52,7 +52,7 @@ from prismor.runtime import mirror
 #: about what has been verified by driving a real session, since a half-wired
 #: host leaves the agent with no tools at all. `prismor setup` reads this to
 #: decide which agents may be offered the mirror as a choice.
-INSTALLABLE_AGENTS: Tuple[str, ...] = ("claude",)
+INSTALLABLE_AGENTS: Tuple[str, ...] = ("claude", "codex")
 
 # ── output helpers (match cli.py's ANSI style, no deps) ──────────────────────
 _RESET = "\033[0m"
@@ -497,10 +497,14 @@ def _announce_workspace(workspace: Path) -> None:
 
 def mirror_on(workspace: Path, *, mode: str = "enforce",
               agent: str = "claude", allow_tools: bool = False) -> int:
-    if agent != "claude":
-        print(_c(f"prismor mirror on: agent '{agent}' is not wired yet — Claude Code only for now.", _RED))
-        print(_c("  Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable "
-                 "the host's own Bash/Read/Write tools (SDK: disallowed_tools).", _DIM))
+    if agent == "codex":
+        _announce_workspace(workspace)
+        return mirror_on_codex(workspace, mode=mode)
+    if agent not in INSTALLABLE_AGENTS:
+        print(_c(f"prismor mirror on: agent '{agent}' is not wired yet.", _RED))
+        print(_c(f"  Wired today: {', '.join(INSTALLABLE_AGENTS)}. For anything else, run "
+                 "`prismor mcp-gateway --mirror` as an MCP server and disable the host's own "
+                 "Bash/Read/Write tools yourself — see docs/governance-surfaces.md.", _DIM))
         return 2
     _announce_workspace(workspace)
     mcp_path, settings_path, key = _claude_paths(workspace)
@@ -637,7 +641,9 @@ def mirror_on(workspace: Path, *, mode: str = "enforce",
     return 0
 
 
-def mirror_off(workspace: Path) -> int:
+def mirror_off(workspace: Path, *, agent: str = "claude") -> int:
+    if agent == "codex":
+        return mirror_off_codex(workspace)
     _announce_workspace(workspace)
     done = 0
     for sc in ("project",):
@@ -732,6 +738,148 @@ def mirror_off(workspace: Path) -> int:
     return 0
 
 
+# ── Codex ────────────────────────────────────────────────────────────────────
+#
+# Wired through Codex's own CLI (`codex mcp add/remove`, `codex features
+# enable/disable`) rather than by editing config.toml. That file is the user's,
+# it is TOML with comments and dozens of unrelated settings, and Codex ships a
+# supported writer for exactly these two things — hand-editing it to save a
+# subprocess would be trading a real risk for nothing.
+#
+# Two properties differ from Claude Code and both are stated at install time
+# rather than discovered later:
+#
+#   * MACHINE SCOPE. Codex reads MCP servers and `[features]` only from the
+#     user-level config (verified: a project-scoped .codex/config.toml is
+#     ignored for features). So mirroring Codex governs every project on this
+#     machine. There is no project-scoped variant to offer.
+#   * THE SANDBOX, not approvals, gates mirrored calls. A mirrored tool runs
+#     inside Prismor, outside Codex's OS sandbox, so Codex cancels it under a
+#     restrictive sandbox with "user cancelled MCP tool call" — and
+#     `approval_policy="never"` does NOT change that. Verified on
+#     codex-cli 0.145.0.
+
+_CODEX_NATIVE_FEATURES = ("shell_tool", "unified_exec")
+
+
+def _codex(*args: str) -> Tuple[bool, str]:
+    """Run a `codex` subcommand. Returns (ok, output)."""
+    import subprocess
+    try:
+        proc = subprocess.run(["codex", *args], capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        return False, "codex is not on PATH"
+    except Exception as exc:
+        return False, str(exc)
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    return proc.returncode == 0, out
+
+
+def _codex_record_path() -> Path:
+    """Machine-level record for a machine-level install, so `mirror off` works
+    from any directory rather than only the one that ran `on`."""
+    from prismor.runtime.pause import prismor_home
+    return prismor_home() / "mirror-install-codex.json"
+
+
+def mirror_on_codex(workspace: Path, *, mode: str = "enforce") -> int:
+    entry = _server_entry(workspace, mode)
+    print(f"  {_c('host', _DIM)}      Codex  {_c('(machine-wide — Codex reads MCP servers and features', _DIM)}")
+    print(f"  {_c('', _DIM)}          {_c('only from your user config, so this covers every project)', _DIM)}")
+
+    print(f"  {_c('checking', _DIM)}  starting the mirror server once to verify it serves tools...")
+    ok, detail = _preflight(entry)
+    if not ok:
+        print(_c(f"  prismor mirror on: the mirror server failed to start — {detail}", _RED))
+        print(_c("  Nothing was changed. Codex keeps its native tools.", _DIM))
+        return 1
+    print(f"  {_c('ok', _GREEN)}        serves: {detail}")
+
+    args = ["mcp", "add", mirror.MIRROR_SERVER_NAME]
+    for key, value in (entry.get("env") or {}).items():
+        args += ["--env", f"{key}={value}"]
+    args += ["--", entry["command"], *entry["args"]]
+    ok, out = _codex(*args)
+    if not ok:
+        print(_c(f"  prismor mirror on: `codex mcp add` failed — {out[:200]}", _RED))
+        return 1
+    print(f"  {_c('server', _DIM)}    codex mcp add {mirror.MIRROR_SERVER_NAME}")
+
+    disabled = []
+    for feature in _CODEX_NATIVE_FEATURES:
+        ok, out = _codex("features", "disable", feature)
+        if ok:
+            disabled.append(feature)
+        else:
+            print(_c(f"  warning   could not disable {feature}: {out[:120]}", _YELLOW))
+    if disabled:
+        print(f"  {_c('natives', _DIM)}   disabled: {', '.join(disabled)}")
+    if "unified_exec" not in disabled:
+        print(_c("  warning   unified_exec is still on — it is a SECOND shell surface, so the", _YELLOW))
+        print(_c("            model can route around the mirror until it is off.", _DIM))
+
+    _write_json(_codex_record_path(), {
+        "agent": "codex", "scope": "machine", "mode": mode,
+        "server": mirror.MIRROR_SERVER_NAME,
+        "features_disabled": disabled,
+        "workspace": str(workspace),
+        "at": time.time(),
+    })
+    mirror.set_mirror_config(workspace, override=True)
+
+    print()
+    print(f"  {_c('Prismor mirror is on for Codex', _GREEN)} ({mode} mode, machine-wide)")
+    print(_c("  Codex gates mirrored calls on its SANDBOX, not its approval policy: a", _DIM))
+    print(_c("  mirrored tool runs inside Prismor, outside Codex's sandbox, so a", _DIM))
+    print(_c("  restrictive sandbox cancels it. If calls come back cancelled, run Codex", _DIM))
+    print(f"  {_c('with a sandbox mode that permits them, e.g.', _DIM)} {_c('codex -s danger-full-access', _BOLD)}{_c('.', _DIM)}")
+    print(_c("  (approval_policy=\"never\" does NOT cover MCP tool calls.)", _DIM))
+    print()
+    print(f"  {_c('Start a new Codex session for it to take effect.', _BOLD)}")
+    print(f"  {_c('If it gets in your way:', _DIM)}  prismor pause")
+    print(f"  {_c('To go back to native tools:', _DIM)}  prismor mirror off --agent codex")
+    return 0
+
+
+def mirror_off_codex(workspace: Path) -> int:
+    rec = None
+    try:
+        rec = _load_json(_codex_record_path()) or None
+    except Exception:
+        rec = None
+    server = (rec or {}).get("server") or mirror.MIRROR_SERVER_NAME
+
+    ok, out = _codex("mcp", "remove", server)
+    if ok:
+        print(f"  {_c('server', _DIM)}    codex mcp remove {server}")
+    else:
+        print(_c(f"  note      `codex mcp remove {server}`: {out[:140]}", _DIM))
+
+    # Re-enable only what we turned off. A feature the user had already disabled
+    # for their own reasons is not ours to switch back on.
+    restored = []
+    for feature in ((rec or {}).get("features_disabled") or []):
+        ok, out = _codex("features", "enable", feature)
+        if ok:
+            restored.append(feature)
+    if restored:
+        print(f"  {_c('natives', _DIM)}   re-enabled: {', '.join(restored)}")
+    elif rec is None:
+        print(_c("  note      no install record found — nothing to re-enable. If Codex is", _DIM))
+        print(_c("            still missing its shell tools: codex features enable shell_tool", _DIM))
+
+    try:
+        p = _codex_record_path()
+        if p.exists():
+            p.unlink()
+    except OSError:
+        pass
+    print()
+    print(f"  {_c('Prismor mirror is off for Codex.', _GREEN)} "
+          f"{_c('Start a new Codex session.', _BOLD)}")
+    return 0
+
+
 # ── runtime switch ───────────────────────────────────────────────────────────
 
 def mirror_passthrough(workspace: Path, on: bool) -> int:
@@ -822,7 +970,7 @@ def run(args, workspace: Path) -> int:
         return mirror_on(workspace, mode=args.mode, agent=args.agent,
                          allow_tools=getattr(args, "allow_tools", False))
     if action == "off":
-        return mirror_off(workspace)
+        return mirror_off(workspace, agent=getattr(args, "agent", "claude"))
     if action == "passthrough":
         return mirror_passthrough(workspace, on=(args.state == "on"))
     return mirror_status(workspace)

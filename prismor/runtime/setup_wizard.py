@@ -599,8 +599,11 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
                              f"{_w('.  Press m to keep hooks only.', DIM)}")
             else:
                 lines.append(f"  {_w('Hooks only — the recommended setup.', DIM)}")
+                where = (_w(" (machine-wide for this agent)", YEL)
+                         if sel_gov.get("scope") == "machine" else "")
                 lines.append(f"  {_w('Press', DIM)} {_w('m', BOLD)} "
-                             f"{_w('to also serve its built-ins over MCP (adds output redaction).', DIM)}")
+                             f"{_w('to also serve its built-ins over MCP', DIM)}{where}"
+                             f"{_w('.', DIM)}")
         elif sel_gov.get("mirror") in ("verified", "possible"):
             lines.append(f"  {_w('Hooks are the recommended surface and are what this wizard installs.', DIM)}")
             lines.append(f"  {_w('Its built-ins can also be served over MCP — see docs/governance-surfaces.md.', DIM)}")
