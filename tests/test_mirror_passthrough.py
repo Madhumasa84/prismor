@@ -195,3 +195,24 @@ def test_mirror_status_names_the_state(tmp_path, monkeypatch, capsys):
                         lambda: {"paused": True, "until": None})
     mirror_cli.mirror_status(tmp_path)
     assert "PAUSED" in capsys.readouterr().out
+
+
+def test_relocated_prismor_home_is_pinned_into_the_server_entry(tmp_path, monkeypatch):
+    """The host launches the gateway from its own environment. A $PRISMOR_HOME
+    that only exists in the developer's shell would leave the gateway reading a
+    different home than `prismor pause` writes to."""
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setenv("PRISMOR_HOME", str(tmp_path / "home"))
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
+    entry = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"][mirror.MIRROR_SERVER_NAME]
+    assert entry["env"]["PRISMOR_HOME"] == str(tmp_path / "home")
+
+
+def test_default_prismor_home_is_not_written_into_the_entry(tmp_path, monkeypatch):
+    from prismor.runtime import mirror_cli
+    monkeypatch.setattr("prismor.runtime.pause.active_state", lambda: None)
+    monkeypatch.setenv("PRISMOR_HOME", str(Path.home() / ".prismor"))
+    assert mirror_cli.mirror_on(tmp_path, scope="project") == 0
+    entry = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"][mirror.MIRROR_SERVER_NAME]
+    assert "PRISMOR_HOME" not in entry["env"]

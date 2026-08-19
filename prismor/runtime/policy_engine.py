@@ -3238,13 +3238,58 @@ def _now_iso_z() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+#: Parsed policy documents, keyed by the SHA-256 of the file's text.
+#:
+#: Every ``PolicyEngine`` construction re-parses ``default_policy.yaml`` (90 KB,
+#: ~80 rules). That cost was invisible while Prismor only ran as a hook — one
+#: short-lived process per tool call, the parse lost in process startup. The
+#: MCP gateway made it visible: it is long-lived and evaluates twice per tool
+#: call (pre + post), and each ``evaluate_tool_call`` builds two engines (one
+#: directly, one inside the data-boundary classifier), so a single mirrored
+#: Bash paid FOUR full YAML parses — 456 ms of the measured 670 ms per call on
+#: a 2-core box.
+#:
+#: Keyed by content hash rather than mtime: hashing 90 KB costs ~0.05 ms
+#: against a 114 ms parse, and it removes the staleness question entirely —
+#: an edited policy has different bytes, so it can never be served from cache,
+#: including on filesystems with coarse mtime granularity. Callers still get an
+#: independent deep copy, because ``_load`` and ``_apply_override`` mutate the
+#: structure they are handed.
+_YAML_CACHE: Dict[str, Any] = {}
+_YAML_CACHE_MAX = 16
+
+#: libyaml's C loader when the wheel ships it (it usually does), which parses
+#: the default policy ~11x faster than the pure-Python loader — same YAML 1.1
+#: safe subset, so this is a drop-in.
+try:  # pragma: no cover - depends on the installed PyYAML build
+    from yaml import CSafeLoader as _SafeLoader  # type: ignore
+except Exception:  # pragma: no cover
+    _SafeLoader = getattr(yaml, "SafeLoader", None) if yaml is not None else None
+
+
 def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
-    """Load a YAML file. Falls back to basic parsing if PyYAML is missing."""
+    """Load a YAML file. Falls back to basic parsing if PyYAML is missing.
+
+    Repeat loads of unchanged content are served from :data:`_YAML_CACHE` as a
+    deep copy — same object graph shape, same mutability, no shared state.
+    """
     if not path.exists():
         return None
     text = path.read_text(encoding="utf-8")
     if yaml is not None:
-        return yaml.safe_load(text)
+        import copy as _copy
+        import hashlib as _hashlib
+
+        key = _hashlib.sha256(text.encode("utf-8")).hexdigest()
+        cached = _YAML_CACHE.get(key)
+        if cached is not None:
+            return _copy.deepcopy(cached)
+        parsed = (yaml.load(text, Loader=_SafeLoader) if _SafeLoader is not None
+                  else yaml.safe_load(text))
+        if len(_YAML_CACHE) >= _YAML_CACHE_MAX:
+            _YAML_CACHE.clear()  # tiny working set; a plain reset beats an LRU here
+        _YAML_CACHE[key] = parsed
+        return _copy.deepcopy(parsed)
     # Minimal fallback: try JSON (YAML is a superset of JSON).
     import json
     try:
