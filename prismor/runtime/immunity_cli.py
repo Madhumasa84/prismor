@@ -87,12 +87,41 @@ def _update_notice() -> None:
         latest = latest_known_version()
     except Exception:
         return
-    if not latest or latest == __version__:
+    if not latest or not _is_newer(latest, __version__):
         return
     sys.stderr.write(
         f"\033[33mnote:\033[0m prismor {latest} is available (you're on {__version__}). "
         "Run `prismor update` to upgrade.\n"
     )
+
+
+def _version_tuple(text: str) -> tuple:
+    """Numeric release segment of a version, for ordering. Trailing
+    pre-release/local parts are ignored — enough to answer "is this newer",
+    without taking a dependency on `packaging` for a courtesy notice."""
+    parts = []
+    for chunk in str(text).split(".")[:4]:
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def _is_newer(candidate: str, current: str) -> bool:
+    """True only when `candidate` is strictly newer.
+
+    An equality check is not enough: the cached "latest" is whatever PyPI last
+    reported, so anyone running ahead of the index — a dev build, or every user
+    for the cache's lifetime right after a release — was told an OLDER version
+    was available and asked to "upgrade" to it.
+    """
+    try:
+        return _version_tuple(candidate) > _version_tuple(current)
+    except Exception:
+        return candidate != current
 
 
 def main(argv: Optional[List[str]] = None) -> None:
