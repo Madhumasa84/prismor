@@ -1,10 +1,29 @@
-# Governance surfaces: hooks vs the MCP mirror
+# Governance surfaces
 
-Prismor can sit in front of an agent two ways. They are not interchangeable, and
-picking the wrong one is the difference between complete coverage and a control
-the model can walk around.
+Prismor can sit in front of an agent several ways. They are not interchangeable,
+and picking the wrong one is the difference between complete coverage and a
+control the model can walk around.
 
-## The two surfaces
+All of them reach the same verdict on the same action — they share one policy
+engine through the [decision contract](decision-contract.md). What differs is
+where they can intercept and what they can do there:
+
+| surface | what it governs | refuse | rewrite input | redact output |
+|---|---|:--:|:--:|:--:|
+| **Hooks** | an agent's entire tool surface | yes | Claude/Qwen only | no |
+| **MCP gateway** | every MCP server behind one connector | yes | yes | yes |
+| **Mirror** | the agent's own built-ins, served over MCP | yes | yes | yes |
+| **SDK adapters** | in-process framework agents | yes | no | no |
+| **eval-server** | non-Python callers and external proxies | yes | yes | yes |
+| **Inference hook** | a hosted transcript-turn channel | yes | no | no |
+
+The rest of this page is about the two that govern a coding agent on a
+developer's machine, where the choice is a real decision. For the others:
+adapters ship with each framework (see `docs/frameworks-overview.md`), the
+eval-server is documented in the [decision contract](decision-contract.md), and
+the inference-hook channel in `docs/inference-hook.md`.
+
+## Hooks vs the MCP mirror
 
 **Hooks (`PreToolUse` / `PostToolUse`).** The agent calls Prismor before each
 tool call and obeys the verdict. The agent keeps its own tools; nothing is

@@ -367,6 +367,11 @@ def normalize_payload(*, agent: str, payload: Dict[str, Any], workspace: Path) -
         event = _normalize_cursor(payload, session_id)
     if isinstance(event, dict) and event.get("type") == "shell" and event.get("command"):
         event["command"] = _strip_prismor_scrub_wrapper(event["command"])
+    # Which enforcement point saw this call. One agent can be governed by more
+    # than one surface at a time (hooks plus the mirror), and without this the
+    # telemetry cannot say which of them actually made the decision.
+    if isinstance(event, dict):
+        event.setdefault("metadata", {}).setdefault("surface", "hook")
     return {"sessionId": session_id, "event": event}
 
 
@@ -405,12 +410,9 @@ def should_block(
     # rule's mode, else the policy's default_mode — both default to "observe").
     # A finding blocks only when its effective mode is "enforce". block_categories
     # no longer gates this (every category is observe-by-default until enforced).
-    # DENY-wins precedence: when several enforce findings fire on one event
-    # with mixed actions, the strongest verdict wins (block > step_up > defer
-    # > modify) rather than whichever the engine surfaced first. Unknown
-    # actions (warn/log/unset on an enforce finding) rank as block — enforce
-    # means "stop". Ties keep first-surfaced order (min() is stable).
-    _ACTION_RANK = {"block": 0, "step_up": 1, "defer": 2, "modify": 3}
+    # DENY-wins precedence (block > step_up > defer > modify) is contract.strongest();
+    # this function only decides which findings are ELIGIBLE to govern.
+    from prismor.runtime.contract import strongest
     eligible: List[Dict[str, Any]] = []
     for finding in findings:
         # A match inside inert text (commit message, PR body, grep pattern)
@@ -427,9 +429,7 @@ def should_block(
             ):
                 continue
             eligible.append(finding)
-    if not eligible:
-        return None
-    return min(eligible, key=lambda f: _ACTION_RANK.get(str(f.get("action") or "block").lower(), 0))
+    return strongest(eligible)
 
 
 def legacy_should_block(

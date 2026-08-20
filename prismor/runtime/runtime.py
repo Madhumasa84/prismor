@@ -17,11 +17,11 @@ from __future__ import annotations
 import os
 import sys
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from prismor.runtime.contract import CONTRACT_VERSION, Decision
 from prismor.runtime.hooks import legacy_should_block, should_block
 from prismor.runtime.policy_engine import PolicyEngine
 from prismor.runtime.principal import Subject, resolve_subject
@@ -32,19 +32,9 @@ from prismor.runtime.store import (
     save_session_snapshot,
 )
 
-
-@dataclass
-class Decision:
-    """Outcome of evaluating one tool call."""
-
-    allow: bool
-    findings: List[Dict[str, Any]] = field(default_factory=list)
-    blocking: Optional[Dict[str, Any]] = None
-    reason: Optional[str] = None
-    subject: Optional[Subject] = None
-    # Engine kept so callers that need post-decision config (e.g. the Claude
-    # sandbox rewrite path) don't have to re-instantiate it.
-    engine: Optional[PolicyEngine] = None
+# ``Decision`` lives in contract.py (the surface-facing boundary) and is
+# re-exported here because every adapter already imports it from this module.
+__all__ = ["CONTRACT_VERSION", "Decision", "evaluate_tool_call", "log_observe_findings"]
 
 
 def _apply_rule_exemptions(
