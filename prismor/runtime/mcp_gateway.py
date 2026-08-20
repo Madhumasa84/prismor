@@ -781,12 +781,12 @@ class Gateway:
         if decision is not None and decision.blocking is not None and passthrough:
             self._note_passthrough(name, decision.blocking, passthrough)
         elif decision is not None and decision.blocking is not None:
-            verdict = str(decision.blocking.get("action") or "block").lower()
+            verdict = decision.verdict
             handled = False
             # MODIFY via pii_redact: rewrite the arguments in place and let the
             # call through — the same transform the Claude hook path applies
             # to Bash, applied here to MCP tool arguments (data_boundary).
-            if verdict == "modify" and decision.blocking.get("transform") == "pii_redact":
+            if verdict == "modify" and decision.transform == "pii_redact":
                 try:
                     from prismor.runtime.enterprise.approvals import redact_approved_payload
                     redacted = redact_approved_payload(arguments, workspace=self.workspace)
@@ -926,48 +926,19 @@ class Gateway:
         return "\n\n".join(lines)
 
     def _redact_result(self, result: Any, *, data_boundary: bool = True) -> Any:
-        """Mask registered cloak secrets and classified data-boundary values in
-        a mirrored tool's output.
+        """Mask cloak secrets and data-boundary values in a mirrored tool's output.
 
-        Best-effort by design: a redaction failure must not fail the call
-        closed, because the pre-call policy has already run and the scan below
-        still gets a vote. Two passes, cheapest first — the cloak store is an
-        exact-value substring swap, the data-boundary classifier is pattern
-        work over the same text.
+        The masking itself is shared with every other surface that can see tool
+        output (``runtime/redaction.py``); what stays here is the gateway's own
+        reporting of it.
         """
-        if not isinstance(result, dict):
-            return result
-        content = result.get("content")
-        if not isinstance(content, list):
-            return result
-        changed = False
-        out: List[Any] = []
-        for block in content:
-            if not (isinstance(block, dict) and isinstance(block.get("text"), str)):
-                out.append(block)
-                continue
-            text = original = block["text"]
-            try:
-                from prismor.runtime.cloaking.runtime import scrub_text
-                text = scrub_text(text)
-            except Exception:
-                pass
-            if data_boundary:
-                try:
-                    from prismor.runtime.data_boundary import redact_payload
-                    redacted = redact_payload(text, workspace=self.workspace)
-                    if isinstance(redacted, str):
-                        text = redacted
-                except Exception:
-                    pass
-            if text != original:
-                changed = True
-                block = {**block, "text": text}
-            out.append(block)
-        if not changed:
-            return result
-        sys.stderr.write("[prismor-gateway] redacted sensitive values from mirrored tool output\n")
-        return {**result, "content": out}
+        from prismor.runtime.redaction import redact_mcp_result
+        out, changed = redact_mcp_result(
+            result, workspace=self.workspace, data_boundary=data_boundary)
+        if changed:
+            sys.stderr.write(
+                "[prismor-gateway] redacted sensitive values from mirrored tool output\n")
+        return out
 
     def _egress_guard(self, spec: UpstreamSpec) -> None:
         """Screen a remote upstream's URL before the gateway dials it.
@@ -1072,6 +1043,11 @@ class Gateway:
             # The REAL server name — matches trifecta globs, tool denies,
             # and control-plane parseToolName. See module docstring.
             "tool_name": tool_name,
+            # Enforcement point that saw the call (contract.SURFACES). A
+            # mirrored built-in is served BY the gateway but is a distinct
+            # surface: it governs the agent's own tools rather than a third-
+            # party MCP server, and only it can repair their output.
+            "surface": "mirror" if route.upstream.spec.local else "mcp-gateway",
         }
         if route.upstream.spec.local:
             metadata["mirrored"] = True
@@ -1150,7 +1126,6 @@ class Gateway:
 _WITHHOLD_CATEGORIES = frozenset({"prompt_injection", "prompt_injection_semantic",
                                   "secret_access", "secret_exfiltration",
                                   "data_boundary", "pii"})
-_WITHHOLD_ACTION_RANK = {"block": 0, "step_up": 1, "defer": 2, "modify": 3}
 
 
 def _result_withhold_finding(findings: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1164,16 +1139,13 @@ def _result_withhold_finding(findings: List[Dict[str, Any]]) -> Optional[Dict[st
     enforce mode. Returns None when nothing qualifies (observe-only findings,
     inert-context matches, unrelated categories).
     """
-    eligible = [
+    from prismor.runtime.contract import strongest
+    return strongest([
         f for f in (findings or [])
         if str(f.get("mode", "observe")).lower() == "enforce"
         and not f.get("contextInert")
         and f.get("category") in _WITHHOLD_CATEGORIES
-    ]
-    if not eligible:
-        return None
-    return min(eligible, key=lambda f: _WITHHOLD_ACTION_RANK.get(
-        str(f.get("action") or "block").lower(), 0))
+    ])
 
 
 def _blocked_result(prefix: str, blocking: Dict[str, Any],

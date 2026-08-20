@@ -50,14 +50,14 @@ from typing import Any, Optional
 from prismor.runtime.principal import resolve_subject
 from prismor.runtime.runtime import evaluate_tool_call
 
-_TYPE_FIELD = {
-    "shell":      "command",
-    "file_read":  "path",
-    "file_write": "path",
-    "network":    "url",
-    "prompt":     "content",
-    "tool_result":"content",
-}
+#: Canonical value field per event type — imported rather than restated, so an
+#: SDK adapter posting here produces the same event a hook would.
+#:
+#: This previously mapped prompt/tool_result to "content" while every other
+#: surface wrote "prompt"/"response". Category rules were unaffected (the
+#: engine folds all five text fields into one blob) but a rule scoped to
+#: `fields: [response]` silently never matched an event that arrived this way.
+from prismor.runtime.contract import TYPE_FIELD as _TYPE_FIELD
 
 
 def _build_event(
@@ -87,6 +87,7 @@ def _build_event(
             "kwargs": arguments,
             "subject": subject_str,
             "available_tools": available_tools or [],
+            "surface": "eval-server",
         },
     }
 
@@ -124,6 +125,24 @@ class EvalHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
             self._send_json({"status": "ok", "ts": datetime.now(timezone.utc).isoformat()})
+        elif self.path == "/v1/contract":
+            # Self-describing, so a non-Python caller can discover the event
+            # shape and verdict vocabulary from the server it is already
+            # talking to rather than tracking a doc that may drift from it.
+            from prismor.runtime import contract as _contract
+            self._send_json({
+                "contract_version": _contract.CONTRACT_VERSION,
+                "event_types": {t: _contract.TYPE_FIELD[t] for t in _contract.EVENT_TYPES},
+                "verdicts": list(_contract.VERDICTS),
+                "verdict_rank": _contract.VERDICT_RANK,
+                "pre_action_events": list(_contract.PRE_ACTION_EVENTS),
+                "surfaces": [
+                    {"id": s.id, "title": s.title, "kind": s.kind,
+                     "can_refuse": s.can_refuse, "can_rewrite": s.can_rewrite,
+                     "can_redact": s.can_redact}
+                    for s in _contract.SURFACES
+                ],
+            })
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -146,9 +165,21 @@ class EvalHandler(BaseHTTPRequestHandler):
             self._send_json({"error": f"invalid JSON: {exc}"}, 400)
             return
 
+        # A caller that has already normalized (an external proxy shaping MCP
+        # JSON-RPC, a test asserting one event across surfaces) may post the
+        # canonical event directly. The tool_name+arguments form below is
+        # lossy by design — it joins every argument value into one string —
+        # which is fine for regex matching but wrong when a field must stay
+        # addressable (a file_write's path vs its content).
+        raw_event = body.get("event")
+        if isinstance(raw_event, dict):
+            self._evaluate_raw_event(body, raw_event)
+            return
+
         tool_name = body.get("tool_name")
         if not tool_name:
-            self._send_json({"error": "tool_name is required"}, 400)
+            self._send_json(
+                {"error": "tool_name is required (or post a canonical 'event')"}, 400)
             return
 
         arguments: dict = body.get("arguments", {})
@@ -203,13 +234,44 @@ class EvalHandler(BaseHTTPRequestHandler):
             self._send_json({"error": f"evaluation error: {exc}"}, 500)
             return
 
-        self._send_json({
-            "allow":    decision.allow,
-            "reason":   decision.reason,
-            "findings": decision.findings,
-            "blocking": decision.blocking,
-            "subject":  decision.subject.as_dict() if decision.subject else None,
-        })
+        self._send_json(decision.as_dict())
+
+    def _evaluate_raw_event(self, body: dict, event: dict) -> None:
+        """Evaluate a pre-normalized canonical event (contract.py shape)."""
+        from prismor.runtime.contract import validate_event
+
+        problems = validate_event(event)
+        if problems:
+            self._send_json({"error": "invalid event", "problems": problems}, 400)
+            return
+
+        agent = str(body.get("agent") or event.get("agent") or "sdk")
+        session_id = str(
+            body.get("session_id") or event.get("session_id") or f"eval-{os.getpid()}")
+        subject_str = (
+            self.headers.get("X-Prismor-Subject")
+            or self.headers.get("X-Warden-Subject")
+            or body.get("subject")
+        )
+        ws_str = body.get("workspace")
+        event.setdefault("session_id", session_id)
+        event.setdefault("agent", agent)
+        event.setdefault("agent_event", "PreToolUse")
+        event.setdefault("metadata", {}).setdefault("surface", "eval-server")
+        try:
+            decision = evaluate_tool_call(
+                event=event,
+                workspace=Path(ws_str) if ws_str else self.workspace,
+                agent=agent,
+                agent_name=str(body.get("agent_name") or ""),
+                mode=str(body.get("mode") or "enforce"),
+                session_id=session_id,
+                subject=resolve_subject(subject_str),
+            )
+        except Exception as exc:
+            self._send_json({"error": f"evaluation error: {exc}"}, 500)
+            return
+        self._send_json(decision.as_dict())
 
 
 def run_eval_server(

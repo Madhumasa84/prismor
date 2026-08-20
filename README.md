@@ -226,6 +226,38 @@ ST -->|"redacted"| TEL
 TEL --> OD
 ```
 
+### One policy engine, every enforcement surface
+
+Stage 1 has more than one door, and that is deliberate: no single interposition
+point covers every agent. Hooks are the widest but not every host offers them;
+MCP is the only place some agents can be intercepted at all; production
+framework agents run where there is no host to hook.
+
+So each surface normalizes what it saw into one canonical event and asks the
+same evaluator for a verdict. A rule written once covers the same action however
+it arrives.
+
+| surface | what it governs | refuse | rewrite input | redact output |
+|---|---|:--:|:--:|:--:|
+| Coding-agent hooks | an agent's entire tool surface | yes | Claude/Qwen | no |
+| MCP gateway | every MCP server behind one connector | yes | yes | yes |
+| Mirrored built-ins | the agent's own Bash/Read/Write, over MCP | yes | yes | yes |
+| Framework SDK adapters | in-process agents (13 frameworks) | yes | no | no |
+| `prismor eval-server` | non-Python callers, external proxies | yes | yes | yes |
+| Inference-hook channel | hosted transcript-turn webhook | yes | no | no |
+
+"Redact output" is why the mirror exists: a pre-action hook can only *refuse* a
+file read, while a surface that carries the response can return the file with the
+credential masked.
+
+This is checked rather than asserted — `tests/test_surface_conformance.py`
+replays one action through each surface's own normalizer and fails if they
+disagree on the verdict or the rule.
+
+See [the decision contract](docs/decision-contract.md) for the event shape and
+verdict vocabulary, and [governance surfaces](docs/governance-surfaces.md) for
+which surface to use per agent.
+
 ---
 
 ## Selected Capabilities, Walked Through<a name="selected-capabilities-walked-through" />

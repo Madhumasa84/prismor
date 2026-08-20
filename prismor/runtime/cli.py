@@ -1619,7 +1619,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             # Any verdict a surface can't honor fails closed to DENY — never a
             # silent ALLOW. STEP_UP/DEFER on headless surfaces land in Phase 2
             # (async approval queue); here they deny with a clear reason.
-            verdict = str(blocking.get("action") or "block").lower()
+            from prismor.runtime.contract import verdict_of
+            verdict = verdict_of(blocking)
             reason = f"[{blocking['severity']}] {blocking['title']}"
             if blocking.get("ruleId"):
                 # The rule id is what every override — allowlist, mode, exemption
