@@ -303,13 +303,32 @@ _AGENT_DISCOVERERS = {
 }
 
 
+def config_scope(path: Path, workspace: Path) -> str:
+    """Classify a discovered config as "project" or "user".
+
+    Every discoverer looks at both the workspace and the host's home
+    directory (``~/.claude``, ``~/.cursor``, ...), so a finding reported
+    against a repo may actually belong to the machine. Labeling the scope
+    keeps the two apart in output and lets callers filter to one of them
+    - see PrismorSec/prismor#289.
+    """
+    try:
+        path.resolve().relative_to(workspace.resolve())
+        return "project"
+    except (ValueError, OSError):
+        return "user"
+
+
 def discover_configs(
     agent: Optional[str] = None,
     workspace: Optional[Path] = None,
+    scope: str = "all",
 ) -> List[Dict[str, Any]]:
-    """Find all agent config files. Returns list of {agent, path}.
+    """Find all agent config files. Returns list of {agent, path, scope}.
 
-    Project-level configs are sourced from ``workspace`` (or CWD if omitted).
+    Project-level configs are sourced from ``workspace`` (or CWD if
+    omitted); user-level ones from the host's home directory. ``scope``
+    is "all" (default), "project", or "user".
     """
     ws = workspace if workspace is not None else Path.cwd()
     agents = [agent] if agent else list(_AGENT_DISCOVERERS.keys())
@@ -319,7 +338,10 @@ def discover_configs(
         if not discoverer:
             continue
         for p in discoverer(ws):
-            results.append({"agent": a, "path": p})
+            found = config_scope(p, ws)
+            if scope not in ("all", found):
+                continue
+            results.append({"agent": a, "path": p, "scope": found})
     return results
 
 
@@ -1126,8 +1148,13 @@ def scan_skills(
     workspace: Optional[Path] = None,
     agent: Optional[str] = None,
     track_drift: bool = True,
+    scope: str = "all",
 ) -> Dict[str, Any]:
     """Scan all discovered skill/MCP configs and return findings.
+
+    ``scope`` limits discovery to "project" (workspace configs only) or
+    "user" (host-level configs only); the default "all" scans both and
+    tags every config and finding with the scope it came from.
 
     Returns:
         {
@@ -1135,10 +1162,11 @@ def scan_skills(
             "entries": int,         # total skill/server entries found
             "findings": [...],      # findings sorted by severity (desc)
             "summary": {...},       # counts by severity
+            "scope": str,           # the scope filter that was applied
         }
     """
     engine = PolicyEngine(workspace=workspace)
-    configs = discover_configs(agent=agent, workspace=workspace)
+    configs = discover_configs(agent=agent, workspace=workspace, scope=scope)
 
     # Loaded once per scan and saved once at the end, so drift is compared
     # against the previous *scan*, not the previous entry within this one.
@@ -1147,6 +1175,8 @@ def scan_skills(
     all_entries: List[Dict[str, Any]] = []
     for cfg in configs:
         entries = parse_config(cfg["path"], agent=cfg["agent"])
+        for entry in entries:
+            entry["scope"] = cfg["scope"]
         all_entries.extend(entries)
 
     findings: List[Dict[str, Any]] = []
@@ -1158,6 +1188,7 @@ def scan_skills(
             f["skillName"] = entry["name"]
             f["skillSource"] = entry.get("source", "")
             f["agent"] = entry.get("agent", "unknown")
+            f["scope"] = entry.get("scope", "project")
         findings.extend(entry_findings)
 
         # Structural schema audit (complements the regex rules above).
@@ -1169,6 +1200,7 @@ def scan_skills(
         ):
             sf["skillSource"] = entry.get("source", "")
             sf["agent"] = entry.get("agent", "unknown")
+            sf["scope"] = entry.get("scope", "project")
             findings.append(sf)
 
         # AST-level dangerous code detection for Python skill sources.
@@ -1178,6 +1210,7 @@ def scan_skills(
             for af in _ast_scan_python(skill_source, entry["name"]):
                 af["skillSource"] = entry.get("source", "")
                 af["agent"] = entry.get("agent", "unknown")
+                af["scope"] = entry.get("scope", "project")
                 findings.append(af)
 
     if drift_state is not None:
@@ -1193,8 +1226,12 @@ def scan_skills(
         summary[sev] = summary.get(sev, 0) + 1
 
     return {
-        "configs": [{"agent": c["agent"], "path": str(c["path"])} for c in configs],
+        "configs": [
+            {"agent": c["agent"], "path": str(c["path"]), "scope": c["scope"]}
+            for c in configs
+        ],
         "entries": len(all_entries),
         "findings": findings,
         "summary": summary,
+        "scope": scope,
     }

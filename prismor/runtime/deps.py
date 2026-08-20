@@ -11,9 +11,11 @@ Usage (from CLI):
 from __future__ import annotations
 
 import json
+import os
 import re
+from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 
 # Manifest file patterns (kept in sync with default_policy.yaml).
@@ -41,20 +43,72 @@ _LOCKFILE_PAIRS: Dict[str, List[str]] = {
 }
 
 
+# Directories that are never part of *this* workspace's own dependency
+# surface: vendored trees, build output, caches, and agent scratch space.
+# Walking into them double-counts the same manifest many times over --
+# see PrismorSec/prismor#289, where four `.claude/worktrees/` checkouts
+# turned 53 findings into 265.
+_SKIP_DIR_NAMES = frozenset({
+    ".git", ".hg", ".svn",
+    "node_modules", "bower_components", "vendor",
+    ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".tox",
+    ".next", ".nuxt", ".cache", ".terraform",
+    "dist", "build",
+    ".claude", ".codex", ".cursor",
+})
+
+
+def _is_nested_checkout(path: Path) -> bool:
+    """True for a directory that is its own git checkout - a submodule or
+    a linked worktree (whose `.git` is a file, not a directory). Its
+    manifests belong to that repo, not to the workspace being scanned.
+    """
+    return (path / ".git").exists()
+
+
+def _iter_workspace_files(workspace: Path, *patterns: str) -> Iterator[Path]:
+    """Yield files under `workspace` whose name matches one of `patterns`,
+    pruning vendored/build/cache directories and nested checkouts.
+
+    Every manifest-walking check goes through here so they all agree on
+    what "the workspace" means - previously `find_manifests` globbed only
+    the top level while the lockfile checks globbed `**/`, so one scan
+    could report a single manifest alongside findings from five copies
+    of it (PrismorSec/prismor#289).
+    """
+    for dirpath, dirnames, filenames in os.walk(workspace, followlinks=False):
+        here = Path(dirpath)
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _SKIP_DIR_NAMES and not _is_nested_checkout(here / d)
+        )
+        for name in sorted(filenames):
+            if any(fnmatch(name, pattern) for pattern in patterns):
+                yield here / name
+
+
 def find_manifests(workspace: Path) -> List[Dict[str, Any]]:
     """Find dependency manifest files in the workspace.
 
     Returns list of {path, type, ecosystem}.
     """
     results: List[Dict[str, Any]] = []
-    for pattern, ecosystem in _MANIFEST_GLOBS.items():
-        for match in workspace.glob(pattern):
-            if match.is_file() and ".git" not in match.parts:
-                results.append({
-                    "path": match,
-                    "name": match.name,
-                    "ecosystem": ecosystem,
-                })
+    seen: set = set()
+    for match in _iter_workspace_files(workspace, *_MANIFEST_GLOBS):
+        if match in seen or not match.is_file():
+            continue
+        ecosystem = next(
+            (eco for pattern, eco in _MANIFEST_GLOBS.items() if fnmatch(match.name, pattern)),
+            None,
+        )
+        if ecosystem is None:
+            continue
+        seen.add(match)
+        results.append({
+            "path": match,
+            "name": match.name,
+            "ecosystem": ecosystem,
+        })
     return results
 
 
@@ -67,8 +121,8 @@ def check_lockfile_presence(workspace: Path) -> List[Dict[str, Any]]:
     for pattern, lockfiles in _LOCKFILE_PAIRS.items():
         if not lockfiles:
             continue
-        for manifest in workspace.glob(pattern):
-            if not manifest.is_file() or ".git" in manifest.parts:
+        for manifest in _iter_workspace_files(workspace, pattern):
+            if not manifest.is_file():
                 continue
             parent = manifest.parent
             has_lock = any((parent / lf).exists() for lf in lockfiles)
@@ -147,9 +201,7 @@ def _read_npm_lockfile(workspace: Path) -> Dict[str, str]:
     "node_modules/<a>/node_modules/<b>" are transitive and skipped.
     """
     pins: Dict[str, str] = {}
-    for lock in workspace.glob("**/package-lock.json"):
-        if ".git" in lock.parts or "node_modules" in lock.parts:
-            continue
+    for lock in _iter_workspace_files(workspace, "package-lock.json"):
         try:
             data = json.loads(lock.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -184,9 +236,7 @@ def read_npm_lockfile_full(workspace: Path) -> Dict[str, str]:
     we are not trying to enumerate every duplicate's exact path.
     """
     pins: Dict[str, str] = {}
-    for lock in workspace.glob("**/package-lock.json"):
-        if ".git" in lock.parts or "node_modules" in lock.parts:
-            continue
+    for lock in _iter_workspace_files(workspace, "package-lock.json"):
         try:
             data = json.loads(lock.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
@@ -217,10 +267,7 @@ _YARN_V1_HEADER_RE = re.compile(r'^"?(?P<name>(?:@[^/@\s]+/)?[^@\s"]+)@')
 
 def _lockfiles(workspace: Path, filename: str):
     """Yield candidate lockfiles, skipping vendored and VCS directories."""
-    for lock in workspace.glob(f"**/{filename}"):
-        if ".git" in lock.parts or "node_modules" in lock.parts:
-            continue
-        yield lock
+    return _iter_workspace_files(workspace, filename)
 
 
 def read_pnpm_lockfile_full(workspace: Path) -> Dict[str, str]:
@@ -511,9 +558,7 @@ def check_floating_ranges(
 
     lockfile_map = lockfile_map or {}
     findings: List[Dict[str, Any]] = []
-    for pkg_json in workspace.glob("**/package.json"):
-        if ".git" in pkg_json.parts or "node_modules" in pkg_json.parts:
-            continue
+    for pkg_json in _iter_workspace_files(workspace, "package.json"):
         if not (pkg_json.parent / "package-lock.json").is_file():
             continue
         try:
@@ -541,40 +586,76 @@ def check_floating_ranges(
 
 
 def _reachable_lockfile_names(declared: set, packages: Dict[str, Any]) -> Optional[set]:
-    """BFS the lockfile's per-package `dependencies` edges starting from
-    the manifest's declared dependency names, returning every package
-    name reachable through the real dependency graph.
+    """BFS the lockfile's per-package dependency edges starting from the
+    manifest's declared dependency names, returning every package name
+    reachable through the real dependency graph.
 
     npm hoists resolvable transitive dependencies to flat top-level
-    `node_modules/<name>` entries whenever there's no version conflict —
+    `node_modules/<name>` entries whenever there's no version conflict -
     so a package that is NOT a direct dependency commonly still has a
     flat, non-nested lockfile path identical in shape to a real direct
     dependency. Without this reachability check, that hoisting pattern
     is indistinguishable from genuine lockfile injection (an entry npm
     will install that nothing in the actual dependency graph requires).
 
-    Returns None if the root entry's own `dependencies` can't be read
-    (a lockfile whose `packages["node_modules/<name>"]` records don't
-    carry per-package `dependencies` — older or non-standard lockfile
-    shapes) — callers should fall back to a softer signal rather than
-    assert injection without being able to verify it.
+    Every entry contributes edges, including nested
+    `node_modules/a/node_modules/b` records, keyed by the terminal
+    package name: a hoisted package is frequently required *only* by a
+    nested copy of its parent, and ignoring nested records made those
+    look unreachable (PrismorSec/prismor#289). Workspace member entries
+    (monorepo packages, whose paths are not under `node_modules/`) seed
+    the frontier, since npm installs their dependencies into the root
+    `node_modules` too.
+
+    Returns None if no `node_modules/` entry carries dependency metadata
+    (older or non-standard lockfile shapes) - callers should fall back
+    to a softer signal rather than assert injection without being able
+    to verify it.
     """
     if not declared:
         return None
+
     own_deps: Dict[str, List[str]] = {}
+    workspace_seeds: set = set()
+    has_dep_metadata = False
     for path, meta in packages.items():
-        if not path.startswith("node_modules/") or not isinstance(meta, dict):
+        if not isinstance(meta, dict):
             continue
-        if "/node_modules/" in path[len("node_modules/"):]:
-            continue  # nested entry — BFS only needs the flat frontier
-        deps = meta.get("dependencies")
-        if isinstance(deps, dict):
-            own_deps[path[len("node_modules/"):]] = list(deps.keys())
-    if not own_deps:
+        if path.startswith("node_modules/"):
+            # Installed package. devDependencies are NOT installed for
+            # transitive packages, so they must not create edges here.
+            # Terminal name of the path: node_modules/a/node_modules/@s/b -> @s/b
+            name = path.rsplit("node_modules/", 1)[1]
+            if meta.get("link") is True:
+                # Symlink into a workspace member - npm created it from
+                # the root manifest's `workspaces`, never an injection.
+                workspace_seeds.add(name)
+            edges: List[str] = []
+            for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+                block = meta.get(field)
+                if isinstance(block, dict):
+                    # An empty dict still proves this lockfile records
+                    # per-package edges, so reachability is verifiable.
+                    has_dep_metadata = True
+                    edges.extend(block.keys())
+            if edges:
+                own_deps.setdefault(name, []).extend(edges)
+        else:
+            # Root ("") or a workspace member ("packages/foo"). Their
+            # dependencies - dev ones included - are installed at the root.
+            for field in (
+                "dependencies", "devDependencies",
+                "optionalDependencies", "peerDependencies",
+            ):
+                block = meta.get(field)
+                if isinstance(block, dict):
+                    workspace_seeds.update(block.keys())
+
+    if not has_dep_metadata:
         return None
 
     reachable: set = set()
-    frontier = list(declared)
+    frontier = list(declared) + list(workspace_seeds)
     while frontier:
         name = frontier.pop()
         if name in reachable:
@@ -601,9 +682,7 @@ def check_lockfile_integrity(workspace: Path) -> List[Dict[str, Any]]:
     Returns list of {manifest, lockfile, issue, severity, message}.
     """
     findings: List[Dict[str, Any]] = []
-    for pkg_json in workspace.glob("**/package.json"):
-        if ".git" in pkg_json.parts or "node_modules" in pkg_json.parts:
-            continue
+    for pkg_json in _iter_workspace_files(workspace, "package.json"):
         lock_path = pkg_json.parent / "package-lock.json"
         if not lock_path.is_file():
             continue

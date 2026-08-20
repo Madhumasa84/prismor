@@ -909,7 +909,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     # ── scan: scan MCP servers and skills ────────────────────────────
     if args.command == "scan":
         from prismor.runtime.scanner import scan_skills
-        result = scan_skills(workspace=workspace, agent=getattr(args, "agent", None))
+        result = scan_skills(
+            workspace=workspace,
+            agent=getattr(args, "agent", None),
+            scope=getattr(args, "scope", "all") or "all",
+        )
 
         if getattr(args, "json", False):
             print(json.dumps(result, indent=2))
@@ -932,7 +936,11 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
         for cfg in configs:
-            print(f"  {_color('Config:', _GREEN)}  [{cfg['agent']}] {cfg['path']}")
+            scope = cfg.get("scope", "project")
+            print(
+                f"  {_color('Config:', _GREEN)}  [{cfg['agent']}] "
+                f"{_color(f'({scope})', _DIM)} {cfg['path']}"
+            )
         print(f"  {_color('Entries:', _GREEN)} {n_entries} skill(s) / MCP server(s)")
         print()
 
@@ -945,8 +953,12 @@ def main(argv: Optional[List[str]] = None) -> None:
             sev = f["severity"]
             color = _RED if sev == "CRITICAL" else _YELLOW if sev == "HIGH" else _DIM
             action_label = f.get("action", "warn").upper()
+            scope = f.get("scope", "project")
             print(f"  {_color(f'[{sev}]', color)}  {f['title']}")
-            print(f"           skill: {_color(f['skillName'], _CYAN)}  ({f['agent']})")
+            print(
+                f"           skill: {_color(f['skillName'], _CYAN)}  "
+                f"({f['agent']}, {scope} scope)"
+            )
             print(f"           rule: {f.get('ruleId', '?')}  ({action_label})")
             evidence = f.get("evidence", "")
             if evidence:
@@ -965,6 +977,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                 parts.append(_color(f"{count} {sev.lower()}", color))
         print(f"  {_color('─' * 50, _DIM)}")
         print(f"  {len(findings)} finding(s): {', '.join(parts)}")
+        n_user = sum(1 for f in findings if f.get("scope") == "user")
+        if n_user:
+            print(
+                f"  {_color(f'{n_user} of these come from user-level configs on this machine, ', _DIM)}"
+                f"{_color('not from the workspace (--scope project to exclude).', _DIM)}"
+            )
 
         has_blocking = any(f.get("action") == "block" for f in findings)
         if has_blocking:
@@ -2931,6 +2949,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser = subparsers.add_parser("scan", help="Scan all MCP servers and skills for security risks")
     scan_parser.add_argument("--workspace", help="Workspace path")
     scan_parser.add_argument("--agent", choices=["claude", "cursor", "windsurf", "openclaw", "hermes", "codex", "copilot", "grok", "kiro", "crush", "openhands", "qwen", "continue", "goose"], help="Only scan configs for this agent")
+    scan_parser.add_argument(
+        "--scope",
+        choices=["all", "project", "user"],
+        default="all",
+        help="project = configs inside the workspace only; user = host-level "
+             "configs (~/.claude, ~/.cursor, ...) only; all = both (default)",
+    )
     scan_parser.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── deps ──────────────────────────────────────────────────────────
