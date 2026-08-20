@@ -17,27 +17,36 @@ control-plane path short-circuits. Local protection — the 63 default rules in
 
 ## Connection lifecycle at a glance
 
-```
-  Developer machine (Prismor, this repo)      Prismor control plane (prismor-web, proprietary)
-  ─────────────────────────────────────      ───────────────────────────────────────────────
-  prismor enroll <token>  ──POST /api/devices/enroll──▶  validate one-time token
-   identity.enroll()           {token,label,platform}     mint revocable device_key
-   save_identity() 0600  ◀──{device_id,org_id,user_id,──  record device row
-   ~/.prismor/identity.json        device_key,org_name}
+```mermaid
+sequenceDiagram
+    participant Dev as Developer machine<br/>(Prismor, this repo)
+    participant CP as Prismor control plane<br/>(prismor-web, proprietary)
 
-  hook-dispatch (hot path)
-   remote_policy.check_and_refresh()
-     ──GET /api/policy/version?applied=N──────────────▶  {version,profileId,fullCapture,...}
-     if changed: GET /api/policy/resolve ─────────────▶  SIGN policy with PRIVATE key
-   verify_and_load() ◀────────{yaml, signature}─────────  (private key NOT in this repo)
-     openssl verify vs keys/public.pub ── fail ⇒ ignore, keep last good
+    rect rgb(248, 250, 252)
+    Note over Dev,CP: Enroll
+    Dev->>CP: POST /api/devices/enroll<br/>{token, label, platform}
+    Note right of CP: validate one-time token<br/>mint revocable device_key
+    CP-->>Dev: {device_id, org_id, user_id,<br/>device_key, org_name}
+    Note left of Dev: save_identity() 0600<br/>~/.prismor/identity.json
+    end
 
-   evaluate_tool_call() ⇒ finding
-   _dispatch_prismor() → build_record() (redact) → assert_redacted()
-     ──POST /api/telemetry/ingest──{org_id,device_id,events[]}──▶ store
-   heartbeat.maybe_flush()  ──POST /api/telemetry/ingest (count only)──▶
+    rect rgb(248, 250, 252)
+    Note over Dev,CP: Hook-dispatch (hot path)
+    Dev->>CP: GET /api/policy/version?applied=N
+    CP-->>Dev: {version, profileId, fullCapture, ...}
+    alt version changed
+        Dev->>CP: GET /api/policy/resolve
+        Note right of CP: SIGN policy with PRIVATE key<br/>(never leaves the control plane)
+        CP-->>Dev: {yaml, signature}
+        Note left of Dev: verify_and_load():<br/>openssl verify vs keys/public.pub<br/>fail ⇒ ignore, keep last good
+    end
+    Note left of Dev: evaluate_tool_call() ⇒ finding<br/>build_record() (redact) → assert_redacted()
+    Dev->>CP: POST /api/telemetry/ingest<br/>{org_id, device_id, events[]}
+    CP-->>Dev: store
+    Dev->>CP: POST /api/telemetry/ingest (count only)<br/>heartbeat.maybe_flush()
+    end
 
-  on 401/403 from any call ⇒ mark_revoked() ⇒ 1h backoff; last good policy stays
+    Note over Dev,CP: on 401/403 from any call ⇒ mark_revoked()<br/>1h backoff — last good policy stays enforced
 ```
 
 The endpoints above are what the **client calls**; the server implementation

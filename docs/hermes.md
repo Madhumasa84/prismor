@@ -71,27 +71,19 @@ prismor cloak uninstall --agent all    # removes both
 
 ## Architecture
 
-```
-                            HERMES AGENT
-  ┌─────────────────────────────────────────────────────────────┐
-  │                                                             │
-  │  Gateway (Telegram)  →  Agent (LLM)  →  Tools (shell/fs)   │
-  │        │                   │                   │            │
-  │        ▼                   ▼                   ▼            │
-  │  ┌──────────┐      ┌────────────┐      ┌──────────────┐    │
-  │  │pre_gw    │      │pre_tool    │      │transform_    │    │
-  │  │dispatch  │      │call        │      │terminal_out  │    │
-  │  └──────────┘      └────────────┘      └──────────────┘    │
-  └─────────────────────────────────────────────────────────────┘
-        │                       │                    │
-        ▼                       ▼                    ▼
-  ┌──────────────┐     ┌──────────────┐      ┌──────────────┐
-  │ Paste guard  │     │ Decloak      │      │ Scrub output │
-  │ Detect raw   │     │ Substitute   │      │ Replace real │
-  │ secrets in   │     │ @@SECRET@@   │      │ values with  │
-  │ user prompts │     │ → real value │      │ placeholders │
-  │ Auto-vault   │     │ at exec time │      │ before model │
-  └──────────────┘     └──────────────┘      └──────────────┘
+```mermaid
+flowchart TD
+    subgraph Hermes["HERMES AGENT"]
+        direction LR
+        Gateway["Gateway\n(Telegram)"] --> Agent["Agent\n(LLM)"] --> Tools["Tools\n(shell/fs)"]
+        Gateway --> GwHook["pre_gateway_dispatch"]
+        Agent --> ToolHook["pre_tool_call"]
+        Tools --> OutHook["transform_terminal_out"]
+    end
+
+    GwHook --> PasteGuard["Paste guard\nDetect raw secrets in user prompts\nAuto-vault"]
+    ToolHook --> Decloak["Decloak\nSubstitute @@SECRET@@ → real value\nat exec time"]
+    OutHook --> Scrub["Scrub output\nReplace real values with\nplaceholders before model"]
 ```
 
 ### Hooks
@@ -122,22 +114,15 @@ The flow is fully automatic — you mostly do nothing:
 
 Hermes discovers the plugin via two mechanisms:
 
-```
-pip install prismor
-        │
-        ▼
-  Hermes auto-discovers
-  entry_point "hermes_agent.plugins"     ◄── Prefer this
-  → prismor.runtime.cloaking.hermes_plugin_entry
-        │
-        └── If not found (e.g. dev install):
-            ┌───────────────────────────┐
-            │ Filesystem fallback       │
-            │ ~/.hermes/plugins/        │
-            │   prismor-cloak/   │
-            │     plugin.yaml           │
-            │     __init__.py           │
-            └───────────────────────────┘
+```mermaid
+flowchart TD
+    Install["pip install prismor"] --> Discover["Hermes auto-discovers\nentry_point 'hermes_agent.plugins'"]
+    Discover -->|"Prefer this"| Entry["prismor.runtime.cloaking.hermes_plugin_entry"]
+    Discover -->|"If not found (e.g. dev install)"| Manifest
+
+    subgraph FS["Filesystem fallback — ~/.hermes/plugins/prismor-cloak/"]
+        Manifest["plugin.yaml"] --> Init["__init__.py"]
+    end
 ```
 
 ### Entry Point
