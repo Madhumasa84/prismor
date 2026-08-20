@@ -49,6 +49,7 @@ class Integration:
     sweep_dir: Optional[str] = None
     notes: Optional[str] = None
     sources: List[str] = field(default_factory=list)
+    mirror: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "Integration":
@@ -65,6 +66,7 @@ class Integration:
             sweep_dir=raw.get("sweep_dir"),
             notes=raw.get("notes"),
             sources=list(raw.get("sources") or []),
+            mirror=dict(raw.get("mirror") or {}),
         )
 
 
@@ -97,3 +99,59 @@ def by_surface(surface: str, path: Optional[Path] = None) -> List[Integration]:
 def by_status(status: str, path: Optional[Path] = None) -> List[Integration]:
     """All integrations with the given ``status`` (shipped|roadmap|sweep-only)."""
     return [i for i in load_registry(path) if i.status == status]
+
+
+# ── governance surfaces ──────────────────────────────────────────────────────
+#
+# Prismor can sit in front of an agent two ways, and they are not equivalent:
+#
+#   hooks   The agent calls Prismor before (and after) each tool call and obeys
+#           the verdict. The agent keeps its own tools, everything it can do is
+#           screened, and there is nothing to install into the model's tool
+#           list. This is the better surface wherever it exists.
+#
+#   mirror  Prismor serves look-alike built-ins over MCP and the agent's own
+#           are switched off. Buys what a hook cannot do — the tool runs inside
+#           Prismor, so output can be REDACTED rather than merely refused — but
+#           it only holds while the natives stay off, so it depends on the host
+#           having a way to turn them off at all.
+#
+# Recommendation, in order:
+#   * hooks when the agent supports them (complete coverage, nothing replaced)
+#   * mirror when it does not (often the only interposition point that exists)
+#   * mirror alongside hooks only when result-side redaction is worth the extra
+#     moving parts — it is not the default.
+
+_MIRROR_USABLE = ("verified", "possible")
+
+
+def governance(agent_id: str, path: Optional[Path] = None) -> Dict[str, Any]:
+    """How Prismor can govern one agent: ``{hooks, mirror, recommended, ...}``.
+
+    ``recommended`` is ``"hooks"``, ``"mirror"``, or ``"none"``. ``surfaces`` is
+    the human-facing label: "hooks", "MCP", "hooks + MCP", or "not supported".
+    """
+    entry = get(agent_id, path)
+    if entry is None:
+        return {"hooks": False, "mirror": "unknown", "recommended": "none",
+                "surfaces": "unknown", "scope": None, "disable": None, "notes": None}
+    hooks = entry.surface == "hook-config" and entry.status != "sweep-only"
+    mirror_status = str(entry.mirror.get("status") or "unknown")
+    mirror_ok = mirror_status in _MIRROR_USABLE
+    if hooks and mirror_ok:
+        surfaces = "hooks + MCP"
+    elif hooks:
+        surfaces = "hooks"
+    elif mirror_ok:
+        surfaces = "MCP"
+    else:
+        surfaces = "not supported"
+    return {
+        "hooks": hooks,
+        "mirror": mirror_status,
+        "recommended": "hooks" if hooks else ("mirror" if mirror_ok else "none"),
+        "surfaces": surfaces,
+        "scope": entry.mirror.get("scope"),
+        "disable": entry.mirror.get("disable"),
+        "notes": entry.mirror.get("notes"),
+    }

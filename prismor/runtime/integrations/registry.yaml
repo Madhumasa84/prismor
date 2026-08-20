@@ -35,6 +35,11 @@ agents:
     normalizer: _normalize_claude
     sweep_dir: "~/.claude/"
     sources: ["https://docs.claude.com/en/docs/claude-code/hooks"]
+    mirror:
+      status: verified
+      scope: project
+      disable: "permissions.deny in .claude/settings.json"
+      verified: "2026-08-19"
 
   - id: cursor
     name: Cursor
@@ -47,6 +52,11 @@ agents:
     normalizer: _normalize_cursor
     sweep_dir: "~/.config/Cursor/"
     sources: ["https://cursor.com/docs/agent/hooks"]
+    mirror:
+      status: possible
+      scope: project
+      disable: "permissions.deny"
+      notes: "accepted in config, not runtime-verified"
 
   - id: windsurf
     name: Windsurf (Codeium Cascade)
@@ -96,6 +106,12 @@ agents:
     sweep_dir: "~/.codex/"
     notes: "Requires codex-cli >= 0.141.0-alpha.1 for working hooks."
     sources: ["https://developers.openai.com/codex/hooks"]
+    mirror:
+      status: verified
+      scope: machine
+      disable: "features.shell_tool=false + features.unified_exec=false"
+      verified: "2026-08-19"
+      notes: "user-level config only; mirrored calls need a sandbox mode that permits them"
 
   - id: copilot
     name: GitHub Copilot CLI
@@ -107,6 +123,9 @@ agents:
     blocking: json-permission
     normalizer: _normalize_copilot
     sources: ["https://docs.github.com/en/copilot/reference/hooks-configuration"]
+    mirror:
+      status: unsupported
+      notes: "per-command deny only, no first-class disablement"
 
   - id: grok
     name: Grok Build (xAI)
@@ -120,6 +139,11 @@ agents:
     sweep_dir: "~/.grok/"
     notes: "Also natively reads .claude/settings.json and .cursor/hooks.json. Tool-name matchers assume Claude-Code-compatible tool names (Bash/Read/Edit/Write/...) by analogy; not yet verified against a live grok binary."
     sources: ["https://docs.x.ai/build/features/hooks", "https://docs.x.ai/build/overview"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "--disallowed-tools"
+      notes: "flags exist, not runtime-verified"
 
   - id: kiro
     name: Kiro CLI (AWS)
@@ -133,6 +157,11 @@ agents:
     sweep_dir: "~/.kiro/"
     notes: "Hooks live inside a named agent config, not a dedicated hooks file. Kiro's merge-vs-replace semantics for a partial kiro_default.json override are undocumented, so a fresh install seeds a self-contained config (explicit tools list included) rather than a hooks-only fragment. Not yet verified against a live kiro-cli binary."
     sources: ["https://kiro.dev/docs/cli/hooks/", "https://kiro.dev/docs/cli/custom-agents/configuration-reference/", "https://github.com/Ar9av/agent-manual/blob/main/tools/kiro/README.md"]
+    mirror:
+      status: possible
+      scope: project
+      disable: "custom-agent allowedTools"
+      notes: "from docs, not live-tested"
 
   - id: crush
     name: Crush (Charmbracelet)
@@ -146,6 +175,10 @@ agents:
     sweep_dir: "~/.config/crush/"
     notes: "Verified live (2026-07, crush v0.86.x): PreToolUse is the only hookable event (no PostToolUse/UserPromptSubmit hook surface exists despite the SDK's generic HookConfig type); a deny reason must come from stderr on exit 2, NOT a {\"decision\":\"block\"} stdout envelope (that shape is silently ignored — a different convention than several other agents in this table). Shell tool name is \"bash\"."
     sources: ["https://github.com/charmbracelet/crush", "https://github.com/Ar9av/agent-manual/blob/main/tools/crush/README.md"]
+    mirror:
+      status: possible
+      scope: project
+      disable: "options.disabled_tools"
 
   - id: openhands
     name: OpenHands
@@ -159,6 +192,9 @@ agents:
     sweep_dir: "~/.openhands/"
     notes: "Verified live (2026-07, openhands v1.21.0): PreToolUse fires and a non-zero exit genuinely blocks the tool call. Shell tool name is \"terminal\" (not \"execute_bash\"). Payload's event-name field is \"event_type\", NOT \"hook_event_name\" like the Claude/Codex-family agents — a real schema difference, not a typo. No documented global/user-level hooks.json path exists; a \"global\"-scope install falls back to ~/.openhands/hooks.json (matches where other OpenHands global state lives) but this is unverified."
     sources: ["https://docs.openhands.dev/", "https://github.com/Ar9av/agent-manual/blob/main/tools/openhands/README.md"]
+    mirror:
+      status: unsupported
+      notes: "include_default_tools is SDK-only, not exposed by the CLI"
 
   - id: qwen
     name: Qwen Code (Alibaba)
@@ -172,6 +208,11 @@ agents:
     sweep_dir: "~/.qwen/"
     notes: "Hooks schema is Claude-Code-shaped (hookSpecificOutput.permissionDecision), but Qwen Code's own tool ids -- verified live (2026-07, qwen-code v0.20.1) the shell tool is \"run_shell_command\", NOT \"Bash\"; a matcher of \"Bash\" silently never fires. Deny is a NESTED stdout envelope ({\"hookSpecificOutput\":{\"hookEventName\":...,\"permissionDecision\":\"deny\",...}}), unlike Copilot's flat shape — needs its own cli.py branch, not the generic exit-2 or Copilot's json-permission path. Non-interactive (`-p`) runs require `-y`/`--yolo` for the shell tool to execute at all; without it, a small model may narrate a plausible-sounding fake result instead of genuinely failing, which can look like (but is not) a hook problem."
     sources: ["https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/", "https://github.com/Ar9av/agent-manual/blob/main/tools/qwen-code/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "coreTools / excludeTools"
+      notes: "from docs, not live-tested"
 
   - id: continue
     name: Continue CLI
@@ -200,6 +241,11 @@ agents:
     sources: ["https://goose-docs.ai/docs/guides/context-engineering/hooks", "https://github.com/Ar9av/agent-manual/blob/main/tools/goose/README.md"]
 
   # ── Coding agents — roadmap (hook surface exists, adapter not built) ──────
+    mirror:
+      status: possible
+      scope: machine
+      disable: "disable each built-in extension individually"
+      notes: "seven separate extensions to turn off"
   - id: gemini
     name: Gemini CLI (Google)
     kind: coding-agent
@@ -210,6 +256,11 @@ agents:
     blocking: exit-2
     normalizer: null
     sources: ["https://geminicli.com/docs/hooks/reference/"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "tools.core / tools.exclude"
+      notes: "from docs, not live-tested"
 
   - id: opencode
     name: OpenCode
@@ -221,6 +272,12 @@ agents:
     blocking: throw
     normalizer: _normalize_opencode
     sources: ["https://opencode.ai/docs/plugins/"]
+    mirror:
+      status: verified
+      scope: project
+      disable: "tools.<name>: false"
+      verified: "2026-08-19"
+      notes: "no trust gate - the project opencode.json both declares and grants the server"
 
   - id: factory-droid
     name: Factory Droid
@@ -232,6 +289,11 @@ agents:
     blocking: json-permission
     normalizer: null
     sources: ["https://docs.factory.ai/reference/hooks-reference"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "--restrict-tools (per-invocation only)"
+      notes: "not persistent, so it cannot be enforced from config"
 
   - id: pi-agent
     name: Pi Coding Agent
@@ -244,6 +306,11 @@ agents:
     normalizer: null
     notes: "Requires the community pi-yaml-hooks package (`pi install npm:pi-yaml-hooks`) — Pi has no built-in hooks.json of its own. Project-scope hooks additionally require trust (PI_YAML_HOOKS_TRUST_PROJECT=1 or a trusted-projects.json entry) before they load. CAUTION, verified live (2026-07, pi-coding-agent v0.81.1): hook firing and unconditional exit-2 blocking both work, but the documented ways to read the triggering command inside a hook — a $TOOL_INPUT env var, and {{tool_input}}/{{command}} mustache templating — were BOTH non-functional in testing (empty/unsubstituted). A real integration here could only do blanket policy (block everything matching an event), not command-aware policy, until the correct mechanism for reading tool input is found."
     sources: ["https://github.com/earendil-works/pi", "https://github.com/Ar9av/agent-manual/blob/main/tools/pi-agent/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "first-class disable flags"
+      notes: "MCP itself is a third-party adapter, not first-party"
 
   - id: amazon-q
     name: Amazon Q Developer CLI (AWS)
@@ -256,6 +323,11 @@ agents:
     normalizer: null
     notes: "Hooks live inside a named per-agent JSON config (like Kiro), not a dedicated hooks file — merging in a Prismor hook means editing whichever agent config is active, same structural complexity as Kiro's kiro_default.json. Only preToolUse blocks; deny is a plain exit-2 + stderr text, no structured JSON decision object (simpler than Claude-family agents, but also less expressive — no ask/modify verdict support). AWS has marked the underlying open-source CLI unmaintained (critical-fixes-only) in favor of the closed-source Kiro CLI, which Prismor already ships support for — that may make this lower priority than its own coverage gap suggests."
     sources: ["https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-installing.html", "https://github.com/Ar9av/agent-manual/blob/main/tools/amazon-q-dev-cli/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "custom-agent tools array"
+      notes: "from docs, not live-tested"
 
   - id: amp
     name: Amp (Sourcegraph spinoff)
@@ -268,6 +340,10 @@ agents:
     normalizer: null
     notes: "No declarative hooks.json — extensibility is a TypeScript Plugin API (async function receiving a context, returning handlers keyed by event name). Architecturally closer to OpenCode's plugin model than to the JSON-hooks agents in this table: a real integration would need a scaffolded .ts plugin (like the OpenClaw/Hermes JS scaffolds) that shells out to the prismor dispatcher and returns a reject action, not a config-merge. Not yet verified against a live amp install."
     sources: ["https://ampcode.com/manual/plugin-api", "https://github.com/Ar9av/agent-manual/blob/main/tools/amp/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "amp.permissions reject rules"
 
   - id: auggie
     name: Auggie CLI (Augment Code)
@@ -280,6 +356,10 @@ agents:
     normalizer: null
     notes: "Documented as a JSON settings.json with a top-level hooks key, command-type handlers only — same shape family as Claude/Codex. Not yet verified against a live auggie install (this repo's own live-testing pass covered Goose/Crush/Continue/OpenHands/Codex/Aider/OpenCode/Pi Agent/Qwen Code/OpenClaw but not Auggie)."
     sources: ["https://docs.augmentcode.com/cli/hooks", "https://github.com/Ar9av/agent-manual/blob/main/tools/auggie/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "auggie tools remove"
 
   - id: kimi-code
     name: Kimi Code (Moonshot AI)
@@ -292,6 +372,10 @@ agents:
     normalizer: null
     notes: "TOML config like Codex, not JSON — a real integration would follow Codex's config.toml text-patch approach (_ensure_codex_hooks_feature_enabled) rather than the JSON read/merge/write path most other agents use. Not yet verified against a live kimi-code install."
     sources: ["https://www.kimi.com/code/docs/en/kimi-code-cli/", "https://github.com/Ar9av/agent-manual/blob/main/tools/kimi-code/README.md"]
+    mirror:
+      status: possible
+      scope: machine
+      disable: "[permission].deny + agent-profile allowlist"
 
   - id: devin
     name: Devin CLI (Cognition AI)
@@ -306,6 +390,11 @@ agents:
     sources: ["https://docs.devin.ai/cli/extensibility/hooks/overview", "https://github.com/Ar9av/agent-manual/blob/main/tools/devin-cli/README.md"]
 
   # ── Sweep / rules-only — no programmable pre-tool hook ────────────────────
+    mirror:
+      status: possible
+      scope: machine
+      disable: "permissions.deny (documented)"
+      notes: "not runtime-verified"
   - id: antigravity
     name: Google Antigravity
     kind: coding-agent
@@ -317,6 +406,9 @@ agents:
     normalizer: null
     sweep_dir: "~/.antigravity/"
     sources: ["https://discuss.ai.google.dev/t/hooks-in-antigravity/120458"]
+    mirror:
+      status: unsupported
+      notes: "no disablement mechanism found"
 
   - id: aider
     name: Aider
@@ -329,6 +421,9 @@ agents:
     normalizer: null
     sweep_dir: "~/.aider/"
     sources: ["https://aider.chat/docs/config/options.html"]
+    mirror:
+      status: unsupported
+      notes: "no MCP support at all"
 
   - id: trae
     name: Trae / Trae CN (ByteDance)
@@ -341,6 +436,9 @@ agents:
     normalizer: null
     sweep_dir: "~/.trae/"
     sources: ["https://docs.trae.ai/ide/rules?_lang=en"]
+    mirror:
+      status: unsupported
+      notes: "GUI only; disablement inferred, never confirmed"
 
   - id: warp
     name: Warp (Agent Mode)
@@ -354,6 +452,9 @@ agents:
     sweep_dir: "~/.warp/"
     notes: "Primarily a GUI terminal app (not an install-anywhere CLI); its own docs describe no lifecycle-event/hook system, only Agent Profiles/Permissions and command/MCP allow-deny lists. Rules files (WARP.md/AGENTS.md) and MCP config (.warp/.mcp.json) are the only sweepable static surface."
     sources: ["https://docs.warp.dev/agent-platform/", "https://github.com/Ar9av/agent-manual/blob/main/tools/warp/README.md"]
+    mirror:
+      status: unsupported
+      notes: "no native-tool removal, only ask/allow friction tiers"
 
   - id: kilocode
     name: Kilocode
@@ -369,6 +470,10 @@ agents:
     sources: ["https://deepwiki.com/Kilo-Org/kilocode/6.3-tool-filtering-and-permissions"]
 
   # ── Production frameworks — in-process SDK adapters ──────────────────────
+    mirror:
+      status: possible
+      scope: project
+      disable: "tools + permission block in kilo.jsonc"
   - id: openai-agents
     name: OpenAI Agents SDK
     kind: framework

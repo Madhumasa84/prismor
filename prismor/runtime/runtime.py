@@ -352,6 +352,26 @@ def evaluate_tool_call(
         except Exception as exc:
             sys.stderr.write(f"[prismor] tool-deny error: {exc}\n")
 
+    # Per-agent "ask" tools: the console's middle state. A matched tag emits a
+    # step_up finding (human approval) rather than a hard deny — the gateway's
+    # await_step_up routes it to the approvals queue; interactive hosts render
+    # it inline. Only fires when the tag is NOT already denied above (deny wins,
+    # and resolve_agent_control keeps the lists disjoint), so a call is never
+    # both blocked and queued for approval.
+    if _control is not None and getattr(_control, "ask_tools", ()):  # noqa: SIM102
+        try:
+            from prismor.runtime.scoped_agent import resolve_tool_tags
+            from prismor.runtime.agents import make_agent_tool_step_up_finding
+            _denied = getattr(_control, "deny_tools", ())
+            for _tname in resolve_tool_tags(event):
+                if _tname in _control.ask_tools and _tname not in _denied:
+                    findings.append(make_agent_tool_step_up_finding(
+                        _agent_name, _tname, session_id, scope_label="agent",
+                        rule_id="agent-tool-step-up"))
+                    break
+        except Exception as exc:
+            sys.stderr.write(f"[prismor] tool-ask error: {exc}\n")
+
     # Org signed-policy tool denies (settings.tool_denies, set by an admin from
     # the Prismor web console). Same tool-tag matcher; scope decides whether
     # this event is covered. Device-scoped entries are pre-filtered to this

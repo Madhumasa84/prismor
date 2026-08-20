@@ -25,12 +25,39 @@ _EVENT_TYPE_TO_TOOL = {
     "network": "WebFetch",
 }
 
-_KNOWN_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "Bash", "WebFetch", "WebSearch"}
+_KNOWN_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "Bash", "WebFetch", "WebSearch",
+                "Glob", "Grep"}
 
-# The seven built-in tool tags every scope is synthesised over. MCP tool
-# families (``mcp__<server>__*``) are appended per machine by
+# The built-in tool tags every scope is synthesised over. MCP tool families
+# (``mcp__<server>__*``) are appended per machine by
 # ``available_tools_for_scope``.
-BUILTIN_SCOPE_TOOLS = ["Bash", "Read", "Edit", "MultiEdit", "Write", "WebFetch", "WebSearch"]
+#
+# Glob and Grep are here even though Claude Code's hook matcher never sends
+# them: when the built-ins are mirrored through the MCP gateway they DO arrive
+# for screening, and a tag absent from this list is denied by omission by every
+# synthesised scope.
+BUILTIN_SCOPE_TOOLS = ["Bash", "Read", "Edit", "MultiEdit", "Write", "Glob", "Grep",
+                       "WebFetch", "WebSearch"]
+
+#: Built-ins that ``runtime.mirror`` re-serves over MCP. A mirrored call reaches
+#: the host's hook layer tagged ``mcp__<server>__Bash``, and a scope that has
+#: never heard of that server denies it — while the gateway, which sees the same
+#: call as a plain ``Bash``, allows it. Same call, two verdicts.
+_MIRRORED_BUILTINS = frozenset({"Bash", "Read", "Write", "Edit", "MultiEdit",
+                                "Glob", "Grep", "WebFetch", "WebSearch"})
+
+
+def native_alias(tool: str) -> Optional[str]:
+    """The built-in tag behind a mirrored MCP tool, if it is one.
+
+    ``mcp__prismor__Bash`` -> ``Bash``. Lets a scope judge a mirrored tool as
+    the tool it actually is, so switching a built-in onto the MCP transport
+    does not change whether it is in scope.
+    """
+    if not is_mcp_tool(tool):
+        return None
+    bare = tool.rsplit("__", 1)[-1]
+    return bare if bare in _MIRRORED_BUILTINS else None
 
 # ── MCP tool families ──────────────────────────────────────────────────────
 # MCP tools arrive under the tag ``mcp__<server>__<tool>`` (Claude Code
@@ -395,7 +422,10 @@ def _static_fallback_rules(goal: str, available_tools: List[str]) -> Dict[str, A
     # and shell is how agents do almost anything (Codex has no Read tool at
     # all — it reads files with `cat`). Dangerous shell is the base policy's
     # job; the static scope only decides writes and network.
-    allowed = {"Read", "Bash"}
+    # Glob and Grep ride with Read: they are read-only discovery, an agent
+    # cannot orient without them, and denying them while allowing Read and
+    # Bash buys nothing (the same listing is one `ls` or `grep` away).
+    allowed = {"Read", "Bash", "Glob", "Grep"}
     deny_network = True
 
     # Detect task intent from keywords
@@ -551,13 +581,20 @@ def check_scoped_rules(
     if tool_name:
         allowed = rules.get("allowed_tools", [])
         denied = rules.get("deny_tools", [])
+        # A mirrored built-in answers to both tags: the MCP tag it arrived
+        # under, so an operator can still deny one server's copy specifically,
+        # and the native tag, so an allowlist naming "Bash" covers a Bash that
+        # happens to be travelling over MCP. Checked deny-first, like the tags
+        # themselves, so neither spelling can be used to slip past a deny.
+        alias = native_alias(tool_name)
+        tags = [tool_name] + ([alias] if alias else [])
 
         # deny_tools takes precedence over allowed_tools: an explicitly denied
         # tool is blocked even when a broader allow-rule would otherwise permit
         # it (e.g. allowed_tools:[Read,Edit] + deny_tools:[Write] blocks Write).
         # Entries may be globs — ``mcp__posthog__*`` covers every tool of that
         # MCP server.
-        if _tool_matches(tool_name, denied):
+        if any(_tool_matches(t, denied) for t in tags):
             return _scoped_finding(
                 session_id,
                 f"Tool '{tool_name}' is explicitly denied for this session",
@@ -580,7 +617,7 @@ def check_scoped_rules(
                 # a human shaped it, so its allowlist is authoritative and MCP
                 # tools it does not name stay blocked.
                 pass
-            elif _tool_matches(tool_name, allowed):
+            elif any(_tool_matches(t, allowed) for t in tags):
                 pass
             elif event_type == "file_write":
                 # A write may arrive as Write, Edit, or MultiEdit. Permit it only if

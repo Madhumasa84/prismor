@@ -53,6 +53,7 @@ prismor
 │   ├─ eval-server            HTTP evaluation endpoint for non-Python adapters
 │   ├─ inference-hook <action> serve · test · secret — Claude Inference Hooks AI security server
 │   ├─ egress <action>        show · report · test · allow · deny · mode — network egress policy
+│   ├─ mirror <action>        on · off · status · passthrough — governed built-ins over MCP
 │   └─ policy <action>        init · validate · show · edit · test
 │
 ├─ Visibility (audit & forensics)
@@ -182,6 +183,10 @@ outside all of this, the same as every other Prismor control.
 | `prismor egress test <target>...` | `--agent <name>`, `--workspace` | Dry-run a URL, host, or whole shell command against the policy. Exit `1` if anything would be blocked. |
 | `prismor egress allow <host>...` | `--reason`, `--workspace` | Add hosts, wildcards, IPs, or CIDRs to `settings.egress.allow` (`egress deny` / `egress rm` for the others). |
 | `prismor egress mode <observe\|enforce>` | `--workspace` | Flip enforcement (`egress default <allow\|deny>` sets the no-match verdict; `egress enable` / `disable` toggle screening). |
+| `prismor mirror on` | `--mode <enforce\|observe>`, `--allow-tools`, `--workspace` | Serve `Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` through Prismor instead of Claude Code's own: registers the `prismor-tools` MCP server and denies the native tools in `.claude/settings.json` (backups as `*.pre-mirror.bak`, nothing else touched). Also trusts the server for this project and carries your existing tool permissions onto the mirrored names — without those the agent boots with no tools at all. `--allow-tools` pre-allows the whole roster for headless runs. Verifies the server starts before denying anything. Takes effect on the next session. See [MCP Gateway](mcp-gateway.md#mirrored-built-ins---mirror-prismor-mirror). |
+| `prismor mirror off` | `--workspace` | Undo exactly what `on` did — the agent uses its native tools again from the next session. |
+| `prismor mirror status` | `--workspace` | Where the mirror is configured, whether it is governing / passing through / paused, its tool roster, live gateway processes. |
+| `prismor mirror passthrough <on\|off>` | `--workspace` | Runtime switch, no restart: `on` runs mirrored built-ins ungoverned (logged, not blocked or redacted). `prismor pause` does the same for hooks + gateway together, with auto-resume. |
 | `prismor egress migrate` | `--workspace` | Convert a legacy warn-only `settings.egress_allowlist` into an enforceable `settings.egress`. |
 | `prismor tags list` | `--last N`, `--workspace` | Tools seen in recent sessions + resolved tags + which tier resolved them (explicit / `_meta` / default / inference). See [Tool Tags](tool-tags.md). |
 | `prismor tags set <tool> <tag>...` | `--workspace` | Tag a tool or glob in `.prismor/policy.yaml` (`tags rm` removes). |
@@ -334,6 +339,8 @@ Scoring table, IOC feed, ecosystem support: [Supply Chain](supply-chain.md).
 ---
 
 ## See also
+
+- [Governance surfaces](governance-surfaces.md) — hooks vs the MCP mirror, per agent
 
 - [Prismor](prismor-runtime.md) — policy engine, session logs, audit, modes
 - [Supply Chain](supply-chain.md) — install-time enforcement and scoring

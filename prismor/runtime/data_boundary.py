@@ -275,6 +275,13 @@ def classify(
         sm.vendor = secret_kind
         out.append(sm)
 
+    for m in _CONNECTION_CREDS_RE.finditer(text):
+        sm = Match("secret", m.group(0), m.start(), m.end(), context=context,
+                   synthetic=_is_synthetic_creds(m.group("user"), m.group("secret"),
+                                                 m.group("host") or ""))
+        sm.vendor = "custom"
+        out.append(sm)
+
     # Drop overlaps (a card inside an IBAN, etc.) keeping the earliest/longest.
     out.sort(key=lambda x: (x.start, -(x.end - x.start)))
     dedup: List[Match] = []
@@ -318,6 +325,58 @@ _SECRET_PATTERNS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r'\bglpat-[0-9a-zA-Z_\-]{20,}'), "gitlab"),
     (re.compile(r'\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}'), "jwt"),
 ]
+
+#: Credentials embedded in a connection URI — ``scheme://user:password@host``.
+#: A hardcoded DSN is one of the most common ways a real credential sits in
+#: ordinary source (and in build output, stack traces and `env` dumps), and no
+#: vendor-prefix pattern above can catch it because the password is arbitrary.
+#:
+#: Only the ``user:password@`` span is matched, not the whole URI, so redaction
+#: leaves the scheme and host intact — the reader still learns *which* database
+#: is being talked to, which is usually the point of reading the line, while the
+#: credential is gone.
+#:
+#: The username is held to an identifier charset rather than "any non-delimiter".
+#: A permissive class also matches inside regex literals — ``r"ssh://(?:git@)?"``
+#: yields user ``(?``, secret ``git`` — and redacting a regex in a file the model
+#: is reading corrupts the source it is about to edit. Silently breaking an Edit
+#: is a worse outcome than missing an exotic username, so the charset is strict.
+_CONNECTION_CREDS_RE = re.compile(
+    r'(?<=://)(?P<user>[A-Za-z0-9_.+\-%]{1,64}):(?P<secret>[^\s:/@"\'<>]{3,128})@'
+    r'(?=(?P<host>[^\s/:"\'<>]+))'
+)
+
+#: Documentation and templates are full of ``postgres://user:password@localhost``.
+#: Redacting those corrupts examples and trains people to ignore the output, so
+#: an obvious placeholder credential is classified but marked synthetic.
+_PLACEHOLDER_CREDS = frozenset({
+    "password", "passwd", "pass", "secret", "changeme", "your_password",
+    "your-password", "yourpassword", "mypassword", "hunter2", "xxxx", "xxx",
+    "pwd", "test", "example", "placeholder", "redacted", "none", "null",
+})
+
+#: Credentials for the loopback interface are development fixtures by
+#: construction — nobody off the machine can use them — and they show up in
+#: docker-compose files, dev scripts and READMEs that people genuinely need to
+#: read back verbatim.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal")
+
+#: ``{db_pw}`` — a str.format template slot. _PLACEHOLDER_RE covers ``{{...}}``
+#: and ``${...}`` but not the single-brace form used by Python templates.
+_FORMAT_SLOT_RE = re.compile(r'^\{[A-Za-z_][A-Za-z0-9_]*\}$')
+
+
+def _is_synthetic_creds(user: str, secret: str, host: str = "") -> bool:
+    low = secret.lower()
+    if low in _PLACEHOLDER_CREDS or user.lower() in ("user", "username", "youruser"):
+        return True
+    if _FORMAT_SLOT_RE.match(secret):
+        return True
+    bare = host.split("@")[-1].split(":")[0].strip("[]").lower()
+    if bare in _LOOPBACK_HOSTS:
+        return True
+    # ${DB_PASS}, {{password}}, <password>, $PASSWORD, ALL_CAPS_TOKEN
+    return bool(_PLACEHOLDER_RE.match(secret))
 
 
 def _iter_secrets(text: str) -> Iterable[Tuple[re.Match, str]]:

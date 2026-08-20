@@ -140,7 +140,7 @@ _HELP_GROUPS = [
     ("Quick start",          ["setup", "discover", "status", "dashboard", "audit", "update", "pause", "pause-hard", "resume"]),
     ("Runtime protection",   ["check", "semantic-check", "scan", "deps", "sandbox", "policy"]),
     ("Sessions & forensics", ["analyze", "ingest", "sessions", "session"]),
-    ("Hooks",                ["install-hooks", "uninstall-hooks", "mcp-gateway"]),
+    ("Hooks",                ["install-hooks", "uninstall-hooks", "mcp-gateway", "mirror"]),
     ("Secret prevention",    ["cloak", "sweep", "canary"]),
     ("Identity & scoping",   ["iam", "scope", "learn"]),
     ("Enterprise / org",     ["enroll", "enroll-status", "workspace", "exempt", "logout"]),

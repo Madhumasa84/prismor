@@ -493,6 +493,29 @@ def _step_policy_select(rules: List[dict], step: int = 2, total: int = 5):
 
 # ── Step 3: Agent Selection ──────────────────────────────────────────────────
 
+def _can_mirror(agent_id: str, gov_entry: dict) -> bool:
+    """True when setup may offer the mirror for this agent: the host supports
+    replacing its built-ins AND `prismor mirror on` knows how to wire it."""
+    try:
+        from prismor.runtime.mirror_cli import INSTALLABLE_AGENTS
+    except Exception:
+        return False
+    return agent_id in INSTALLABLE_AGENTS and gov_entry.get("mirror") in ("verified", "possible")
+
+
+def _mirror_only_agents() -> list:
+    """Coding agents Prismor can only reach through the MCP mirror."""
+    try:
+        from prismor.runtime.integrations.registry import load_registry, governance
+        return [a.name.split(" (")[0] for a in load_registry()
+                if a.kind == "coding-agent" and governance(a.id)["recommended"] == "mirror"]
+    except Exception:
+        return []
+
+
+_MIRROR_ONLY = _mirror_only_agents()
+
+
 def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
     detected = _detect_agents(target)
     agents = [
@@ -514,6 +537,18 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
         agents[0]["on"] = True
     sel = 0
 
+    # How Prismor can reach each agent. Shown here because the two surfaces are
+    # not interchangeable and the difference decides what this wizard installs:
+    # hooks screen the agent's own tools in place, while the MCP mirror replaces
+    # them. See docs/governance-surfaces.md.
+    gov = {}
+    for ag in agents:
+        try:
+            from prismor.runtime.integrations.registry import governance
+            gov[ag["name"]] = governance(ag["name"])
+        except Exception:
+            gov[ag["name"]] = {"surfaces": "", "recommended": "hooks", "mirror": "unknown"}
+
     while True:
         lines = _header_lines(step, total, "AGENTS")
         lines.append(f"  {_w('Select agents to install Prismor hooks for:', DIM)}")
@@ -522,11 +557,62 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
             arrow = _w("▸ ", CYAN) if i == sel else "  "
             dot   = _w("●", GRN) if ag["on"] else _w("○", DIM)
             name  = _pad(_w(ag["label"], BOLD) if i == sel else ag["label"], 18)
-            tag   = _w("detected", GRN) if detected[ag["name"]] else _w("not found", DIM)
-            lines.append(f"  {arrow}{dot}  {name} {tag}")
+            tag   = _pad(_w("detected", GRN) if detected[ag["name"]] else _w("not found", DIM), 11)
+            g = gov.get(ag["name"], {})
+            surface = g.get("surfaces", "")
+            if ag.get("mirror"):
+                sfx = _w("hooks + MCP mirror", GRN)
+            elif surface in ("hooks + MCP", "hooks"):
+                sfx = _w("hooks", GRN)
+                if _can_mirror(ag["name"], g):
+                    sfx += _w("   (m: add MCP mirror)", DIM)
+            elif surface == "MCP":
+                sfx = _w("MCP only", YEL)
+            elif surface == "not supported":
+                sfx = _w("no interception", DIM)
+            else:
+                sfx = ""
+            lines.append(f"  {arrow}{dot}  {name} {tag} {sfx}")
+        # Agents with no hook protocol never appear in the list above, because
+        # this wizard installs hooks. Naming them here is the difference between
+        # "Prismor does not support my agent" and "Prismor reaches it a
+        # different way" — without this they are silently invisible.
+        if _MIRROR_ONLY:
+            lines.append(f"  {_w('No hook protocol — govern these with', DIM)} "
+                         f"{_w('prismor mirror on', BOLD)}{_w(':', DIM)}")
+            lines.append(f"    {_w(', '.join(_MIRROR_ONLY), YEL)}")
+            lines.append("")
+        sel_gov = gov.get(agents[sel]["name"], {})
+        if sel_gov.get("recommended") == "mirror":
+            lines.append(f"  {_w('This agent has no hook protocol.', DIM)} "
+                         f"{_w('Hooks cannot be installed for it —', DIM)}")
+            lines.append(f"  {_w('govern it with', DIM)} {_w('prismor mirror on', BOLD)} "
+                         f"{_w('(serves its built-ins over MCP instead).', DIM)}")
+        elif sel_gov.get("recommended") == "none":
+            lines.append(f"  {_w('No interception surface: no hooks, and its built-in tools', DIM)}")
+            lines.append(f"  {_w('cannot be switched off, so an MCP mirror would be bypassable.', DIM)}")
+        elif _can_mirror(agents[sel]["name"], sel_gov):
+            if agents[sel].get("mirror"):
+                lines.append(f"  {_w('Its built-ins will be served through Prismor over MCP', YEL)} "
+                             f"{_w('— adds output redaction,', DIM)}")
+                lines.append(f"  {_w('takes effect next session, undo with', DIM)} {_w('prismor mirror off', BOLD)}"
+                             f"{_w('.  Press m to keep hooks only.', DIM)}")
+            else:
+                lines.append(f"  {_w('Hooks only — the recommended setup.', DIM)}")
+                where = (_w(" (machine-wide for this agent)", YEL)
+                         if sel_gov.get("scope") == "machine" else "")
+                lines.append(f"  {_w('Press', DIM)} {_w('m', BOLD)} "
+                             f"{_w('to also serve its built-ins over MCP', DIM)}{where}"
+                             f"{_w('.', DIM)}")
+        elif sel_gov.get("mirror") in ("verified", "possible"):
+            lines.append(f"  {_w('Hooks are the recommended surface and are what this wizard installs.', DIM)}")
+            lines.append(f"  {_w('Its built-ins can also be served over MCP — see docs/governance-surfaces.md.', DIM)}")
+        else:
+            lines.append(f"  {_w('Hooks are the recommended surface and are what this wizard installs.', DIM)}")
+            lines.append("")
         lines.append("")
         lines.append(_control_line([
-            ("↑↓", "move"), ("space", "toggle"),
+            ("↑↓", "move"), ("space", "toggle"), ("m", "MCP mirror"),
             ("←", "back"), ("enter", "next"),
         ]))
         _render(lines)
@@ -535,10 +621,21 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
         if key == _UP:               sel = (sel - 1) % len(agents)
         elif key == _DOWN:           sel = (sel + 1) % len(agents)
         elif key == _SPACE:          agents[sel]["on"] = not agents[sel]["on"]
+        elif key in ("m", "M"):
+            # Opt IN to the mirror, per agent. Off by default: hooks are the
+            # recommended surface, and the mirror replaces the agent's tools,
+            # which is not something a wizard should do to someone by default.
+            if _can_mirror(agents[sel]["name"], gov.get(agents[sel]["name"], {})):
+                agents[sel]["mirror"] = not agents[sel].get("mirror", False)
+                if agents[sel]["mirror"]:
+                    agents[sel]["on"] = True
         elif key in (_LEFT, "b", "B"): return _BACK  # type: ignore[return-value]
         elif key in (_ENTER, "\n"):
             chosen = [a["name"] for a in agents if a["on"]]
-            return chosen if chosen else ["claude"]
+            if not chosen:
+                chosen = ["claude"]
+            mirrors = [a["name"] for a in agents if a["on"] and a.get("mirror")]
+            return {"agents": chosen, "mirror": mirrors}
         elif key in ("q", "Q", "\x03"): _cleanup(); sys.exit(0)
 
 
@@ -683,13 +780,14 @@ def _prompt_unlock_password() -> bool:
 
 # ── Confirm ──────────────────────────────────────────────────────────────────
 
-def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project", unlock_pw: bool = False) -> bool:
+def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project", unlock_pw: bool = False, mirror_agents: Optional[List[str]] = None) -> bool:
     home = str(Path.home())
     disp = str(target).replace(home, "~")
     n_on = sum(1 for r in rules if r["on"])
     n_rec = sum(1 for r in rules if r.get("recommended"))
     n_rec_on = sum(1 for r in rules if r.get("recommended") and r["on"])
     ags  = ", ".join(agents)
+    mirror_agents = mirror_agents or []
     W = 48
 
     def bdr(l, fill, r):
@@ -718,6 +816,10 @@ def _step_confirm(target: Path, mode: str, rules: List[dict], agents: List[str],
         else:
             lines.append(row(kv("Rules", f"{n_on}/{len(rules)} enabled")))
         lines.append(row(kv("Agents", ags)))
+        lines.append(row(kv("Surface", "PreToolUse / PostToolUse hooks")))
+        if mirror_agents:
+            lines.append(row(kv("MCP mirror", ", ".join(mirror_agents), YEL)))
+            lines.append(row(_w("built-ins served by Prismor; next session", DIM)))
         lines.append(row(kv("Cloak", "yes  (secret prevention)" if cloak else "no",
                             GRN if cloak else DIM)))
         lines.append(row(kv("Scope", "global (all projects)" if scope == "global" else "workspace only",
@@ -891,7 +993,7 @@ def _install_skill(target: Path):
         return False, str(e)[:40]
 
 
-def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project") -> None:
+def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], cloak: bool = False, scope: str = "project", mirror_agents: Optional[List[str]] = None) -> None:
     sys.stdout.write(ALT_OFF)
     sys.stdout.write("\033[H\033[J" + HIDE)
     sys.stdout.flush()
@@ -994,6 +1096,20 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
             except Exception as e:
                 return False, str(e)[:50]
         _spinner_run(f"Installing {agent} hooks", _install_hook)
+
+    # 3a. MCP mirror — only for agents explicitly opted in on the agent screen.
+    # Deliberately after hooks: if this fails the machine still has working
+    # governance, whereas a mirror installed without hooks would be the only
+    # control and a half-install leaves the agent with no tools at all.
+    for agent in (mirror_agents or []):
+        def _install_mirror(a: str = agent):
+            try:
+                from prismor.runtime import mirror_cli
+                rc = mirror_cli.mirror_on(target, mode=mode, agent=a)
+                return rc == 0, "" if rc == 0 else "see output above"
+            except Exception as e:
+                return False, str(e)[:50]
+        _spinner_run(f"Serving {agent} built-ins over MCP", _install_mirror)
 
     # 3b. Cloaking hooks (opt-in — Claude Code only for now)
     if cloak and "claude" in agents:
@@ -1167,6 +1283,7 @@ def run_wizard(target: Path) -> None:
     rules = _load_rules()
     mode = "observe"
     agents = None
+    mirror_agents = []
     cloak = True
     scope = "project"
     unlock_pw = False
@@ -1199,7 +1316,8 @@ def run_wizard(target: Path) -> None:
                 if result is _BACK:
                     step = 2 if enforcing else 1
                     continue
-                agents = result
+                agents = result["agents"]
+                mirror_agents = result["mirror"]
                 step = 4
             elif step == 4:
                 result = _step_cloak(cloak, step=4 if enforcing else 3, total=total)
@@ -1227,7 +1345,8 @@ def run_wizard(target: Path) -> None:
                 step = 7
             elif step == 7:
                 result = _step_confirm(target, mode, rules, agents, cloak=cloak,
-                                       scope=scope, unlock_pw=unlock_pw)
+                                       scope=scope, unlock_pw=unlock_pw,
+                                       mirror_agents=mirror_agents)
                 if result is _BACK:
                     step = 6 if offer_unlock else 5
                     continue
@@ -1236,12 +1355,14 @@ def run_wizard(target: Path) -> None:
         rules = _load_rules()
         mode = "observe"
         agents = ["claude"]
+        mirror_agents = []
         cloak = False
         scope = "project"
         unlock_pw = False
 
     _raw_off()
-    _do_install(target, mode, rules, agents, cloak=cloak, scope=scope)
+    _do_install(target, mode, rules, agents, cloak=cloak, scope=scope,
+                mirror_agents=mirror_agents)
     # After the install output, so the prompt isn't competing with spinners.
     if unlock_pw:
         _prompt_unlock_password()

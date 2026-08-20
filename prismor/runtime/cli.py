@@ -305,7 +305,22 @@ def main(argv: Optional[List[str]] = None) -> None:
                 break
     if not ws_value:
         ws_value = os.environ.get("PRISMOR_WORKSPACE")
-    workspace = Path(ws_value).resolve() if ws_value else infer_default_workspace(Path.cwd())
+    if ws_value:
+        workspace = Path(ws_value).resolve()
+    else:
+        # os.getcwd() itself can fail — the shell's current directory was
+        # deleted or is unreadable (a removed temp/worktree dir, a permission
+        # change). That must not crash the CLI with a traceback; fall back to
+        # $HOME and tell the user how to be explicit.
+        try:
+            _cwd = Path.cwd()
+        except (FileNotFoundError, PermissionError, OSError):
+            _cwd = Path.home()
+            sys.stderr.write(
+                "[prismor] current directory is unavailable (deleted or "
+                "unreadable); using your home directory. Pass --workspace "
+                "<dir> or set PRISMOR_WORKSPACE to choose explicitly.\n")
+        workspace = infer_default_workspace(_cwd)
 
     # ── eval-server: HTTP evaluation endpoint for non-Python adapters ────
     if args.command == "eval-server":
@@ -1299,6 +1314,22 @@ def main(argv: Optional[List[str]] = None) -> None:
             if isinstance(_cwd, str) and _cwd:
                 workspace = _git_root_or_self(Path(_cwd))
         register_workspace(workspace)
+
+        # A mirrored built-in reaching the hook layer as mcp__<server>__Bash has
+        # already been screened and logged by the gateway that executes it —
+        # there, as a native shell/file event with the right rules applied.
+        # Screening it again doubles every telemetry row and splits one action
+        # across two tool names in the console. Only skipped while a live mirror
+        # for this workspace actually serves a tool of that name.
+        try:
+            from prismor.runtime import mirror as _mirror
+            if _mirror.already_screened(payload.get("tool_name") or "", workspace,
+                                        cwd=str(payload.get("cwd") or "")):
+                sys.exit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
 
         normalized = normalize_payload(agent=args.agent, payload=payload, workspace=workspace)
         event = normalized["event"]
@@ -2421,6 +2452,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
 
     # ── egress subcommands ─────────────────────────────────────────────
+    if args.command == "mirror":
+        from prismor.runtime import mirror_cli
+        sys.exit(mirror_cli.run(args, workspace))
+
     if args.command == "egress":
         from prismor.runtime import egress_cli
 
@@ -2794,6 +2829,15 @@ def build_parser() -> argparse.ArgumentParser:
             "--no-open", action="store_true",
             help="Don't open a browser tab (headless server only)",
         )
+        # main() already resolves --workspace for every command by scanning
+        # argv, and run_server is handed the result — but argparse rejected the
+        # flag here, so `prismor dashboard --workspace X` died with
+        # "unrecognized arguments" while every sibling command accepted it.
+        _dp.add_argument(
+            "--workspace",
+            help="Workspace whose policy, agents and MCP servers to show "
+                 "(default: $PRISMOR_WORKSPACE, then cwd)",
+        )
 
     # ── eval-server: HTTP evaluation endpoint ───────────────────────────
     _ep = subparsers.add_parser(
@@ -3159,6 +3203,48 @@ def build_parser() -> argparse.ArgumentParser:
     gw_parser.add_argument("--namespace", choices=["plain", "none"], default="plain",
                            help="plain=<server>__<tool> (default); none=raw tool names "
                            "(single-upstream shim only)")
+    gw_parser.add_argument("--mirror", action="store_true",
+                           help="Also serve Prismor's mirrored built-in tools "
+                                "(Bash, Read, Write, Edit, Glob, Grep). Disable the "
+                                "agent's own built-ins so it uses these instead "
+                                "(Claude Code: --tools \"\"; SDK: disallowed_tools) — "
+                                "then every file and shell action is policy-screened "
+                                "and its output redacted, including in agents that "
+                                "have no hook support.")
+
+    # ── mirror (governed built-ins over MCP) ───────────────────────────
+    mirror_parser = subparsers.add_parser(
+        "mirror",
+        help="Serve Bash/Read/Write/Edit/Glob/Grep through Prismor instead of the agent's own — "
+             "policy before, redaction after; on/off/status/passthrough",
+        description="The mirror replaces the agent's native built-ins with Prismor-executed "
+        "look-alikes served over MCP, so every shell/file action is policy-screened before it "
+        "runs and its output redacted after. `on` wires it into Claude Code (MCP server + "
+        "native tools denied) for the next session; `off` undoes exactly that. `prismor pause` "
+        "lifts enforcement without a restart; `passthrough on` does the same for just this "
+        "workspace's mirror, indefinitely.",
+    )
+    mirror_sub = mirror_parser.add_subparsers(dest="mirror_command")
+    mirror_on_p = mirror_sub.add_parser("on", help="Wire the mirror into Claude Code (next session)")
+    mirror_on_p.add_argument("--mode", choices=["observe", "enforce"], default="enforce",
+                             help="enforce=block policy violations (default); observe=log only")
+    mirror_on_p.add_argument("--agent", choices=["claude", "codex", "opencode"], default="claude",
+                             help="Host to configure. claude: this project. codex: machine-wide "
+                                  "(Codex reads MCP servers and features only from the user config)")
+    mirror_on_p.add_argument("--allow-tools", dest="allow_tools", action="store_true",
+                             help="Pre-allow every mirrored tool instead of only the ones whose "
+                                  "native twin you had already allowed. Needed for headless runs "
+                                  "(`claude -p`, CI), which cannot answer a permission prompt.")
+    mirror_off_p = mirror_sub.add_parser("off", help="Hand the built-ins back to the agent (next session)")
+    mirror_off_p.add_argument("--agent", choices=["claude", "codex", "opencode"], default="claude",
+                              help="Host to un-configure")
+    mirror_sub.add_parser("status", help="Configured? governing, paused or passing through? live gateways?")
+    mirror_pt = mirror_sub.add_parser("passthrough",
+                                      help="Run mirrored built-ins ungoverned (on) or governed (off) — no restart")
+    mirror_pt.add_argument("state", choices=["on", "off"])
+    for _mp in (mirror_on_p, mirror_off_p, mirror_pt):
+        _mp.add_argument("--workspace", help="Workspace path (default: $PRISMOR_WORKSPACE, then cwd)")
+    mirror_sub.choices["status"].add_argument("--workspace", help="Workspace path (default: $PRISMOR_WORKSPACE, then cwd)")
 
     # ── hook-dispatch (internal) ───────────────────────────────────────
     hook_dispatch = subparsers.add_parser("hook-dispatch", help="(internal) Called by IDE hooks")

@@ -1023,6 +1023,28 @@
   .agent-ctrl:last-child { border-bottom:none; }
   .agent-ctrl > label:first-child { width:150px; font-size:12px; font-weight:600; color:var(--gray-700); flex-shrink:0; }
   .agent-ctrl-hint { font-size:11px; color:var(--gray-400); }
+  /* ── Per-tool three-state grid (Allow / Ask / Deny) ── */
+  .tp-block { align-items:flex-start; flex-direction:column; gap:8px; }
+  .tp-grid { width:100%; border:1px solid var(--gray-100); border-radius:10px; overflow:hidden; }
+  .tp-row { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-bottom:1px solid var(--gray-100); }
+  .tp-row:last-child { border-bottom:none; }
+  .tp-tool { font-family:var(--font-mono,monospace); font-size:12.5px; color:var(--gray-800); }
+  .tp-btns { display:inline-flex; gap:4px; }
+  .tp-btn { font-family:var(--font-ui); font-size:11px; font-weight:600; padding:4px 12px; border-radius:999px; border:1px solid var(--gray-200); background:var(--gray-50,#f8fafc); color:var(--gray-400); cursor:pointer; transition:all .12s; }
+  .tp-btn:hover { border-color:var(--gray-300); color:var(--gray-600); }
+  .tp-allow.on { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
+  .tp-ask.on   { background:#fef9c3; color:#a16207; border-color:#fde68a; }
+  .tp-deny.on  { background:#fee2e2; color:#b91c1c; border-color:#fecaca; }
+  .mcp-kind { font-size:11px; font-weight:600; color:var(--gray-500); background:var(--gray-100); border-radius:999px; padding:2px 9px; margin-left:2px; }
+  .mcp-kind-mirror { color:#a16207; background:#fef9c3; }
+  .mcp-hint { font-size:11.5px; color:var(--gray-500); margin-top:8px; line-height:1.5; }
+  .tp-toggle { position:relative; width:38px; height:22px; border-radius:999px; border:1px solid var(--gray-200); background:var(--gray-100); cursor:pointer; padding:0; transition:background .12s; }
+  .tp-toggle.on { background:#22c55e; border-color:#16a34a; }
+  .tp-toggle.off { background:var(--gray-200); }
+  .tp-toggle:disabled { opacity:.4; cursor:not-allowed; }
+  .tp-knob { position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .12s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+  .tp-toggle.on .tp-knob { left:18px; }
+  .tp-row-off .tp-tool { color:var(--gray-400); }
 
   /* ── Session flow page ── */
   .session-hero {
@@ -1623,6 +1645,7 @@
   <button class="tab-btn active" data-tab="overview" data-label="Overview"><svg class="icon"><use href="#i-home"/></svg><span>Overview</span></button>
   <button class="tab-btn" data-tab="agents" data-label="Agents"><svg class="icon"><use href="#i-bot"/></svg><span>Agents</span></button>
   <button class="tab-btn" data-tab="sessions" data-label="Sessions"><svg class="icon"><use href="#i-radio"/></svg><span>Sessions</span></button>
+  <button class="tab-btn" data-tab="mcpservers" data-label="MCP Servers"><svg class="icon"><use href="#i-database"/></svg><span>MCP Servers</span></button>
   <button class="tab-btn" data-tab="mcp" data-label="MCP Playground"><svg class="icon"><use href="#i-database"/></svg><span>MCP Playground</span></button>
   <button class="tab-btn" data-tab="policy" data-label="Policy Control"><svg class="icon"><use href="#i-shield"/></svg><span>Policy Control</span></button>
   <button class="tab-btn" data-tab="fleet" data-label="Fleet"><svg class="icon"><use href="#i-building"/></svg><span>Fleet</span><span class="tab-lock"><svg class="icon"><use href="#i-lock"/></svg></span></button>
@@ -1648,6 +1671,13 @@
 </div>
 
 <!-- ═══ PAGE: MCP PLAYGROUND ══════════════════════════════════════ -->
+<div id="page-mcpservers" class="page">
+  <div class="section"><h2>MCP Servers</h2><div class="rule"></div>
+    <span class="hint">Every MCP server Prismor fronts, and how each tool is handled. Allow runs it; Ask requires human approval (step-up); Deny blocks it. Applies across all agents.</span>
+  </div>
+  <div id="mcpServersList"><div class="empty">Loading MCP servers…</div></div>
+</div>
+
 <div id="page-mcp" class="page">
   <div class="section"><h2>MCP Playground</h2><div class="rule"></div>
     <span class="hint">Claude Code tool access — every call is evaluated by Prismor before delivery.</span>
@@ -2598,6 +2628,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       if (_agentsCache) renderAgents(_agentsCache);
       loadAgents();           // silent background refresh
     }
+    if (btn.dataset.tab === 'mcpservers') loadMcpServers();
     if (btn.dataset.tab === 'mcp') loadMcpPlayground();
   });
 });
@@ -2618,6 +2649,134 @@ function renderMcpPlayground(data) {
   const calls = data.delivered || [];
   document.getElementById('mcpDelivered').textContent = calls.length ? 'Delivered: ' + calls.join(', ') : 'No calls delivered yet.';
 }
+// ── MCP Servers: one registry of every server Prismor fronts ──────────────
+async function loadMcpServers() {
+  const el = document.getElementById('mcpServersList');
+  try {
+    const ws = _serverWorkspace || '';
+    const data = await apiFetch('/api/mcp-servers' + (ws ? '?workspace=' + encodeURIComponent(ws) : ''));
+    _mcpServersCache = data.servers || [];
+    renderMcpServers();
+  } catch (e) {
+    el.innerHTML = '<div class="empty" style="color:#b91c1c">Failed to load: ' + safe(e.message) + '</div>';
+  }
+}
+let _mcpServersCache = [];
+function renderMcpServers() {
+  const el = document.getElementById('mcpServersList');
+  const servers = _mcpServersCache;
+  if (!servers.length) { el.innerHTML = '<div class="empty">No MCP servers configured. Point your agent\'s .mcp.json at <code>prismor mcp-gateway</code>.</div>'; return; }
+  el.innerHTML = servers.map(s =>
+    s.kind === 'mirror' ? renderMirrorCard(s) : renderRemoteCard(s)
+  ).join('');
+}
+
+// The mirror: front-of-house controls. A Governing / Pass-through switch (screen
+// and redact every mirrored call, or execute them exactly as the natives would
+// while still logging) and a per-tool on/off roster — "this tool I want, this
+// one I don't" — distinct from call-time allow/ask/deny. Pass-through keeps
+// serving the tools: the host's natives were denied by `prismor mirror on`, so a
+// mirror that went silent would leave the agent with no Bash/Read at all.
+// Handing the built-ins back to the agent is a config change + restart, and
+// that lives in the CLI (`prismor mirror off`), not behind a runtime switch.
+function renderMirrorCard(s) {
+  const override = s.override !== false;
+  const paused = !!s.paused;
+  const governing = override && !paused;
+  const ovBtn = '<button class="en-toggle ' + (override ? 'on' : 'off') + '" ' +
+    (paused ? 'disabled title="Prismor is paused — run prismor resume first" ' : '') +
+    'onclick="mcpOverrideSet(\'' + safeAttr(s.name) + '\',' + (override ? 'true' : 'false') + ')">' +
+    (paused ? 'Paused' : (override ? 'Governing' : 'Pass-through')) + '</button>';
+  const rows = (s.tools || []).map(t => {
+    const on = t.enabled !== false;
+    const toggle = '<button class="tp-toggle ' + (on ? 'on' : 'off') + '"' +
+      ' onclick="mcpToolEnable(\'' + safeAttr(s.name) + '\',\'' + safeAttr(t.name) + '\',' + (on ? 'true' : 'false') + ')">' +
+      '<span class="tp-knob"></span></button>';
+    return '<div class="tp-row' + (governing ? '' : ' tp-row-off') + '">' +
+      '<span class="tp-tool">' + safe(t.name) + '</span>' + toggle + '</div>';
+  }).join('');
+  let hint;
+  if (paused) {
+    const until = s.paused_until ? ' until ' + safe(s.paused_until) : '';
+    hint = 'Prismor is <b>paused</b>' + until + ' — the mirror passes every call through (logged, not blocked or redacted). ' +
+      'Resume from your terminal: <code>prismor resume</code>.';
+  } else if (override) {
+    hint = 'Governing — every mirrored call is policy-screened before it runs and its output redacted after. ' +
+      'Native tools are switched off in the host by <code>prismor mirror on</code>; ' +
+      '<code>prismor mirror off</code> hands them back (next session).';
+  } else {
+    hint = 'Pass-through — the mirror still serves the tools below but runs them exactly as the natives would ' +
+      '(logged, not blocked or redacted). Flip back to Governing here, or <code>prismor mirror passthrough off</code>.';
+  }
+  return '<div class="card" style="margin-bottom:16px">' +
+    '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
+      '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
+      safe(s.name) + '<span class="mcp-kind mcp-kind-mirror">mirror · built-ins</span>' +
+      '<span style="margin-left:auto">' + ovBtn + '</span></div>' +
+    '<div class="mcp-hint">' + hint + '</div>' +
+    '<div class="tp-grid" style="margin-top:10px">' + rows + '</div></div>';
+}
+
+function renderRemoteCard(s) {
+  const rows = (s.tools || []).length ? (s.tools || []).map(t => {
+    const st = t.state || 'allow';
+    const btn = (val, label, title) =>
+      '<button class="tp-btn tp-' + val + (st === val ? ' on' : '') + '" title="' + title + '" ' +
+        'onclick="mcpToolSet(\'' + safeAttr(t.tag) + '\',\'' + val + '\')">' + label + '</button>';
+    return '<div class="tp-row"><span class="tp-tool">' + safe(t.name) + '</span>' +
+      '<span class="tp-btns">' + btn('allow','Allow','Runs without prompting') +
+        btn('ask','Ask','Requires human approval (step-up)') +
+        btn('deny','Deny','Blocked in real time') + '</span></div>';
+  }).join('') : '<div class="tp-row" style="color:var(--gray-400);font-size:12px">No tools with a policy yet — they appear here once the agent uses them.</div>';
+  return '<div class="card" style="margin-bottom:16px">' +
+    '<div class="card-title" style="display:flex;align-items:center;gap:10px">' +
+      '<span class="badge" style="width:24px;height:24px;border-radius:6px;background:var(--gray-100);display:inline-grid;place-items:center;font-weight:700;font-size:12px">P</span>' +
+      safe(s.name) + '<span class="mcp-kind">remote</span></div>' +
+    '<div class="tp-grid" style="margin-top:12px">' + rows + '</div></div>';
+}
+
+async function mcpOverrideSet(server, current) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/mcp-config', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({override: !current, workspace: ws})});
+    const s = _mcpServersCache.find(x => x.name === server);
+    if (s) s.override = r.override;
+    renderMcpServers();
+    toast('✓ ' + server + (r.override ? ' governing built-ins' : ' passing through (ungoverned)'));
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
+}
+
+async function mcpToolEnable(server, tool, current) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/mcp-config', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tool, enabled: !current, workspace: ws})});
+    const dis = new Set(r.disabled_tools || []);
+    const s = _mcpServersCache.find(x => x.name === server);
+    if (s) (s.tools||[]).forEach(t => { if (t.name === tool) t.enabled = !dis.has(tool); });
+    renderMcpServers();
+    toast('✓ ' + tool + (current ? ' removed' : ' added'));
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
+}
+async function mcpToolSet(tag, action) {
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/tool-policy', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scope:'global', tool: tag, action, workspace: ws})});
+    // Update cache in place for the toggled tag.
+    const deny = new Set(r.deny_tools || []), ask = new Set(r.ask_tools || []);
+    _mcpServersCache.forEach(s => (s.tools||[]).forEach(t => {
+      if (t.tag === tag) t.state = deny.has(tag) ? 'deny' : (ask.has(tag) ? 'ask' : 'allow');
+    }));
+    renderMcpServers();
+    toast('✓ ' + tag + ' → ' + action);
+  } catch(e){ toast('✗ ' + e.message, true); loadMcpServers(); }
+}
+
 async function mcpRequest(body) {
   const result = await apiFetch('/api/mcp-playground', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (result.state) _mcpPlayground = result.state; else _mcpPlayground = result;
@@ -3412,7 +3571,53 @@ function renderAgentControls(agentName){
     iamBlock+
     '<div class="agent-ctrl"><label>Agent enabled</label>'+
       '<button class="en-toggle '+(a.enabled?'on':'off')+'" onclick="agentToggleBtn(\''+safeAttr(a.name)+'\','+(a.enabled?'true':'false')+')">'+(a.enabled?'Enabled':'Disabled')+'</button>'+
-      '<span class="agent-ctrl-hint">off = kill switch: every tool call from this agent is denied until re-enabled</span></div>';
+      '<span class="agent-ctrl-hint">off = kill switch: every tool call from this agent is denied until re-enabled</span></div>'+
+    renderToolPolicyGrid(a);
+}
+
+// Built-ins Prismor mirrors over MCP (prismor mcp-gateway --mirror). Shown for
+// every agent so the grid matches the tools an agent actually holds even before
+// it has exercised each one.
+const MIRROR_BUILTINS = ['Bash','Read','Write','Edit','Glob','Grep'];
+
+// Per-tool three-state control: Allow / Ask (human approval) / Deny. The middle
+// state maps to a step_up finding the gateway routes to the approvals queue.
+function renderToolPolicyGrid(a){
+  const deny = new Set(a.deny_tools || []);
+  const ask  = new Set(a.ask_tools  || []);
+  // Union of what we know this agent can touch: its capabilities (if the API
+  // surfaced them), whatever already has a policy, and the mirror built-ins.
+  const tools = Array.from(new Set([
+    ...MIRROR_BUILTINS, ...(a.capabilities||[]), ...deny, ...ask,
+  ])).sort();
+  const state = t => deny.has(t) ? 'deny' : (ask.has(t) ? 'ask' : 'allow');
+  const btn = (t, val, label, title) =>
+    '<button class="tp-btn tp-'+val+(state(t)===val?' on':'')+'" title="'+title+'" '+
+      'onclick="toolPolicySet(\''+safeAttr(a.name)+'\',\''+safeAttr(t)+'\',\''+val+'\')">'+label+'</button>';
+  const rows = tools.map(t =>
+    '<div class="tp-row"><span class="tp-tool">'+safe(t)+'</span>'+
+      '<span class="tp-btns">'+
+        btn(t,'allow','Allow','Runs without prompting')+
+        btn(t,'ask','Ask','Requires human approval (step-up)')+
+        btn(t,'deny','Deny','Blocked in real time')+
+      '</span></div>').join('');
+  return '<div class="agent-ctrl tp-block"><label>Tool permissions</label>'+
+    '<div class="tp-grid">'+rows+'</div>'+
+    '<span class="agent-ctrl-hint">Per-tool handling for this agent. Ask routes the call '+
+    'to the approvals queue; a headless gateway waits and fails closed if unanswered.</span></div>';
+}
+
+async function toolPolicySet(agent, tool, action){
+  try {
+    const ws = _serverWorkspace || '';
+    const r = await apiFetch('/api/tool-policy', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scope:'agent', agent, tool, action, workspace: ws})});
+    const a = (_agentsCache?.agents||[]).find(x=>x.name===agent);
+    if (a){ a.deny_tools = r.deny_tools || []; a.ask_tools = r.ask_tools || []; }
+    renderAgentControls(agent);
+    toast('✓ '+tool+' → '+action);
+  } catch(e){ toast('✗ '+e.message, true); loadAgents(); }
 }
 function renderAgentSessions(agentName){
   const rows = _allSessionsCache.filter(s=>s.agent===agentName);

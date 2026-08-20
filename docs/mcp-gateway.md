@@ -104,6 +104,142 @@ The model reads the reason and can adapt or ask the user. A flagged tool
 JSON-RPC errors are used only for protocol failures (unknown tool, upstream
 server died).
 
+## Mirrored built-ins (`--mirror`, `prismor mirror`)
+
+> Choosing between this and hooks: see
+> [Governance surfaces](governance-surfaces.md). Short version — hooks
+> wherever the agent has them, the mirror where it does not.
+
+Hooks see a tool call before it runs, but they cannot hand the model a
+*redacted* file, and hostless agents have no hooks at all. With `--mirror` the
+gateway also serves Prismor-executed look-alikes of the agent's own
+`Bash` / `Read` / `Write` / `Edit` / `Glob` / `Grep` — same names, same
+schemas — so the tool executes inside Prismor: policy before, the real output
+redacted after, one telemetry event, reported under the native tool name so
+every rule and deny written against `Bash` keeps applying.
+
+For Claude Code there is a one-command switch:
+
+```bash
+prismor mirror on            # register the mirror + deny the native tools (next session)
+prismor mirror status        # configured? governing / pass-through / paused? live gateways?
+prismor mirror off           # hand the built-ins back to the agent (next session)
+```
+
+Switching a host over takes four coordinated changes, and missing any one of
+them leaves the agent with *no* file or shell tools — the natives are denied but
+the replacement never loads. `on` does all four, backing up each file it touches
+as `*.pre-mirror.bak` and changing nothing else in them:
+
+| # | Change | File | Why it is required |
+|---|---|---|---|
+| 1 | `prismor-tools` server entry | `.mcp.json` | serves the mirrored built-ins |
+| 2 | natives denied | `.claude/settings.json` | so the model reaches for the mirror, not its own tools |
+| 3 | `enabledMcpjsonServers: ["prismor-tools"]` | `.claude/settings.local.json` | a project-declared MCP server does not load until a human trusts it — and a project file cannot vouch for itself, so putting this in the shared `settings.json` does nothing |
+| 4 | `mcp__prismor-tools__*` allowed | `.claude/settings.json` | MCP tools sit behind the same permission prompt as any tool, and renaming `Bash` invalidates every allow rule the human had |
+
+Step 4 translates rather than grants: a native that was already allowed gets its
+mirrored twin allowed, one that was not keeps prompting exactly as before.
+Headless runs (`claude -p`, CI) cannot answer a prompt at all — use
+`prismor mirror on --allow-tools` there to pre-allow the whole roster.
+
+`off` removes exactly those four. `--mode observe` logs without blocking.
+
+Scope is deliberately the project you are standing in, with no machine-wide or
+agent-wide variant. Fleet-level rollout belongs to the control plane, which
+already pushes device mode, agent kill switches and pause that way — those are
+an administrator's decisions, not a CLI's. (The user-level MCP config is also
+owned and rewritten wholesale by the running host, so an edit there does not
+reliably survive.)
+
+### Codex
+
+```bash
+prismor mirror on --agent codex        # machine-wide
+prismor mirror off --agent codex
+```
+
+Wired through Codex's own CLI (`codex mcp add`, `codex features disable`) rather
+than by editing `config.toml`, so the vendor's supported writer owns its own
+file. Two differences from Claude Code, both stated by the command before it
+changes anything:
+
+- **Machine-wide, not per project.** Codex reads MCP servers and `[features]`
+  only from the user-level config — a project-scoped `.codex/config.toml` is
+  ignored for features — so there is no project variant to offer.
+- **The sandbox gates mirrored calls, not approvals.** A mirrored tool runs
+  inside Prismor, outside Codex's OS sandbox, so a restrictive sandbox cancels
+  it with `user cancelled MCP tool call`, and `approval_policy="never"` does
+  *not* change that. Run Codex with a sandbox mode that permits the call. This
+  is a real trade: mirroring Codex swaps its OS-level sandboxing for Prismor's
+  policy and redaction.
+
+Both `shell_tool` **and** `unified_exec` are disabled: `unified_exec` is a
+second shell surface, and leaving it on lets the model route around the mirror.
+`off` re-enables only the features `on` actually turned off.
+
+Verified on codex-cli 0.145.0: `config.py` came back as
+`postgres://[REDACTED:secret]@db.internal…` and a `.env` read was blocked —
+result-side redaction Codex has never had (see prismor#152).
+
+### OpenCode
+
+```bash
+prismor mirror on --agent opencode     # this project
+prismor mirror off --agent opencode
+```
+
+The highest-value host to mirror: OpenCode has no hook protocol, so MCP is the
+only interposition point that exists for it - without this Prismor cannot see an
+OpenCode session at all.
+
+Everything is one project-scoped `opencode.json`, and there is **no trust gate** -
+the project file both declares the server and grants it. Note the MCP block is
+keyed directly under `mcp`, **not** `mcp.servers`, which published guidance says
+and OpenCode 1.18 rejects.
+
+Verified on OpenCode 1.18.16: after `on`, `opencode mcp list` reports
+`prismor-tools connected` and `opencode debug agent build` shows
+`bash, read, write, edit, grep, glob` all disabled; `off` restores them and
+leaves any tool the developer had disabled themselves alone.
+
+Other hosts: run `prismor mcp-gateway --mirror` as an MCP server and disable the
+host's own built-ins yourself. The server is host-agnostic — only the config
+wiring is per-host, and `prismor mirror status` lists what is wired today.
+
+**One Prismor, not two.** The hook layer and the gateway both see a mirrored
+call and stay consistent only because they share code: the gateway drops a
+marker the hook reads (screened once, not twice) and the hook maps
+`mcp__prismor-tools__Bash` back to `Bash` (so a session scope judges it as the
+tool it really is). If `prismor install-hooks` wired an older or different
+checkout, both agreements break — the scope denies what the gateway allows, and
+`prismor pause` reaches only one layer. `mirror on` and `mirror status` compare
+the two and warn; the fix is to re-run `prismor install-hooks` from the same
+install.
+
+**Getting out of the way — no restart needed.** Both are read on every call:
+
+- `prismor pause` lifts enforcement for the gateway exactly as it does for the
+  hooks: calls still execute, still get evaluated and logged, but nothing is
+  blocked, withheld, or redacted until `prismor resume` (or the 24h
+  auto-resume). This applies to remote MCP servers behind the gateway too.
+- `prismor mirror passthrough on` does the same for just this workspace's
+  mirror, indefinitely — the same switch as the mirror card in
+  `prismor dashboard`. The mirror keeps *serving* its tools while passing
+  through: the host's natives are denied, so a mirror that went silent would
+  leave the agent with no shell or file access mid-session.
+
+A blocked mirrored call tells the agent which of these to ask the human to
+run. The agent cannot run them itself: `prismor mirror on|off|passthrough`,
+`prismor pause`, and writes to `.prismor/mirror.json` are covered by the
+`prismor-self-edit` rule, so an agent whose Bash *is* the mirror cannot hand
+itself the native tools back (see [Policy layers](policy-layers-and-exemptions.md)).
+
+Tools the host owns cannot be mirrored (`Task`/`Agent`, `Skill`,
+`AskUserQuestion`); they stay native. `on` also denies `MultiEdit` and
+`NotebookEdit`, since an ungoverned native file-writer next to a governed
+`Edit` would be a bypass, not a mirror.
+
 ## Policy matching
 
 Events are recorded with `tool_name = mcp__<server>__<tool>` using the **real

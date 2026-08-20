@@ -74,10 +74,17 @@ class UpstreamSpec:
     url: str = ""
     transport: str = ""       # "stdio" | "http" | "sse" (informational)
     headers: Dict[str, str] = field(default_factory=dict)
+    #: In-process mirrored built-ins (see runtime/mirror.py) — no child
+    #: process, no socket. Served by UpstreamLocal.
+    local: bool = False
 
     @property
     def remote(self) -> bool:
         return bool(self.url)
+
+
+#: Upstream name for the in-process mirrored built-ins.
+MIRROR_SPEC_NAME = "builtins"
 
 
 class GatewayConfigError(ValueError):
@@ -108,6 +115,9 @@ def load_gateway_config(path: Path) -> List[UpstreamSpec]:
 
 
 def _spec_from_entry(name: str, cfg: Dict[str, Any]) -> UpstreamSpec:
+    # {"mirror": true} / {"type": "mirror"} — the in-process built-ins.
+    if cfg.get("mirror") is True or str(cfg.get("type") or "").lower() == "mirror":
+        return UpstreamSpec(name=name, local=True, transport="local")
     meta = _mcp_endpoint_meta(cfg)
     if meta["url"]:
         headers = cfg.get("headers") if isinstance(cfg.get("headers"), dict) else {}
@@ -440,10 +450,63 @@ class UpstreamHttp(Upstream):
             pass
 
 
+class UpstreamLocal(Upstream):
+    """The mirrored built-ins, served in-process.
+
+    Same ``Upstream`` contract as a spawned stdio server, but there is no child
+    process and no transport: ``request`` dispatches straight into
+    ``runtime.mirror``. Modelling the mirror as just another upstream is what
+    lets it inherit the gateway's whole pipeline — pre-call policy, result
+    scanning, redaction, telemetry, trifecta tagging — instead of growing a
+    second, weaker enforcement path beside it.
+    """
+
+    def __init__(self, spec: UpstreamSpec, workspace: Path,
+                 on_notification: Optional[Callable[[str, Dict[str, Any]], None]] = None):
+        super().__init__(spec, on_notification)
+        self.workspace = workspace
+
+    def initialize(self, client_params: Dict[str, Any]) -> Dict[str, Any]:
+        return {"protocolVersion": str(client_params.get("protocolVersion")
+                                       or PROTOCOL_VERSION_FALLBACK),
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "prismor-mirror", "version": _gateway_version()}}
+
+    def request(self, method: str, params: Dict[str, Any],
+                timeout: float = REQUEST_TIMEOUT) -> Dict[str, Any]:
+        from prismor.runtime import mirror
+        if method == "tools/list":
+            return {"tools": mirror.mirror_tool_definitions(self.workspace)}
+        if method == "tools/call":
+            name = str(params.get("name") or "")
+            try:
+                text = mirror.execute(name, params.get("arguments") or {},
+                                      self.workspace)
+            except mirror.MirrorError as exc:
+                # A tool-level failure, not a policy block: report it the way a
+                # native tool would so the model can correct itself and retry.
+                return {"content": [{"type": "text", "text": f"Error: {exc}"}],
+                        "isError": True}
+            except Exception as exc:  # unexpected — still must not kill the server
+                return {"content": [{"type": "text",
+                                     "text": f"Error: mirrored tool failed: {exc}"}],
+                        "isError": True}
+            return {"content": [{"type": "text", "text": text}], "isError": False}
+        if method == "ping":
+            return {}
+        raise UpstreamError(f"prismor-mirror does not support {method}", -32601)
+
+    def notify(self, method: str, params: Dict[str, Any]) -> None:
+        return None
+
+
 def make_upstream(spec: UpstreamSpec,
                   on_notification: Optional[Callable[[str, Dict[str, Any]], None]] = None,
                   guard: Optional[Callable[[UpstreamSpec], None]] = None,
+                  workspace: Optional[Path] = None,
                   ) -> Upstream:
+    if spec.local:
+        return UpstreamLocal(spec, workspace or Path.cwd(), on_notification)
     if spec.remote:
         return UpstreamHttp(spec, on_notification, guard)
     return UpstreamStdio(spec, on_notification)
@@ -524,7 +587,7 @@ class Gateway:
         self._connect_lock = threading.Lock()
         self.upstreams: List[Upstream] = [
             make_upstream(s, self._make_notification_handler(s.name),
-                          self._egress_guard)
+                          self._egress_guard, workspace=workspace)
             for s in specs
         ]
         self._routes: Dict[str, _Route] = {}
@@ -635,8 +698,13 @@ class Gateway:
 
     # ── tools/list ───────────────────────────────────────────────────────
 
-    def _client_tool_name(self, server: str, tool: str) -> str:
-        if self.namespace == "none":
+    def _client_tool_name(self, server: str, tool: str, local: bool = False) -> str:
+        # Mirrored built-ins are never namespaced. The host already prefixes
+        # MCP tools ("mcp__prismor__Bash"); adding the gateway's own prefix on
+        # top gives "mcp__prismor__prismor__Bash" and buries the one signal the
+        # model relies on to recognise the tool. Collisions are impossible in
+        # practice because every non-local server keeps its prefix.
+        if local or self.namespace == "none":
             return tool
         return f"{server}__{tool}"
 
@@ -654,13 +722,14 @@ class Gateway:
                 if not isinstance(tool, dict) or not tool.get("name"):
                     continue
                 original = str(tool["name"])
-                exposed = self._client_tool_name(up.spec.name, original)
+                exposed = self._client_tool_name(up.spec.name, original,
+                                                 local=up.spec.local)
                 routes[exposed] = _Route(upstream=up, server=up.spec.name,
                                          tool=original,
                                          meta_tags=_extract_meta_tags(tool))
                 entry = dict(tool)
                 entry["name"] = exposed
-                if self.namespace != "none":
+                if self.namespace != "none" and not up.spec.local:
                     desc = str(tool.get("description") or "")
                     entry["description"] = f"[{up.spec.name}] {desc}".strip()
                 tools.append(entry)
@@ -695,12 +764,23 @@ class Gateway:
         except Exception:
             pass
 
+        # Pass-through? A `prismor pause` (local or org) lifts enforcement for
+        # the whole gateway, exactly as it does for the hook layer — the human
+        # ran it to make Prismor stop interfering, and a gateway that kept
+        # blocking would make the pause a lie. A mirror whose override switch
+        # is off passes its built-ins through as well. Either way the call is
+        # still evaluated and logged: pass-through is observe, not blindness.
+        passthrough = self._passthrough(route)
+
         # Pre-call evaluation.
         decision = self._evaluate(self._build_call_event(route, arguments))
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
-            log_observe_findings(decision, mode=self.mode, tool_name=name)
-        if decision is not None and decision.blocking is not None:
+            log_observe_findings(decision, tool_name=name,
+                                 mode="observe" if passthrough else self.mode)
+        if decision is not None and decision.blocking is not None and passthrough:
+            self._note_passthrough(name, decision.blocking, passthrough)
+        elif decision is not None and decision.blocking is not None:
             verdict = str(decision.blocking.get("action") or "block").lower()
             handled = False
             # MODIFY via pii_redact: rewrite the arguments in place and let the
@@ -735,26 +815,159 @@ class Gateway:
                 except Exception:
                     handled = False
             if not handled:
-                self._reply(req_id, _blocked_result("Blocked by Prismor",
-                                                    decision.blocking))
+                self._reply(req_id, _blocked_result(
+                    "Blocked by Prismor", decision.blocking,
+                    unblock=self._unblock_text(decision.blocking, route)))
                 return
 
         result = route.upstream.request(
             "tools/call", {"name": route.tool, "arguments": arguments},
             timeout=CALL_TIMEOUT)
 
+        # Mirrored built-ins execute inside Prismor, so their output can be
+        # *repaired* rather than only refused: strip credential material before
+        # the model sees it. This is the capability a PreToolUse hook cannot
+        # have — a hook sees the request, never the file contents — and it is
+        # why a secret hardcoded in ordinary source (not just .env) stops
+        # leaking. Redact before scanning so the scan sees what the model will.
+        if route.upstream.spec.local:
+            # Cloak masking runs even while paused: `prismor pause` suspends
+            # ENFORCEMENT, and the hook-layer scrubber does not consult pause
+            # either, so a paused mirror must not start pushing raw secret
+            # values into the model's context. Data-boundary redaction IS
+            # policy, so it goes with the rest of enforcement.
+            result = self._redact_result(result, data_boundary=not passthrough)
+
         # Post-call: the response is untrusted content — scan before the model
         # ever sees it (prompt injection, poisoned tool output, secrets).
-        decision = self._evaluate(self._build_result_event(route, result))
+        decision = self._evaluate(self._build_result_event(route, result, arguments))
         if decision is not None:
             from prismor.runtime.runtime import log_observe_findings
-            log_observe_findings(decision, mode=self.mode, tool_name=name)
-        if decision is not None and decision.blocking is not None:
+            log_observe_findings(decision, tool_name=name,
+                                 mode="observe" if passthrough else self.mode)
+        if passthrough:
+            if decision is not None and decision.blocking is not None:
+                self._note_passthrough(name, decision.blocking, passthrough)
+            self._reply(req_id, result)
+            return
+        # `decision.blocking` is set by should_block, which only fires on
+        # PRE-action events — a hook cannot un-ring a bell after the tool has
+        # run. The gateway is the exception: it is still holding the response
+        # and has not handed it to the model, so a post-action finding is
+        # genuinely actionable here. Withhold on an enforce-mode block finding
+        # even though the hook-oriented should_block declined to.
+        withhold = decision.blocking if decision is not None else None
+        if withhold is None and decision is not None and self.mode == "enforce":
+            withhold = _result_withhold_finding(decision.findings)
+        if withhold is not None:
             self._reply(req_id, _blocked_result(
-                "[Prismor] response withheld", decision.blocking))
+                "[Prismor] response withheld", withhold,
+                unblock=self._unblock_text(withhold, route)))
             return
 
         self._reply(req_id, result)
+
+    # ── pause / pass-through ─────────────────────────────────────────────
+
+    def _passthrough(self, route: "_Route") -> Optional[Dict[str, Any]]:
+        """Reason this call must pass through ungoverned, or None.
+
+        Resolved per call, not at startup: `prismor pause` / `resume` and the
+        dashboard's mirror switch have to take effect on the NEXT tool call,
+        without the host restarting the gateway (Claude Code only re-reads
+        `.mcp.json` on a new session, so "restart to apply" would mean the
+        pause is invisible for the rest of the conversation).
+        """
+        try:
+            from prismor.runtime import mirror as _mirror
+            # The mirror switch is per-workspace and only about built-ins;
+            # a pause applies to every upstream this gateway fronts.
+            return _mirror.passthrough_state(
+                self.workspace if route.upstream.spec.local else None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _note_passthrough(name: str, blocking: Dict[str, Any],
+                          passthrough: Dict[str, Any]) -> None:
+        why = ("prismor is paused" if passthrough.get("source") == "pause"
+               else "mirror override is off (pass-through)")
+        sys.stderr.write(
+            f"[prismor-gateway] would have blocked {name} "
+            f"({blocking.get('ruleId') or blocking.get('title')}) — "
+            f"passing through: {why}\n")
+
+    def _unblock_text(self, blocking: Dict[str, Any], route: "_Route") -> str:
+        """The hook layer tells the human how to lift a block (narrowest first:
+        `prismor allow <rule>` … `prismor pause`). The gateway said nothing,
+        so a mirrored block read as a dead end — the person at the keyboard
+        was left guessing which command undoes it, and the first live session
+        ended with the whole mirror being ripped out by hand. Same text here,
+        plus the mirror's own two exits."""
+        lines: List[str] = []
+        try:
+            from prismor.runtime import unblock as _unblock
+            from prismor.runtime.enterprise import identity as _identity
+            from prismor.runtime.enterprise import workspace_scope as _scope
+            text = _unblock.format_unblock(
+                blocking, workspace=self.workspace, session_id=self.session_id,
+                org_managed=_scope.is_managed(self.workspace),
+                enrolled=_identity.is_enrolled())
+            if text:
+                lines.append(text)
+        except Exception:
+            pass  # best-effort — a block must never depend on its own help text
+        if route.upstream.spec.local:
+            lines.append(
+                "This tool runs through the Prismor mirror. From your own terminal:\n"
+                "  prismor pause          lift enforcement for 24h (no restart needed)\n"
+                "  prismor mirror off     hand Bash/Read/Edit back to the agent's native tools "
+                "(takes effect on the next session)")
+        return "\n\n".join(lines)
+
+    def _redact_result(self, result: Any, *, data_boundary: bool = True) -> Any:
+        """Mask registered cloak secrets and classified data-boundary values in
+        a mirrored tool's output.
+
+        Best-effort by design: a redaction failure must not fail the call
+        closed, because the pre-call policy has already run and the scan below
+        still gets a vote. Two passes, cheapest first — the cloak store is an
+        exact-value substring swap, the data-boundary classifier is pattern
+        work over the same text.
+        """
+        if not isinstance(result, dict):
+            return result
+        content = result.get("content")
+        if not isinstance(content, list):
+            return result
+        changed = False
+        out: List[Any] = []
+        for block in content:
+            if not (isinstance(block, dict) and isinstance(block.get("text"), str)):
+                out.append(block)
+                continue
+            text = original = block["text"]
+            try:
+                from prismor.runtime.cloaking.runtime import scrub_text
+                text = scrub_text(text)
+            except Exception:
+                pass
+            if data_boundary:
+                try:
+                    from prismor.runtime.data_boundary import redact_payload
+                    redacted = redact_payload(text, workspace=self.workspace)
+                    if isinstance(redacted, str):
+                        text = redacted
+                except Exception:
+                    pass
+            if text != original:
+                changed = True
+                block = {**block, "text": text}
+            out.append(block)
+        if not changed:
+            return result
+        sys.stderr.write("[prismor-gateway] redacted sensitive values from mirrored tool output\n")
+        return {**result, "content": out}
 
     def _egress_guard(self, spec: UpstreamSpec) -> None:
         """Screen a remote upstream's URL before the gateway dials it.
@@ -847,12 +1060,21 @@ class Gateway:
     # ── event builders ───────────────────────────────────────────────────
 
     def _event_base(self, route: _Route, agent_event: str) -> Dict[str, Any]:
+        # A mirrored built-in reports under its NATIVE name ("Bash", "Read"),
+        # not "mcp__prismor__Bash". The tool is the same tool — only the
+        # transport changed — so every existing rule, deny list, allow entry
+        # and console filter written against "Bash" must keep matching. Naming
+        # it as an MCP tool would silently exempt it from all of them.
+        tool_name = (route.tool if route.upstream.spec.local
+                     else f"mcp__{route.server}__{route.tool}")
         metadata: Dict[str, Any] = {
             "cwd": str(self.workspace),
             # The REAL server name — matches trifecta globs, tool denies,
             # and control-plane parseToolName. See module docstring.
-            "tool_name": f"mcp__{route.server}__{route.tool}",
+            "tool_name": tool_name,
         }
+        if route.upstream.spec.local:
+            metadata["mirrored"] = True
         if route.meta_tags:
             # Server-declared tags ride on the event; trifecta consumes them
             # as a classification tier below the explicit org map.
@@ -867,6 +1089,14 @@ class Gateway:
 
     def _build_call_event(self, route: _Route, arguments: Any) -> Dict[str, Any]:
         base = self._event_base(route, "PreToolUse")
+        if route.upstream.spec.local:
+            # Native event shape ("shell"/"file_read"/"file_write") so the
+            # mirrored tool is screened by the real command and path rules
+            # rather than the generic MCP-payload path.
+            from prismor.runtime import mirror
+            shaped = mirror.shape_call_event(route.tool, arguments)
+            if shaped is not None:
+                return {**base, **shaped}
         try:
             args_text = json.dumps(arguments, default=str)
         except Exception:
@@ -880,8 +1110,15 @@ class Gateway:
                     "outbound_payload": args_text, **mcp_meta}
         return {**base, "type": "tool_result", "response": args_text, **mcp_meta}
 
-    def _build_result_event(self, route: _Route, result: Any) -> Dict[str, Any]:
+    def _build_result_event(self, route: _Route, result: Any,
+                            arguments: Any = None) -> Dict[str, Any]:
         base = self._event_base(route, "PostToolUse")
+        if route.upstream.spec.local:
+            from prismor.runtime import mirror
+            shaped = mirror.shape_result_event(
+                route.tool, arguments, _extract_mcp_response_text(result))
+            if shaped is not None:
+                return {**base, **shaped}
         event = {**base, "type": "tool_result",
                  "response": _extract_mcp_response_text(result),
                  "mcp_server": route.server, "mcp_tool": route.tool}
@@ -906,7 +1143,41 @@ class Gateway:
         return _handler
 
 
-def _blocked_result(prefix: str, blocking: Dict[str, Any]) -> Dict[str, Any]:
+#: Result-side finding categories the gateway withholds a response over. A
+#: poisoned tool result is dangerous because of what it makes the MODEL do next
+#: (follow an injected instruction) or what it leaks (a secret the redactor did
+#: not mask); both are worth stopping even though the tool already ran.
+_WITHHOLD_CATEGORIES = frozenset({"prompt_injection", "prompt_injection_semantic",
+                                  "secret_access", "secret_exfiltration",
+                                  "data_boundary", "pii"})
+_WITHHOLD_ACTION_RANK = {"block": 0, "step_up": 1, "defer": 2, "modify": 3}
+
+
+def _result_withhold_finding(findings: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Strongest enforce-mode finding that justifies withholding a tool result.
+
+    ``should_block`` deliberately returns nothing on a post-action event — a
+    hook cannot recall a tool that already ran. The gateway can: it still holds
+    the response. So it makes its own post-call decision here, restricted to the
+    finding categories where withholding the *output* is the actual mitigation
+    (injection, leaked secrets), and only for findings the policy already put in
+    enforce mode. Returns None when nothing qualifies (observe-only findings,
+    inert-context matches, unrelated categories).
+    """
+    eligible = [
+        f for f in (findings or [])
+        if str(f.get("mode", "observe")).lower() == "enforce"
+        and not f.get("contextInert")
+        and f.get("category") in _WITHHOLD_CATEGORIES
+    ]
+    if not eligible:
+        return None
+    return min(eligible, key=lambda f: _WITHHOLD_ACTION_RANK.get(
+        str(f.get("action") or "block").lower(), 0))
+
+
+def _blocked_result(prefix: str, blocking: Dict[str, Any],
+                    unblock: str = "") -> Dict[str, Any]:
     parts = [f"{prefix}: [{blocking.get('severity', 'high')}] "
              f"{blocking.get('title', 'policy violation')}"]
     if blocking.get("ruleId"):
@@ -915,6 +1186,9 @@ def _blocked_result(prefix: str, blocking: Dict[str, Any]) -> Dict[str, Any]:
         parts.append(str(blocking["evidence"]))
     if blocking.get("remediation"):
         parts.append(f"Recommended fix: {blocking['remediation']}")
+    if unblock:
+        parts.append("")
+        parts.append(unblock)
     return {"content": [{"type": "text", "text": "\n".join(parts)}],
             "isError": True}
 
@@ -1158,7 +1432,22 @@ def run_gateway(args, workspace: Path) -> int:
     if not specs:
         config = getattr(args, "config", None)
         path = Path(config).expanduser() if config else DEFAULT_GATEWAY_CONFIG
-        specs = load_gateway_config(path)
+        # --mirror alone is a complete, useful configuration (guarded built-ins
+        # with no downstream MCP servers), so a config that is missing OR
+        # present-but-empty ({"mcpServers": {}}) is not an error in that case —
+        # the mirror is appended below regardless. Without this, a serverless
+        # config aborts the whole gateway and the host (e.g. Codex) sees zero
+        # tools even though the mirror was requested.
+        if getattr(args, "mirror", False):
+            try:
+                specs = load_gateway_config(path) if path.exists() else []
+            except GatewayConfigError:
+                specs = []
+        else:
+            specs = load_gateway_config(path)
+    if getattr(args, "mirror", False) and not any(s.local for s in specs):
+        specs.append(UpstreamSpec(name=MIRROR_SPEC_NAME, local=True,
+                                  transport="local"))
 
     gateway = Gateway(specs, workspace=workspace,
                       mode=getattr(args, "mode", "observe") or "observe",
@@ -1176,7 +1465,38 @@ def run_gateway(args, workspace: Path) -> int:
     except (ValueError, OSError):
         pass  # not the main thread / unsupported platform
 
+    # Tell the host's hook layer that these built-ins are already screened here,
+    # so the same call is not evaluated and logged a second time as
+    # mcp__<server>__Bash. Cleared on the way out, and pid-guarded so a crash
+    # cannot leave screening suppressed.
+    mirrored = any(s.local for s in specs)
+    if mirrored:
+        try:
+            from prismor.runtime import mirror as _mirror
+            _mirror.mark_active(workspace)
+        except Exception:
+            pass
+
+    state = ""
+    try:
+        from prismor.runtime import mirror as _mirror
+        pt = _mirror.passthrough_state(workspace if mirrored else None)
+        if pt is not None:
+            state = (" PAUSED (pass-through until `prismor resume`)"
+                     if pt.get("source") == "pause"
+                     else " pass-through (mirror override off)")
+    except Exception:
+        pass
     sys.stderr.write(
         f"[prismor-gateway] serving {len(specs)} upstream server(s) "
-        f"session={gateway.session_id} mode={gateway.mode}\n")
-    return gateway.serve_stdio()
+        f"session={gateway.session_id} mode={gateway.mode}"
+        f"{' mirror=on' if mirrored else ''}{state}\n")
+    try:
+        return gateway.serve_stdio()
+    finally:
+        if mirrored:
+            try:
+                from prismor.runtime import mirror as _mirror
+                _mirror.clear_active(workspace)
+            except Exception:
+                pass
