@@ -1,7 +1,26 @@
 ## [Unreleased]
 
+## [1.43.0] — 2026-08-20
+
 ### Added
+- **Mirrored built-in tools.** Prismor can serve `Bash`, `Read`, `Write`, `Edit`, `Glob` and `Grep` as MCP tools it executes itself, so policy runs before the call and the output is redacted after — the one thing a `PreToolUse` hook structurally cannot do, and the only way to govern an agent that has no hook protocol at all. `prismor mirror on|off|status|passthrough` wires it into a host and undoes exactly what it wired; `on` starts the server and completes an MCP handshake before it disables anything, so a broken install can never leave the agent with no tools. Wired and verified against real sessions on Claude Code (per project), Codex (machine-wide) and OpenCode (per project — the only interposition point it has). Docs: `docs/governance-surfaces.md`, `docs/mcp-gateway.md`.
+- `prismor setup` shows each agent's governance surface (hooks / hooks + MCP / MCP only / no interception), names the agents that have no hook protocol instead of omitting them, and offers the mirror as an explicit per-agent opt-in. Hooks remain the recommendation and the default; `--non-interactive` never installs the mirror.
+- `prismor mirror passthrough on|off` runs mirrored built-ins ungoverned without a restart, for when the mirror is in the way but you do not want to uninstall it.
+- `prismor dashboard --workspace` is accepted (it was resolved internally but rejected by the argument parser).
+
 - **Claude Inference Hooks.** `prismor inference-hook serve` runs the AI security server behind Claude Enterprise Inference hooks: Anthropic POSTs each governed prompt from claude.ai, Claude Code and Cowork as a signed prompt frame; Prismor fans the transcript into canonical events, runs the normal policy pipeline (plus a channel deny floor for PII / credentials / prompt injection and a credential-in-transcript screen using the Cloak classifier) and answers `{"action": "allow"|"deny", "deny_reason", "reference_id"}` inside the verdict timeout. Standard Webhooks signature verification (`whsec_`, rotation grace, constant-time), tenant resolution from the signed `tenant_id`, always-HTTP-200 verdicts so a policy deny is never a webhook failure, `webhook-id` idempotency, shadow mode, fail-closed by default. `prismor inference-hook test` sends signed sample frames (or evaluates in-process); `prismor inference-hook secret` mints a secret. Docs: `docs/inference-hook.md`.
+
+### Fixed
+- **Mirroring silently disabled Cloak decloaking.** The cloaking hook matches the exact tool name `Bash`, so serving the tool over MCP stopped it firing and placeholders reached the shell literally. Substitution now happens inside the mirror's executor, after policy has judged the placeholder form, so the real secret never reaches policy, telemetry or the audit trail.
+- `prismor pause` now reaches the MCP gateway. It previously suspended only the hook layer, so a paused machine kept blocking mirrored and remote MCP calls with no way to stop it short of uninstalling.
+- Pause no longer switches off secret masking. It suspends enforcement and data-boundary redaction; masking of registered secret values keeps running, as it always has on the hook path.
+- Pass-through (mirror override off) keeps serving its tools instead of serving none. Previously it left an agent whose native tools were disabled with no tools at all.
+- A blocked mirrored call now carries the same unblock guidance the hook path gives, plus the mirror's own exits.
+
+### Changed
+- **Policy YAML is no longer re-parsed on every evaluation.** One `evaluate_tool_call` built two `PolicyEngine`s and the gateway evaluates twice per call, so a single mirrored tool call parsed a 90 KB rule file four times. Parsed documents are now cached by content hash (so an edited policy can never be served stale) and libyaml's loader is used when available. Measured on a 2-core box: mirrored `Read` 667 ms → 101 ms, blocked `Bash` 378 ms → 136 ms, the hook path 625 ms → 421 ms per call, and the test suite 105 s → 76 s.
+- `prismor-self-edit` covers `prismor mirror on|off|passthrough` and `.prismor/mirror.json`, so an agent whose `Bash` *is* the mirror cannot hand itself the native tools back. `prismor mirror status` stays available to it.
+
 
 ## [1.42.2] — 2026-08-16
 
