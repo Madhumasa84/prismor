@@ -168,8 +168,22 @@ def coverage(workspace: Path) -> Dict[str, Dict[str, bool]]:
 
 
 def unguarded_agents(workspace: Path) -> List[str]:
-    """Detected agents with no Prismor hook at any scope — trivially bypassable."""
-    return [a for a, s in coverage(workspace).items() if not (s["project"] or s["global"])]
+    """Detected agents Prismor could govern but currently does not.
+
+    Hooks are not the only surface. An agent the MCP mirror governs is not
+    unguarded, and an agent with no interception surface at all (no hooks, and
+    built-ins that cannot be switched off) is not a coverage gap either — it is
+    unsupported, and listing it makes the gap count unactionable. Both used to
+    be reported here, which sent `ensure_global_coverage` off trying to install
+    hooks into agents that have no hook protocol.
+    """
+    try:
+        from prismor.runtime.surfaces import ungoverned  # lazy: import cycle
+        return ungoverned(workspace)
+    except Exception:
+        # Never let the richer answer break the caller: fall back to the
+        # hooks-only view rather than reporting no gaps at all.
+        return [a for a, s in coverage(workspace).items() if not (s["project"] or s["global"])]
 
 
 def ensure_global_coverage(*, repo_root: Path, workspace: Path, mode: str = "observe") -> List[str]:
@@ -186,6 +200,18 @@ def ensure_global_coverage(*, repo_root: Path, workspace: Path, mode: str = "obs
         gaps = unguarded_agents(workspace)
     except Exception:
         return repaired
+    # Heals by installing a HOOK, so it may only act on agents that have one.
+    # A mirror-only agent with nothing on is a real gap, but not one this
+    # function can close — asking install_hooks for it could only ever fail.
+    # Asked per agent rather than via surfaces.resolve() so this keeps using
+    # unguarded_agents() as its one source of gaps (callers stub that), and so
+    # it does not repeat resolve()'s filesystem scan on the refresh path; the
+    # registry lookup behind governance() is cached.
+    try:
+        from prismor.runtime.integrations.registry import governance
+        gaps = [a for a in gaps if governance(a).get("hooks")]
+    except Exception:
+        pass  # capability unknown: fall back to attempting every gap
     for agent in gaps:
         try:
             install_hooks(repo_root=repo_root, workspace=workspace, agent=agent, scope="global", mode=mode)

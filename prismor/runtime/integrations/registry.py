@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import yaml
@@ -75,12 +76,19 @@ def registry_path() -> Path:
     return _REGISTRY_PATH
 
 
+@lru_cache(maxsize=4)
+def _parsed(src: Path) -> Tuple[Integration, ...]:
+    """Parse+cache one registry file. `get`/`by_surface`/`governance` each
+    reparsed the whole YAML per call, so asking about N agents cost N parses of
+    a file that ships inside the package and cannot change under a running
+    process. Returns a tuple: a cached mutable list would alias across callers."""
+    raw = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
+    return tuple(Integration.from_dict(e) for e in (raw.get("agents") or []))
+
+
 def load_registry(path: Optional[Path] = None) -> List[Integration]:
     """Parse the registry into ``Integration`` objects (declaration order)."""
-    src = path or _REGISTRY_PATH
-    raw = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
-    entries = raw.get("agents") or []
-    return [Integration.from_dict(e) for e in entries]
+    return list(_parsed(path or _REGISTRY_PATH))
 
 
 def get(agent_id: str, path: Optional[Path] = None) -> Optional[Integration]:

@@ -17,6 +17,9 @@ where they can intercept and what they can do there:
 | **eval-server** | non-Python callers and external proxies | yes | yes | yes |
 | **Inference hook** | a hosted transcript-turn channel | yes | no | no |
 
+Run `prismor surfaces` to see which of these are switched on for each agent
+detected on this machine, and which are possible but off.
+
 The rest of this page is about the two that govern a coding agent on a
 developer's machine, where the choice is a real decision. For the others:
 adapters ship with each framework (see `docs/frameworks-overview.md`), the
