@@ -32,6 +32,15 @@ Prismor is highly customizable based on user's own policies. Observe or enforce 
 </p>
 <p align="center"><sub>Plus Grok Build, Crush, OpenHands, Qwen Code, Continue CLI, Goose, Hermes, OpenClaw, Devin CLI, Factory Droid, Aider, and more — see <a href="AGENT_INTEGRATIONS.md">AGENT_INTEGRATIONS.md</a> for the full coverage matrix</sub></p>
 
+<h3 align="center">Works With</h3>
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/works-with/claude-dark.svg"><img src="assets/works-with/claude-light.svg" width="28" height="28" alt="Claude" title="Claude"></picture>&nbsp;&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/works-with/openai-dark.svg"><img src="assets/works-with/openai-light.svg" width="28" height="28" alt="OpenAI" title="OpenAI"></picture>&nbsp;&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/works-with/gemini-dark.svg"><img src="assets/works-with/gemini-light.svg" width="28" height="28" alt="Gemini" title="Gemini"></picture>&nbsp;&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/works-with/copilot-dark.svg"><img src="assets/works-with/copilot-light.svg" width="28" height="28" alt="GitHub Copilot" title="GitHub Copilot"></picture>&nbsp;&nbsp;&nbsp;
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/works-with/cursor-dark.svg"><img src="assets/works-with/cursor-light.svg" width="28" height="28" alt="Cursor" title="Cursor"></picture>
+</p>
+
 ---
 <p align="center">
   <img src="assets/readme-demo.gif" width="90%" alt="Prismor demo"/>
