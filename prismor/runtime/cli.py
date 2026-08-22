@@ -1173,6 +1173,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     # ── status: one-shot health check (mode, hooks, cloak, latest session) ──
+    if args.command == "surfaces":
+        _print_surfaces(workspace)
+        return
+
     if args.command == "status":
         if getattr(args, "all", False):
             _print_dashboard(days=getattr(args, "days", 7))
@@ -2867,6 +2871,12 @@ def build_parser() -> argparse.ArgumentParser:
     _ep.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     _ep.add_argument("--workspace", default=None, help="Workspace path for policy/IAM (default: cwd)")
     _ep.add_argument("--api-key", default=None, help="Require Authorization: Bearer <key> on /v1/evaluate (default: $PRISMOR_EVAL_KEY); needed when exposing beyond localhost")
+
+    # ── surfaces: which enforcement surfaces are governing this machine ──
+    subparsers.add_parser(
+        "surfaces",
+        help="Show which enforcement surfaces (hooks, MCP mirror, gateway) are active",
+    )
 
     # ── inference-hook: Claude Inference Hooks AI-security server ──────
     def _add_ih_serve_args(p: argparse.ArgumentParser) -> None:
@@ -5819,3 +5829,61 @@ def format_tokens(payload: Dict[str, Any]) -> str:
 
 if __name__ == "__main__":
     main()
+
+
+def _print_surfaces(workspace: Path) -> None:
+    """Which enforcement surfaces are governing this machine, and which could be.
+
+    Prismor can sit in front of an agent more than one way and the surfaces are
+    not interchangeable — so "off", "not possible here", and "governed a
+    different way" have to read differently. A single "not governed" for all
+    three is what makes an unsupported agent look like a misconfiguration.
+    """
+    from prismor.runtime import surfaces as _surfaces
+    from prismor.runtime.contract import surface as _surface
+
+    rows = _surfaces.resolve(workspace)
+    gw = _surfaces.gateway(workspace)
+
+    print(f"\n  {_color('PRISMOR', _BOLD)}  enforcement surfaces — {workspace}\n")
+
+    if not rows:
+        print(f"  {_color('No coding agents detected on this machine.', _DIM)}\n")
+    else:
+        print(f"  {_color('AGENT', _DIM)}{'':<10}{_color('HOOKS', _DIM)}      "
+              f"{_color('MIRROR', _DIM)}     {_color('GOVERNED BY', _DIM)}")
+        for agent in sorted(rows):
+            s = rows[agent]
+            def cell(sid: str) -> str:
+                if sid in s["active"]:
+                    return _color("on   ", _GREEN)
+                if sid in s["possible"]:
+                    return _color("off  ", _DIM)
+                return _color("n/a  ", _DIM)
+            if s["active"]:
+                by = _color(" + ".join(s["active"]), _GREEN)
+            elif s["possible"]:
+                by = _color("nothing — ungoverned", _YELLOW)
+            else:
+                by = _color("no interception surface exists", _DIM)
+            print(f"  {agent:<15}{cell('hook')}      {cell('mirror')}     {by}")
+
+    live = gw["live"]
+    if gw["configured"]:
+        state = (_color(f"{live} live", _GREEN) if live
+                 else _color("configured, starts with the next session", _DIM))
+        print(f"\n  {_color('MCP gateway', _DIM)}    {gw['configured']} upstream(s) · {state}")
+    else:
+        print(f"\n  {_color('MCP gateway', _DIM)}    not configured")
+
+    gaps = [a for a, s in rows.items() if s["possible"] and not s["active"]]
+    if gaps:
+        print(f"\n  {_color('Ungoverned:', _YELLOW)} {', '.join(sorted(gaps))}")
+        print(_color("  Prismor cannot constrain an agent it does not sit in front of.", _DIM))
+
+    print()
+    print(_color("  prismor setup                 install hooks (widest coverage)", _DIM))
+    print(_color("  prismor mirror on             serve built-ins over MCP (adds output redaction)", _DIM))
+    print(_color("  prismor mcp-gateway --help    front your MCP servers", _DIM))
+    print(_color("  docs/governance-surfaces.md   which surface to use per agent", _DIM))
+    print()
