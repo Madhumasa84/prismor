@@ -1371,7 +1371,10 @@ def default_workspace() -> Path:
     home = os.environ.get("PRISMOR_HOME") or str(Path.home() / ".prismor")
     ws = Path(home) / "surfaces" / "proxy"
     ws.mkdir(parents=True, exist_ok=True)
-    return ws
+    try:
+        return ws.resolve()
+    except OSError:
+        return ws
 
 
 def run_proxy(host: str = "127.0.0.1", port: int = 7080,
@@ -1380,6 +1383,10 @@ def run_proxy(host: str = "127.0.0.1", port: int = 7080,
               session_id: str = "", agent_name: str = "") -> None:
     """Start the LLM proxy (blocking)."""
     ws = workspace or default_workspace()
+    try:
+        ws = ws.resolve()
+    except OSError:
+        pass
     config = ProxyConfig.load(config_path if config_path is not None
                               else default_config_path())
     ProxyHandler.config = config

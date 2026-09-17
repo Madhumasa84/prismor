@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 try:  # POSIX advisory locks; absent on Windows.
     import fcntl
@@ -194,9 +194,25 @@ def _registry_path() -> Path:
     return prismor_home() / "workspaces.json"
 
 
+def canonical_workspace_path(workspace: Optional[Union[Path, str]]) -> str:
+    """Return the resolved, canonical path string for a workspace.
+
+    Resolves symlinks so that query and write paths agree regardless of
+    whether PRISMOR_HOME or --workspace traversed a symlink (e.g. macOS /tmp
+    -> /private/tmp, bind mounts, symlinked home dirs).
+    """
+    if not workspace:
+        return ""
+    p = Path(workspace) if isinstance(workspace, str) else workspace
+    try:
+        return str(p.resolve())
+    except OSError:
+        return str(p)
+
+
 def register_workspace(workspace: Path) -> None:
     """Add a workspace to the global registry (idempotent)."""
-    ws = str(workspace.resolve())
+    ws = canonical_workspace_path(workspace)
     reg = _registry_path()
     paths: List[str] = []
     if reg.exists():
@@ -621,6 +637,37 @@ def _dedupe_runtime_events_once(connection: sqlite3.Connection, db_path: Path) -
         pass
 
 
+def _canonicalize_workspace_paths_once(connection: sqlite3.Connection, db_path: Path) -> None:
+    """Canonicalize (resolve symlinks) any legacy workspace_path rows.
+
+    Fixes PrismorSec/prismor#416: earlier versions wrote raw str(workspace)
+    without resolving symlinks, causing list_sessions to miss rows on platforms
+    like macOS where /tmp traverses a symlink.
+    """
+    marker = db_path.parent / "migrations" / "runtime-state" / "canonicalize-workspace-paths-v1.json"
+    if marker.exists():
+        return
+    try:
+        rows = connection.execute(
+            "SELECT DISTINCT workspace_path FROM sessions WHERE workspace_path IS NOT NULL AND workspace_path != ''"
+        ).fetchall()
+        for (wp,) in rows:
+            if wp:
+                resolved = canonical_workspace_path(wp)
+                if resolved and resolved != wp:
+                    connection.execute("UPDATE sessions SET workspace_path = ? WHERE workspace_path = ?", (resolved, wp))
+                    for table in ("package_inventory", "token_usage", "tool_output_size", "supply_chain_events"):
+                        try:
+                            connection.execute(f"UPDATE {table} SET workspace_path = ? WHERE workspace_path = ?", (resolved, wp))
+                        except sqlite3.OperationalError:
+                            pass
+        connection.commit()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"version": 1}, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def initialize_database(workspace: Path) -> Path:
     ensure_data_dirs(workspace)
     db_path = get_db_path(workspace)
@@ -707,6 +754,7 @@ def initialize_database(workspace: Path) -> Path:
         # indexes reference (e.g. supply_chain_events.session_id).
         _migrate_schema(connection)
         _dedupe_runtime_events_once(connection, db_path)
+        _canonicalize_workspace_paths_once(connection, db_path)
         connection.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
@@ -767,7 +815,7 @@ def save_session_snapshot(
                 agent,
                 agent_name or agent,
                 source,
-                str(workspace),
+                canonical_workspace_path(workspace),
                 repo_url,
                 started_at,
                 updated_at,
@@ -986,10 +1034,8 @@ def list_sessions(workspace: Path, limit: int = 20, *, all_workspaces: bool = Fa
                 (limit,),
             ).fetchall()
         else:
-            try:
-                ws_key = str(workspace.resolve())
-            except OSError:
-                ws_key = str(workspace)
+            ws_key = canonical_workspace_path(workspace)
+            ws_raw = str(workspace)
             rows = connection.execute(
                 """
                 SELECT session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
@@ -998,8 +1044,32 @@ def list_sessions(workspace: Path, limit: int = 20, *, all_workspaces: bool = Fa
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
-                (ws_key, str(workspace), limit),
+                (ws_key, ws_raw, limit),
             ).fetchall()
+            if len(rows) < limit:
+                seen_ids = {r["session_id"] for r in rows}
+                candidates = connection.execute(
+                    """
+                    SELECT session_id, agent, source, workspace_path, repo_url, started_at, updated_at, risk_score, findings_count, summary_json
+                    FROM sessions
+                    WHERE workspace_path IS NOT NULL AND workspace_path != '' AND workspace_path != ? AND workspace_path != ?
+                    ORDER BY updated_at DESC
+                    LIMIT 500
+                    """,
+                    (ws_key, ws_raw),
+                ).fetchall()
+                extra_rows = []
+                for cand in candidates:
+                    if cand["session_id"] in seen_ids:
+                        continue
+                    wp = cand["workspace_path"]
+                    if canonical_workspace_path(wp) == ws_key:
+                        extra_rows.append(cand)
+                        seen_ids.add(cand["session_id"])
+                        if len(rows) + len(extra_rows) >= limit:
+                            break
+                if extra_rows:
+                    rows = sorted(list(rows) + extra_rows, key=lambda r: r["updated_at"] or "", reverse=True)[:limit]
     finally:
         connection.close()
     return [_session_from_row(row) for row in rows]
@@ -2158,7 +2228,7 @@ def write_supply_chain_event(
                 ) VALUES (?, 'immunity-cli', 'supply_chain', ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    session_id, str(workspace), ts, ts,
+                    session_id, canonical_workspace_path(workspace), ts, ts,
                     max_score, n_findings,
                     json.dumps({
                         "ecosystem": ecosystem,
@@ -2202,7 +2272,7 @@ def write_supply_chain_event(
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        ts, str(workspace), ecosystem,
+                        ts, canonical_workspace_path(workspace), ecosystem,
                         v.spec.name,
                         getattr(v.spec, "version", None) or getattr(v.meta, "version", None) or "",
                         install_cmd,
@@ -2511,7 +2581,7 @@ def record_token_usage(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            message_id, session_id, str(workspace), ts, model,
+            message_id, session_id, canonical_workspace_path(workspace), ts, model,
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cache_1h_tokens,
         ),
     ))
@@ -2539,7 +2609,7 @@ def record_tool_output_size(
             session_id, workspace_path, ts, agent, tool_name, label, size_chars, approx_tokens
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, str(workspace), ts, agent, tool_name, label, size_chars, size_chars // 4),
+        (session_id, canonical_workspace_path(workspace), ts, agent, tool_name, label, size_chars, size_chars // 4),
     )
 
 
@@ -2593,8 +2663,19 @@ def get_token_stats(workspace: Optional[Path] = None, hours: int = 24, limit: in
             "cacheCreationTokens": 0, "cacheHitRate": 0.0, "totalTokens": 0,
             "byTool": [], "topOffenders": [],
         }
-    scope_sql = " AND workspace_path = ?" if workspace else ""
-    window_args = [f"-{hours} hours"] + ([str(workspace)] if workspace else [])
+    ws_key = canonical_workspace_path(workspace) if workspace else ""
+    raw_key = str(workspace) if workspace else ""
+    if workspace:
+        if ws_key and raw_key and ws_key != raw_key:
+            scope_sql = " AND (workspace_path = ? OR workspace_path = ?)"
+            ws_args = [ws_key, raw_key]
+        else:
+            scope_sql = " AND workspace_path = ?"
+            ws_args = [ws_key or raw_key]
+    else:
+        scope_sql = ""
+        ws_args = []
+    window_args = [f"-{hours} hours"] + ws_args
     try:
         row = conn.execute(
             "SELECT COALESCE(SUM(input_tokens),0) as inp,"
