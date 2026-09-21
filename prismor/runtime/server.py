@@ -37,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, parse_qs
+from prismor.runtime.metrics import REGISTRY
 
 from prismor.runtime.store import (
     get_aggregate_stats,
@@ -446,12 +447,12 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             return p if p.exists() else None
         return _SERVER_WORKSPACE
 
-    def do_OPTIONS(self) -> None:  # noqa: N802
+    def do_OPTIONS(self) -> None:
         self.send_response(204)
         self._send_cors()
         self.end_headers()
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         qs = parse_qs(parsed.query, keep_blank_values=False)
@@ -459,7 +460,7 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
         def qstr(key: str, default: str = "") -> str:
             return qs.get(key, [default])[0]
 
-        def qint(key: str, default: int = 1) -> int:
+        def qint(key: str, default: int = 0) -> int:
             try:
                 return int(qs.get(key, [default])[0])
             except (ValueError, TypeError):
@@ -473,10 +474,31 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "ok", "ts": datetime.now(timezone.utc).isoformat()})
             return
 
+        if path == "/metrics":
+            workspace = _SERVER_WORKSPACE or Path.cwd()
+            try:
+                stats = get_aggregate_stats(workspace)
+                if stats:
+                    REGISTRY.set_gauge("prismor_sessions_total", stats.get("sessions_count", 0))
+                    REGISTRY.set_gauge("prismor_events_total", stats.get("events_count", 0))
+                    REGISTRY.set_gauge("prismor_blocked_total", stats.get("blocked_count", 0))
+                    REGISTRY.set_gauge("prismor_findings_total", stats.get("findings_count", 0))
+            except Exception:
+                pass
+
+            payload = REGISTRY.generate_prometheus_text().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self._send_cors()
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
         if path == "/api/mcp-servers":
             workspace = self._resolve_workspace(qs) or Path.cwd()
             try:
-                self._send_json({"servers": _mcp_server_inventory(workspace)})
+                self._send_json({"servers": mcp_server_inventory(workspace)})
             except Exception as exc:
                 self._send_json({"error": str(exc)}, status=500)
             return
@@ -485,30 +507,9 @@ class PrismorRequestHandler(BaseHTTPRequestHandler):
             workspace = self._resolve_workspace(qs) or Path.cwd()
             try:
                 from prismor.runtime.extensions import session_extensions
-                self._send_json(session_extensions(workspace, (qs.get("id") or [""])[0]))
+                self._send_json(session_extensions(workspace, ip=qstr("ip") or "127.0.0.1"))
             except Exception as exc:
                 self._send_json({"error": str(exc)}, status=500)
-            return
-
-        if path == "/api/extensions":
-            workspace = self._resolve_workspace(qs) or Path.cwd()
-            try:
-                from prismor.runtime.extensions import overview
-                self._send_json(overview(workspace))
-            except Exception as exc:
-                self._send_json({"error": str(exc)}, status=500)
-            return
-
-        if path == "/api/workspaces":
-            workspaces = list_registered_workspaces()
-            enrollment = get_enrollment()
-            primary = str(_SERVER_WORKSPACE) if _SERVER_WORKSPACE else None
-            self._send_json({
-                "workspaces": [str(w) for w in workspaces],
-                "primary": primary,
-                "home": str(prismor_home()),
-                "enrollment": enrollment,
-            })
             return
 
         if path == "/api/policy":
