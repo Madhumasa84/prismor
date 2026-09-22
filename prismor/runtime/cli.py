@@ -954,7 +954,16 @@ def main(argv: Optional[List[str]] = None) -> None:
             sys.stderr.write("error: either a value or --from-log is required\n")
             raise SystemExit(2)
 
-        if args.type == "command":
+        if args.explain:
+            # Explaining means showing what an allowlist swallowed too, which
+            # check_command/check_path do not surface.
+            _etype = {"command": "shell", "read": "file_read",
+                      "write": "file_write", "text": "text"}[args.type]
+            _field = "path" if args.type in ("read", "write") else (
+                "text" if args.type == "text" else "command")
+            findings = engine.evaluate({"type": _etype, _field: args.value}, 1,
+                                       include_suppressed=True)
+        elif args.type == "command":
             findings = engine.check_command(args.value)
         elif args.type in ("read", "write"):
             event_type = "file_read" if args.type == "read" else "file_write"
@@ -3323,7 +3332,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument("--workspace", help="Workspace path for project-level policy")
     check_parser.add_argument("--explain", action="store_true",
-                              help="Show the rule patterns and matched substring for each finding")
+                              help="Show, per finding, which policy layer defined the rule, "
+                                   "why it resolves to observe or enforce, and its pattern")
     check_parser.add_argument("--from-log", metavar="PATH",
                               help="Replay a JSONL session log and check every event")
     check_parser.add_argument("--suggest-allowlist", action="store_true",
@@ -4381,8 +4391,19 @@ def _print_findings(
     for f in findings:
         sev = f["severity"]
         color = _RED if sev == "CRITICAL" else _YELLOW if sev == "HIGH" else _DIM
-        action_label = _effective_verdict(f)
+        suppressed = f.get("suppressedBy")
+        if suppressed:
+            # It matched; an exception swallowed it. Saying so is the whole
+            # point — a silently dropped finding looks like a rule that never
+            # fired, and that is how a too-broad allowlist survives review.
+            color = _DIM
+            action_label = "SUPPRESSED"
+        else:
+            action_label = _effective_verdict(f)
         print(_color(f"[{sev}]", color) + f" {f['title']}  " + _color(f"({action_label})", color))
+        if suppressed:
+            reason = str(suppressed.get("reason") or "no reason given")
+            print(_color(f"  suppressed by allowlist {suppressed.get('id')!r} — {reason}", _DIM))
         evidence = str(f.get("evidence", "")).split("\n", 1)[0]
         print(f"  rule: {f.get('ruleId', '?')}  evidence: {evidence}")
 
@@ -4390,6 +4411,18 @@ def _print_findings(
             rule = next((r for r in engine.rules if r.id == f.get("ruleId")), None)
             if rule is not None:
                 print(f"  category: {f.get('category')}  action: {f.get('action')}")
+                # The two questions --explain exists to answer: who set this
+                # rule, and why does `action: block` sometimes only warn?
+                print(f"  defined by: {rule.layer} policy layer")
+                try:
+                    mode, why = engine.explain_mode(rule)
+                    verdict = "blocks" if mode == "enforce" else "reports only"
+                    print(f"  mode: {mode} — {why}  →  {verdict}")
+                except Exception:
+                    pass
+                if f.get("contextInert"):
+                    print("  context: matched inside inert text "
+                          "(commit message, PR body, grep pattern) — reports, never blocks")
                 print(f"  event_types: {sorted(rule.event_types)}")
                 print(f"  fields: {rule.fields}")
                 print(f"  pattern: {_truncate_str(rule.patterns.pattern, 160)}")
