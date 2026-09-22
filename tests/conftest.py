@@ -66,6 +66,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytest
 
+# Ensure tests.conftest and conftest refer to the same module object
+if __name__ in sys.modules:
+    sys.modules.setdefault("tests.conftest", sys.modules[__name__])
+    sys.modules.setdefault("conftest", sys.modules[__name__])
+
 # Framework adapter imports
 # Env vars that OUTRANK $PRISMOR_HOME, cleared before any test runs.
 #
@@ -264,6 +269,9 @@ def _index_module(mod: types.ModuleType) -> None:
             _BASELINE[key] = value
             _SLOTS.append((mod, name, attr, None, value, key))
         elif inspect.isclass(value) and getattr(value, "__module__", "").startswith("prismor"):
+            class_key = (mod, name, attr, None)
+            _BASELINE[class_key] = value
+            _SLOTS.append((mod, name, attr, None, value, class_key))
             try:
                 class_items = list(vars(value).items())
             except Exception:
@@ -311,19 +319,27 @@ def _resolve(key: _SnapKey) -> Tuple[Any, Optional[str]]:
 
 
 def _restore(key: _SnapKey, original: Any) -> str:
-    _mod, mod_name, attr, cattr = key
+    mod, mod_name, attr, cattr = key
     target, target_attr = _resolve(key)
     label = f"{mod_name}.{attr}" + (f".{cattr}" if cattr else "")
-    if target is None or target_attr is None:
-        return label
-    try:
-        if original is _MISSING:
-            if hasattr(target, target_attr):
-                delattr(target, target_attr)
-        else:
-            setattr(target, target_attr, original)
-    except Exception:
-        pass
+    if target is not None and target_attr is not None:
+        try:
+            if original is _MISSING:
+                if hasattr(target, target_attr):
+                    delattr(target, target_attr)
+            else:
+                setattr(target, target_attr, original)
+        except Exception:
+            pass
+    if mod is not None and mod is not target and cattr is None:
+        try:
+            if original is _MISSING:
+                if hasattr(mod, attr):
+                    delattr(mod, attr)
+            else:
+                setattr(mod, attr, original)
+        except Exception:
+            pass
     return label
 
 
@@ -334,7 +350,7 @@ def _snapshot_sys_modules() -> Dict[str, types.ModuleType]:
 
 
 def _restore_sys_modules(before: Dict[str, types.ModuleType]) -> None:
-    """Undo a test's re-import of a ``prismor`` module.
+    """Undo a test's re-import or addition of a ``prismor`` module.
 
     Several tests drop a module from ``sys.modules`` to reset a module-level
     cache. When that name is imported again a *second* module object appears,
@@ -348,6 +364,18 @@ def _restore_sys_modules(before: Dict[str, types.ModuleType]) -> None:
     canonical object per name, so patching a module means patching the module.
     """
     import sys
+
+    # Remove modules added to sys.modules during the test
+    for name in list(sys.modules.keys()):
+        if name.startswith("prismor") and name not in before:
+            sys.modules.pop(name, None)
+            parent_name, _, leaf = name.rpartition(".")
+            parent = sys.modules.get(parent_name) if parent_name else None
+            if parent is not None and hasattr(parent, leaf):
+                try:
+                    delattr(parent, leaf)
+                except Exception:
+                    pass
 
     for name, original in before.items():
         if sys.modules.get(name) is original:
@@ -382,23 +410,74 @@ def _no_module_state_leaks() -> Any:
         _restore_sys_modules(modules_before)
         _ensure_indexed()
         leaked = []
-        for mod, mod_name, attr, cattr, pristine, key in _SLOTS:
+        for idx, (mod, mod_name, attr, cattr, pristine, key) in enumerate(_SLOTS):
             if cattr is None:
                 try:
                     current = vars(mod).get(attr, _MISSING)
                 except Exception:
-                    current = getattr(mod, attr, _MISSING)
+                    try:
+                        current = getattr(mod, attr, _MISSING)
+                    except Exception:
+                        current = _MISSING
             else:
-                cls = vars(mod).get(attr, None)
+                try:
+                    cls = vars(mod).get(attr, None)
+                except Exception:
+                    try:
+                        cls = getattr(mod, attr, None)
+                    except Exception:
+                        cls = None
                 if cls is None:
                     current = _MISSING
                 else:
                     try:
                         current = vars(cls).get(cattr, _MISSING)
                     except Exception:
-                        current = getattr(cls, cattr, _MISSING)
+                        try:
+                            current = getattr(cls, cattr, _MISSING)
+                        except Exception:
+                            current = _MISSING
+            original_baseline = _BASELINE.get(key, pristine)
+            if current is original_baseline:
+                if pristine is not original_baseline:
+                    _SLOTS[idx] = (mod, mod_name, attr, cattr, original_baseline, key)
+                continue
+
             if current is not pristine:
-                leaked.append(_restore(key, pristine))
+                leaked.append(_restore(key, original_baseline))
+                # Check whether the restore actually took. If it failed (e.g.
+                # target rejected setattr or was an unrestorable mock/type),
+                # re-seed this slot's pristine with the post-restore value so
+                # this leak does not cascade into subsequent tests.
+                if cattr is None:
+                    try:
+                        current_after = vars(mod).get(attr, _MISSING)
+                    except Exception:
+                        try:
+                            current_after = getattr(mod, attr, _MISSING)
+                        except Exception:
+                            current_after = _MISSING
+                else:
+                    try:
+                        cls_after = vars(mod).get(attr, None)
+                    except Exception:
+                        try:
+                            cls_after = getattr(mod, attr, None)
+                        except Exception:
+                            cls_after = None
+                    if cls_after is None:
+                        current_after = _MISSING
+                    else:
+                        try:
+                            current_after = vars(cls_after).get(cattr, _MISSING)
+                        except Exception:
+                            try:
+                                current_after = getattr(cls_after, cattr, _MISSING)
+                            except Exception:
+                                current_after = _MISSING
+                if current_after is not original_baseline:
+                    _SLOTS[idx] = (mod, mod_name, attr, cattr, current_after, key)
+
         if leaked:
             leaked = sorted(leaked)
             pytest.fail(
