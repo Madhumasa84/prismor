@@ -2177,6 +2177,7 @@ _HOOK_TIMINGS_DDL = (
     "agent TEXT, detail_json TEXT, "
     "PRIMARY KEY (session_id, ts))"
 )
+_HOOK_TIMINGS_MIGRATED: Set[Path] = set()
 
 
 def record_hook_timing(workspace: Path, session_id: str, ts: str, hook_event: str, hook_ms: int,
@@ -2193,15 +2194,18 @@ def record_hook_timing(workspace: Path, session_id: str, ts: str, hook_event: st
     """
     if not session_id or not ts:
         return
+    db_path = get_db_path(workspace)
     try:
-        conn = sqlite3.connect(get_db_path(workspace), timeout=2)
+        conn = sqlite3.connect(db_path, timeout=2)
         try:
             conn.execute(_HOOK_TIMINGS_DDL)
-            for col in ("agent", "detail_json"):  # tables created before #494
-                try:
-                    conn.execute(f"ALTER TABLE hook_timings ADD COLUMN {col} TEXT")  # constant identifiers  # nosec B608
-                except sqlite3.OperationalError:
-                    pass
+            if db_path not in _HOOK_TIMINGS_MIGRATED:
+                for col in ("agent", "detail_json"):  # tables created before #494
+                    try:
+                        conn.execute(f"ALTER TABLE hook_timings ADD COLUMN {col} TEXT")  # constant identifiers  # nosec B608
+                    except sqlite3.OperationalError:
+                        pass
+                _HOOK_TIMINGS_MIGRATED.add(db_path)
             conn.execute(
                 "INSERT OR REPLACE INTO hook_timings (session_id, ts, hook_event, hook_ms, agent, detail_json) "
                 "VALUES (?, ?, ?, ?, ?, ?)",

@@ -3431,15 +3431,28 @@ def _analyze_within(guard: Any, text: str, budget_s: float) -> Any:
     box: List[Any] = []
     # ponytail: the overrun judge thread is abandoned, not cancelled; the hook
     # process exits right after, and a CLI judge's own timeout reaps its child.
-    t = threading.Thread(target=lambda: box.append(guard.analyze(text)), daemon=True)
+    def _run() -> None:
+        try:
+            box.append(guard.analyze(text))
+        except Exception as exc:
+            import sys
+            sys.stderr.write(f"[prismor] semantic_guard judge error: {exc}\n")
+
+    t = threading.Thread(target=_run, daemon=True)
     t.start()
     t.join(budget_s)
     if box:
         return box[0]
     from prismor.runtime.semantic_guard import _heuristic_analyze
-    _perf.degraded("semantic_judge:budget")
+    if t.is_alive():
+        _perf.degraded("semantic_judge:budget")
+        prefix = f"[LLM budget] judge over {int(budget_s * 1000)}ms budget; "
+    else:
+        _perf.degraded("semantic_judge:error")
+        _perf.RULES.setdefault("semantic-guard", [0, 0, 0.0, 0])[3] += 1
+        prefix = "[LLM error] judge crashed; "
     risk = _heuristic_analyze(text)
-    risk.reason = f"[LLM budget] judge over {int(budget_s * 1000)}ms budget; " + risk.reason
+    risk.reason = prefix + risk.reason
     return risk
 
 
