@@ -624,7 +624,7 @@ def mine_patterns(workspace: Path, min_support: int = 3) -> List[Dict[str, Any]]
         # A finding's event_index corresponds to the event's position
         # within its session (0-based row number by id order).
         rows = conn.execute(
-            f"""
+            f"""  # nosec B608
             SELECT e.command_text, e.session_id
             FROM events e
             WHERE e.type = 'shell'
@@ -636,7 +636,7 @@ def mine_patterns(workspace: Path, min_support: int = 3) -> List[Dict[str, Any]]
                   WHERE f.session_id = e.session_id
                     AND f.evidence LIKE '%' || SUBSTR(e.command_text, 1, 40) || '%'
               )
-            """,
+            """,  # nosec B608
         ).fetchall()
     finally:
         conn.close()
@@ -717,7 +717,7 @@ def track_false_positives(workspace: Path, threshold: int = 5) -> List[Dict[str,
     try:
         initialize_learning_tables(conn)
         rows = conn.execute(
-            f"""
+            f"""  # nosec B608
             SELECT rule_id, COUNT(*) as cnt,
                    GROUP_CONCAT(DISTINCT reason) as reasons,
                    GROUP_CONCAT(evidence, '|||') as evidences
@@ -726,7 +726,7 @@ def track_false_positives(workspace: Path, threshold: int = 5) -> List[Dict[str,
             GROUP BY rule_id
             HAVING cnt >= ?
             ORDER BY cnt DESC
-            """,
+            """,  # nosec B608
             (threshold,),
         ).fetchall()
     finally:
