@@ -624,7 +624,7 @@ def mine_patterns(workspace: Path, min_support: int = 3) -> List[Dict[str, Any]]
         # A finding's event_index corresponds to the event's position
         # within its session (0-based row number by id order).
         rows = conn.execute(
-            f"""  # nosec B608
+            f"""
             SELECT e.command_text, e.session_id
             FROM events e
             WHERE e.type = 'shell'
@@ -717,7 +717,7 @@ def track_false_positives(workspace: Path, threshold: int = 5) -> List[Dict[str,
     try:
         initialize_learning_tables(conn)
         rows = conn.execute(
-            f"""  # nosec B608
+            f"""
             SELECT rule_id, COUNT(*) as cnt,
                    GROUP_CONCAT(DISTINCT reason) as reasons,
                    GROUP_CONCAT(evidence, '|||') as evidences
