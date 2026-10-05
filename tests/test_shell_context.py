@@ -156,6 +156,8 @@ def test_double_quote_command_substitution_blocks_at_runtime(tmp_path, command):
 @pytest.mark.parametrize("command", [
     'echo "chmod 777"; rm -rf /',
     'echo "chmod 777" && rm -rf /',
+    'echo "chmod 777" || rm -rf /',
+    'echo "chmod 777" | rm -rf /',
     'git commit -m "chmod 777"; rm -rf /',
     'printf "%s" "chmod 777"; rm -rf /',
 ])
