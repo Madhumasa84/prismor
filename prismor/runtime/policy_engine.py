@@ -1756,6 +1756,8 @@ class PolicyEngine:
             if event_type == "shell" and matched_evidence:
                 try:
                     from prismor.runtime.shell_context import (
+                        command_substitution_spans,
+                        heredocs,
                         is_inert_match,
                         is_remote_payload,
                         quoted_spans,
@@ -1777,16 +1779,30 @@ class PolicyEngine:
                                 _context_text
                             )
                         )
-                        if not has_executable_quoted_span:
-                            # A quote-evasion match is judged on its dequoted
-                            # spelling, which re-quotes each word for what it
-                            # is (`echo $'\x72m -rf /'` stays an echo argument).
-                            _context_text = (
-                                folded_evidence
-                                if evasion == "shell_quote_obfuscation"
-                                else matched_evidence
+                        has_executable_heredoc_span = any(
+                            h.expands
+                            and bool(
+                                command_substitution_spans(
+                                    _context_text[h.body_start:h.body_end]
+                                )
                             )
-                            _m = rule.patterns.search(_context_text)
+                            for h in heredocs(_context_text)
+                        )
+                        if not has_executable_quoted_span and not has_executable_heredoc_span:
+                            for h in heredocs(_context_text):
+                                if not h.expands and is_inert_match(_context_text, h.body_start, h.body_end):
+                                    context_inert = True
+                                    break
+                            if not context_inert:
+                                # A quote-evasion match is judged on its dequoted
+                                # spelling, which re-quotes each word for what it
+                                # is (`echo $'\x72m -rf /'` stays an echo argument).
+                                _context_text = (
+                                    folded_evidence
+                                    if evasion == "shell_quote_obfuscation"
+                                    else matched_evidence
+                                )
+                                _m = rule.patterns.search(_context_text)
                     if _m is not None:
                         context_inert = is_inert_match(
                             _context_text, _m.start(), _m.end()
