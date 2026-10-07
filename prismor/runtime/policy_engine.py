@@ -1788,21 +1788,19 @@ class PolicyEngine:
                             )
                             for h in heredocs(_context_text)
                         )
+                        # An expanding heredoc with a substitution keeps the
+                        # raw miss: the normalized spelling drops the ``$(``
+                        # and would make the payload look like plain body text.
                         if not has_executable_quoted_span and not has_executable_heredoc_span:
-                            for h in heredocs(_context_text):
-                                if not h.expands and is_inert_match(_context_text, h.body_start, h.body_end):
-                                    context_inert = True
-                                    break
-                            if not context_inert:
-                                # A quote-evasion match is judged on its dequoted
-                                # spelling, which re-quotes each word for what it
-                                # is (`echo $'\x72m -rf /'` stays an echo argument).
-                                _context_text = (
-                                    folded_evidence
-                                    if evasion == "shell_quote_obfuscation"
-                                    else matched_evidence
-                                )
-                                _m = rule.patterns.search(_context_text)
+                            # A quote-evasion match is judged on its dequoted
+                            # spelling, which re-quotes each word for what it
+                            # is (`echo $'\x72m -rf /'` stays an echo argument).
+                            _context_text = (
+                                folded_evidence
+                                if evasion == "shell_quote_obfuscation"
+                                else matched_evidence
+                            )
+                            _m = rule.patterns.search(_context_text)
                     if _m is not None:
                         context_inert = is_inert_match(
                             _context_text, _m.start(), _m.end()
