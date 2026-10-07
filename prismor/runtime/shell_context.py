@@ -78,6 +78,63 @@ def _has_double_quote_command_substitution(value: str) -> bool:
     return False
 
 
+def command_substitution_spans(value: str) -> List[Tuple[int, int]]:
+    """Return (start, end) offsets of executable $(...) and `...` substitutions.
+
+    In an unquoted heredoc, \\ escapes $, `, and \\. Unescaped $(...) and `...`
+    execute before the heredoc sink receives its input.
+    """
+    spans: List[Tuple[int, int]] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        ch = value[i]
+        if ch == chr(92):
+            i += 2
+            continue
+        if ch == "`":
+            start = i
+            i += 1
+            while i < n and value[i] != "`":
+                if value[i] == chr(92):
+                    i += 2
+                else:
+                    i += 1
+            end = min(i + 1, n)
+            spans.append((start, end))
+            i = end
+            continue
+        if ch == "$" and i + 1 < n and value[i + 1] == "(":
+            start = i
+            depth = 1
+            i += 2
+            while i < n and depth > 0:
+                c = value[i]
+                if c == chr(92):
+                    i += 2
+                    continue
+                if c in (chr(39), chr(34)):
+                    q = c
+                    i += 1
+                    while i < n and value[i] != q:
+                        if q == chr(34) and value[i] == chr(92):
+                            i += 2
+                        else:
+                            i += 1
+                    if i < n:
+                        i += 1
+                    continue
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                i += 1
+            spans.append((start, i))
+            continue
+        i += 1
+    return spans
+
+
 def quoted_spans(command: str) -> List[Tuple[int, int, bool, bool]]:
     """Return (start, end, is_payload, is_closed) for each quoted span.
 
@@ -206,15 +263,22 @@ def is_inert_match(command: str, match_start: int, match_end: int) -> bool:
       * that segment starts with a known text-emitting command.
 
     Or a heredoc body whose opener is ``cat`` or ``tee`` -- a script being
-    written to a file or printed, not run. ``bash <<EOF`` feeds the body to an
-    interpreter and stays live, and so does ``cat > x.py <<EOF ... EOF &&
-    python3 x.py``: the interpreter rule above scans the whole command, so a
-    body that is executed later in the same call is never inert. A body that
-    is written now and run in a later call is staged-execution's job.
+    written to a file or printed, not run. If the delimiter is unquoted (so
+    the shell expands the body), any match overlapping an executable command
+    substitution (``$(...)`` or ```...```) is live code, not inert text.
+    ``bash <<EOF`` feeds the body to an interpreter and stays live, and so does
+    ``cat > x.py <<EOF ... EOF && python3 x.py``: the interpreter rule above
+    scans the whole command, so a body that is executed later in the same call
+    is never inert. A body that is written now and run in a later call is
+    staged-execution's job.
     """
     if match_start < 0 or match_end > len(command):
         return False
-    hspans = heredoc_spans(command)
+    hdocs = heredocs(command)
+    hspans = [
+        (h.body_start, h.body_end, command[:h.start].rsplit("\n", 1)[-1])
+        for h in hdocs
+    ]
     # Blank heredoc bodies before quote scanning: an apostrophe inside a
     # script body would otherwise open a span that swallows the rest of the
     # command, hiding a trailing ``; python3 x.py`` from the interpreter check.
@@ -225,13 +289,30 @@ def is_inert_match(command: str, match_start: int, match_end: int) -> bool:
         if word.rsplit("/", 1)[-1] in _INTERPRETERS:
             return False
 
-    for body_start, body_end, opener in hspans:
-        if body_start <= match_start and match_end <= body_end:
+    for h in hdocs:
+        effective_start = match_start
+        while effective_start < match_end and command[effective_start].isspace():
+            effective_start += 1
+        effective_end = match_end
+        while effective_end > effective_start and command[effective_end - 1].isspace():
+            effective_end -= 1
+
+        if h.body_start <= effective_start and effective_end <= h.body_end:
+            opener = command[:h.start].rsplit("\n", 1)[-1]
             segment = opener
             for sep in _SEPARATORS:
                 segment = segment.split(sep)[-1]
             tokens = segment.split()
-            return bool(tokens) and tokens[0].rsplit("/", 1)[-1] in _HEREDOC_SINKS
+            if not (bool(tokens) and tokens[0].rsplit("/", 1)[-1] in _HEREDOC_SINKS):
+                return False
+            if h.expands:
+                body = command[h.body_start:h.body_end]
+                for sub_start, sub_end in command_substitution_spans(body):
+                    abs_start = h.body_start + sub_start
+                    abs_end = h.body_start + sub_end
+                    if match_start < abs_end and match_end > abs_start:
+                        return False
+            return True
 
     if not spans:
         return False

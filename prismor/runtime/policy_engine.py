@@ -1767,6 +1767,8 @@ class PolicyEngine:
             if event_type == "shell" and matched_evidence:
                 try:
                     from prismor.runtime.shell_context import (
+                        command_substitution_spans,
+                        heredocs,
                         is_inert_match,
                         is_remote_payload,
                         quoted_spans,
@@ -1788,7 +1790,19 @@ class PolicyEngine:
                                 _context_text
                             )
                         )
-                        if not has_executable_quoted_span:
+                        has_executable_heredoc_span = any(
+                            h.expands
+                            and bool(
+                                command_substitution_spans(
+                                    _context_text[h.body_start:h.body_end]
+                                )
+                            )
+                            for h in heredocs(_context_text)
+                        )
+                        # An expanding heredoc with a substitution keeps the
+                        # raw miss: the normalized spelling drops the ``$(``
+                        # and would make the payload look like plain body text.
+                        if not has_executable_quoted_span and not has_executable_heredoc_span:
                             # A quote-evasion match is judged on its dequoted
                             # spelling, which re-quotes each word for what it
                             # is (`echo $'\x72m -rf /'` stays an echo argument).
