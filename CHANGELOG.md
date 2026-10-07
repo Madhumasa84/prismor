@@ -1,6 +1,7 @@
-## [Unreleased]
+## [1.60.0] — 2026-10-06
 
 ### Fixed
+- **A command substitution inside an unquoted heredoc passed as inert text** (#587). `cat <<EOF` with `$(rm -rf /)` or a backtick payload in its body was treated as text written to a file and allowed, though the shell runs the substitution before `cat` sees the body. A match that overlaps an unescaped `$(...)` or backtick span in an unquoted heredoc now blocks. Quoted delimiters (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) and escaped `\$(` stay inert.
 - **Shell rules fired on everyday commands.** Replaying 30 days of real agent sessions (6,458 unique tool calls) through the default policy gave 647 findings, roughly 75 of them real. The same replay now gives 317, and 177 instead of 311 of them would block. All 128 attacks used to test the change are still caught except two DNS-exfiltration forms that main misses too. Changes:
   - Shell commands keep the newlines between statements. They used to be collapsed into one line before matching, so every `[^\n]` guard in a rule did nothing. `rm -rf /tmp/x` reached a `cd /home/...` on the next line, and a `cat > f.py <<EOF` redirect reached a path inside the heredoc body. Continuations, lines ending in `|`/`&&`/`||`, and quoted strings spanning lines are still joined. Rules that read only commands, paths or URLs now match `^`/`$` per statement.
   - Patterns stay inside one shell command instead of running across `;`, `&&` and `|`. Verbs need a word boundary, so `rm` no longer matches inside "perform", and the `>` of `2>&1` is no longer a write.
