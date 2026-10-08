@@ -106,6 +106,8 @@ def _write_private(path: Path, data: Dict[str, Any]) -> None:
 class Client:
     def __init__(self, api_key: str, base: str = API) -> None:
         self.api_key = api_key
+        if not base.startswith(("https://", "http://")):
+            raise SystemExit(f"ELEVENLABS_API_BASE must be http(s): {base}")
         self.base = base.rstrip("/")
 
     def call(self, method: str, path: str, body: Any = None) -> Any:
@@ -114,7 +116,7 @@ class Client:
             data=json.dumps(body).encode() if body is not None else None,
             headers={"xi-api-key": self.api_key, "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:  # scheme checked http(s) in __init__  # nosec B310
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]

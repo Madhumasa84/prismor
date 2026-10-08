@@ -156,6 +156,7 @@ packages = [
 "docs/decision-contract.md" = "prismor/runtime/data/docs/decision-contract.md"
 "docs/deploy-docker.md" = "prismor/runtime/data/docs/deploy-docker.md"
 "docs/docker.md" = "prismor/runtime/data/docs/docker.md"
+"docs/elevenlabs.md" = "prismor/runtime/data/docs/elevenlabs.md"
 "docs/enterprise-tool-access.md" = "prismor/runtime/data/docs/enterprise-tool-access.md"
 "docs/extensions.md" = "prismor/runtime/data/docs/extensions.md"
 "docs/frameworks-agno.md" = "prismor/runtime/data/docs/frameworks-agno.md"

@@ -70,6 +70,7 @@ _Generated from `prismor/runtime/integrations/registry.yaml` — do not edit by 
 | HTTP Eval-Server (any language) | framework | http | ✅ | `client-side` |
 | MCP Gateway (any MCP-speaking agent) | framework | mcp | ✅ | `proxy-deny` |
 | Claude Inference Hooks (claude.ai · Claude Code · Cowork) | framework | http | ✅ | `proxy-deny` |
+| ElevenLabs Agents (voice) | framework | http | ✅ | `proxy-deny` |
 
 **Multiplexers**
 
