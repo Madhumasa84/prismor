@@ -263,6 +263,29 @@ re-plumb credentials first.
 The real credential is read from the environment variable named by
 `api_key_env`. Never put a provider key in this file.
 
+### Adapting a client you can't change
+
+A hosted client sends a fixed request shape that the model may refuse. A key's
+optional `body` rule rewrites the request after screening and before it goes
+upstream, so policy still judges what the client sent:
+
+```json
+"pk_el_…": {
+  "subject": "elevenlabs:Acme Support", "upstream": "openai",
+  "body": {
+    "rename": {"max_tokens": "max_completion_tokens"},
+    "drop": ["temperature"],
+    "set": {"reasoning_effort": "none"}
+  }
+}
+```
+
+`rename` moves a field (keeping an existing target), `drop` removes one, and
+`set` overwrites. `prismor elevenlabs connect` writes this rule for GPT-5-era
+models: ElevenLabs always sends `max_tokens` and `temperature: 0`, and
+`gpt-5.6-luna` refuses both, along with function tools on chat completions
+unless reasoning is off.
+
 ### Local OpenAI-compatible backends
 
 Ollama, vLLM, LM Studio, LocalAI and similar servers use the OpenAI-compatible
@@ -321,6 +344,16 @@ prismor proxy --mode enforce --host 0.0.0.0            # reachable from the cont
 Every turn is then screened, and a tool the model proposes is judged before n8n
 executes it. Bind beyond loopback only on a trusted network, or put TLS in
 front.
+
+## Governing ElevenLabs voice agents
+
+ElevenLabs agents take a **Custom LLM** URL, so the same lever works from
+ElevenLabs' cloud — over a public https URL rather than a container network.
+`prismor elevenlabs connect --all --proxy-url https://…` does the wiring,
+including two settings that matter for voice: it turns off the backup LLM
+(which would otherwise answer without the proxy whenever it errors) and asks
+for spoken refusals, so a blocked turn is a sentence the caller hears rather
+than a rule id read aloud. Walkthrough: [elevenlabs.md](elevenlabs.md).
 
 ## Running it as a service
 

@@ -402,6 +402,8 @@ def main(argv: Optional[List[str]] = None) -> None:
             config_path=_Path(args.config) if getattr(args, "config", None) else None,
             session_id=getattr(args, "session_id", "") or "",
             agent_name=getattr(args, "agent_name", "") or "",
+            judge_budget_ms=int(getattr(args, "judge_budget_ms", 0) or 0),
+            judge=getattr(args, "judge", "") or "",
         )
         return
 
@@ -2935,6 +2937,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         from prismor.runtime import mirror_cli
         sys.exit(mirror_cli.run(args, workspace))
 
+    if args.command == "elevenlabs":
+        from prismor.runtime import elevenlabs_cli
+        sys.exit(elevenlabs_cli.run(args))
+
     if args.command == "egress":
         from prismor.runtime import egress_cli
 
@@ -3455,6 +3461,56 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Stable session id (default: fresh per process). Env: PRISMOR_SESSION_ID")
     _pp.add_argument("--agent-name", dest="agent_name", default="",
                      help="Per-instance agent name (enables the console kill-switch and per-agent policy)")
+    _pp.add_argument("--judge", choices=["typesafe", "prismor", "api", "claude", "codex"], default="",
+                     help="Semantic LLM judge when policy names none. typesafe = TypeSafe Jev "
+                          "(needs TYPESAFE_API_KEY): typed probabilities in well under a second, "
+                          "for latency-critical clients such as voice agents")
+    _pp.add_argument("--judge-budget-ms", dest="judge_budget_ms", type=int, default=0,
+                     help="Cap the semantic LLM judge per event (ms) unless policy sets "
+                          "semantic_guard.budget_ms; over budget the heuristic decides on time. "
+                          "Use for clients with a turn deadline, e.g. ElevenLabs voice agents (1500)")
+
+    # ── elevenlabs: route ElevenLabs voice agents through the proxy ──────
+    _elp = subparsers.add_parser(
+        "elevenlabs",
+        help="Route ElevenLabs voice agents through `prismor proxy` — status/connect/disconnect",
+        description="ElevenLabs agents run in ElevenLabs' cloud, so the lever is their Custom LLM "
+        "setting. `connect` mints a per-agent virtual key, stores it as an ElevenLabs workspace "
+        "secret, points the agent at the proxy, threads each call into one Prismor session, and "
+        "disables the backup LLM that would otherwise route around policy. `disconnect` restores "
+        "exactly what was replaced. Reads ELEVENLABS_API_KEY.",
+    )
+    _el_sub = _elp.add_subparsers(dest="el_command")
+    _el_sub.add_parser("status", help="Every agent: its LLM, whether Prismor governs it, backup LLM")
+    _el_con = _el_sub.add_parser("connect", help="Route agents through the proxy")
+    _el_con.add_argument("agent_ids", nargs="*", help="ElevenLabs agent ids")
+    _el_con.add_argument("--all", action="store_true", help="Every agent in the workspace")
+    _el_con.add_argument("--proxy-url", dest="proxy_url", default="",
+                         help="Public https URL of `prismor proxy` (env: PRISMOR_PROXY_PUBLIC_URL)")
+    _el_con.add_argument("--model", default="",
+                         help="Upstream model id (default: gpt-5.6-luna)")
+    _el_con.add_argument("--upstream", default="openai",
+                         help="proxy.json upstream the virtual key routes to (default: openai)")
+    _el_con.add_argument("--config", default=None,
+                         help="proxy.json to write virtual keys into (default: $PRISMOR_HOME/proxy.json)")
+    _el_con.add_argument("--turn-timeout", dest="turn_timeout", type=float, default=8.0,
+                         help="Seconds ElevenLabs waits for a turn before retrying it "
+                              "(cascade_timeout_seconds, 2-15; default 8, ElevenLabs' own is 4)")
+    _el_con.add_argument("--refusal-text", dest="refusal_text", default="",
+                         help="What the agent says when Prismor blocks a turn, in the agent's own "
+                              "language and voice (default: \"Sorry, I can't do that. It's blocked "
+                              "by our security policy. ...\")")
+    _el_con.add_argument("--sequential-screening", dest="sequential_screening", action="store_true",
+                         help="Judge each turn before the model sees it (slower first word; a "
+                              "blocked prompt never leaves). Default: in parallel with the model, "
+                              "reply held until the verdict")
+    _el_con.add_argument("--keep-backup-llm", dest="keep_backup_llm", action="store_true",
+                         help="Leave ElevenLabs' backup LLM on (turns it serves bypass Prismor)")
+    _el_dis = _el_sub.add_parser("disconnect", help="Restore agents' original LLM settings")
+    _el_dis.add_argument("agent_ids", nargs="*", help="ElevenLabs agent ids")
+    _el_dis.add_argument("--all", action="store_true", help="Every agent prismor connected")
+    _el_dis.add_argument("--config", default=None,
+                         help="proxy.json the virtual keys were written to")
 
     # ── surfaces: which enforcement surfaces are governing this machine ──
     subparsers.add_parser(

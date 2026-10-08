@@ -61,9 +61,11 @@ the agent it is supposed to be governing.
 from __future__ import annotations
 
 import hashlib
+from collections import OrderedDict
 import hmac
 import json
 import os
+import queue
 import re
 import signal
 import ssl
@@ -431,6 +433,22 @@ def prompt_parts(body: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
+#: What a message Prismor already blocked is replaced with when the client
+#: resends the conversation. A voice platform resends the whole history every
+#: turn; left in place, one refused injection would be re-refused on every
+#: later turn (a dead call), or reach the model on the next one.
+SCRUBBED_MESSAGE = "[removed by Prismor: this message was blocked by security policy]"
+
+#: Conversations whose screening state is remembered (oldest dropped first).
+MAX_TRACKED_CONVERSATIONS = 2000
+
+
+def _message_fingerprint(msg: Dict[str, Any]) -> str:
+    seed = "\x00".join([str(msg.get("role") or ""), str(msg.get("tool_call_id") or ""),
+                        _text_of(msg.get("content"))])
+    return hashlib.sha256(seed.encode("utf-8", "replace")).hexdigest()[:24]
+
+
 def conversation_key(body: Dict[str, Any]) -> str:
     """A stable id for the conversation this request belongs to.
 
@@ -545,6 +563,9 @@ class Screen:
         self._pending: Dict[str, int] = {}
         self._dirty_at: Dict[str, float] = {}
         self._conversations: Dict[str, str] = {}
+        # Declared conversations (X-Prismor-Session): which messages were
+        # already screened, and which were blocked. See conversation_delta.
+        self._screened: "OrderedDict[str, Dict[str, set]]" = OrderedDict()
         # Serialized for the same reason the MCP gateway serializes: the
         # trifecta TagLedger is order-dependent, and concurrent evaluations
         # could let the completing half of a forbidden tag pair through.
@@ -581,6 +602,59 @@ class Screen:
                 sid = f"{self.session_id}-{key}"
                 self._conversations[key] = sid
         return sid
+
+    def conversation_delta(self, session_id: str,
+                           body: Dict[str, Any]) -> Tuple[str, List[Tuple[str, str]]]:
+        """Scrub already-blocked messages; return only the text not yet screened.
+
+        For a client that declares its conversation (``X-Prismor-Session``) and
+        resends the whole history each turn -- every voice platform does --
+        judging the full history again is wasted time on the turn's critical
+        path, and it makes one blocked message poison every later turn. Each
+        message is screened once: the event carries the new messages only, and
+        a message that was blocked is replaced in the forwarded body with
+        ``SCRUBBED_MESSAGE`` so the model never acts on it later either.
+        Mutates ``body``. Returns ``(text, [(fingerprint, role), ...])`` for
+        :meth:`mark_screened`.
+        """
+        with self._lock:
+            state = self._screened.get(session_id)
+            if state is None:
+                state = {"seen": set(), "blocked": set()}
+                self._screened[session_id] = state
+                while len(self._screened) > MAX_TRACKED_CONVERSATIONS:
+                    self._screened.popitem(last=False)
+            else:
+                self._screened.move_to_end(session_id)
+            seen, blocked = set(state["seen"]), set(state["blocked"])
+        texts: List[str] = []
+        new: List[Tuple[str, str]] = []
+        system = _system_of(body)
+        if system:
+            fp = _message_fingerprint({"role": "system", "content": system})
+            if fp not in seen:
+                texts.append(_text_of(system))
+                new.append((fp, "system"))
+        for msg in _turns(body):
+            fp = _message_fingerprint(msg)
+            if fp in blocked:
+                msg["content"] = SCRUBBED_MESSAGE
+                continue
+            if fp not in seen:
+                texts.append(_text_of(msg.get("content")))
+                new.append((fp, str(msg.get("role") or "")))
+        return "\n".join(t for t in texts if t), new
+
+    def mark_screened(self, session_id: str, new: List[Tuple[str, str]],
+                      blocked: bool) -> None:
+        """Record a turn's verdict. On a block, the messages that could carry
+        the attack (user and tool turns) are scrubbed from then on."""
+        with self._lock:
+            state = self._screened.setdefault(session_id, {"seen": set(), "blocked": set()})
+            for fp, role in new:
+                state["seen"].add(fp)
+                if blocked and role in ("user", "tool", "function"):
+                    state["blocked"].add(fp)
 
     def _base(self, agent_event: str, subject: Optional[str],
               session_id: str = "") -> Dict[str, Any]:
@@ -970,9 +1044,54 @@ def gcp_access_token() -> str:
         return token
 
 
+# ── per-key request fixes ────────────────────────────────────────────────────
+
+def apply_body_rules(body: Dict[str, Any], rules: Dict[str, Any]) -> Dict[str, Any]:
+    """Adapt a request the client cannot change to what the upstream accepts.
+
+    A hosted platform sends a fixed request shape: ElevenLabs puts
+    ``max_tokens`` and ``temperature: 0`` on every turn, and the GPT-5-era
+    models refuse both (``max_completion_tokens`` only; default temperature
+    only). A virtual key's ``"body": {"rename": {...}, "drop": [...],
+    "set": {...}}`` fixes that at the proxy. Applied after screening, so policy
+    judges what the client sent.
+    """
+    for old, new in (rules.get("rename") or {}).items():
+        if old in body:
+            value = body.pop(old)
+            body.setdefault(new, value)
+    for key in rules.get("drop") or []:
+        body.pop(key, None)
+    body.update(rules.get("set") or {})
+    return body
+
+
 # ── refusals, in each provider's own error shape ─────────────────────────────
 
-def refusal_reason(blocking: Dict[str, Any]) -> str:
+#: What a voice agent says instead of reading out a rule id. Opted into per
+#: request with ``X-Prismor-Refusal: spoken``: the refusal text is the agent's
+#: next utterance, and "Blocked by Prismor [remote-execution]" spoken aloud to a
+#: caller is an error message, not an answer. The rule still lands in the trail.
+SPOKEN_REFUSAL = ("Sorry, I can't do that. It's blocked by our security policy. "
+                  "Is there something else I can help with?")
+
+
+def spoken_text(header: str) -> str:
+    """The operator's own refusal sentence (``X-Prismor-Refusal-Text``).
+
+    A voice agent that speaks Spanish should refuse in Spanish, and in the
+    brand's words. Printable text only, capped, so a header cannot smuggle
+    control characters or a speech-length payload into the turn.
+    """
+    text = "".join(ch for ch in (header or "") if ch.isprintable()).strip()
+    return text[:300]
+
+
+def refusal_reason(blocking: Dict[str, Any], spoken: Any = False) -> str:
+    """``spoken``: False for the rule-naming refusal, True for SPOKEN_REFUSAL,
+    or the operator's own sentence."""
+    if spoken:
+        return spoken if isinstance(spoken, str) else SPOKEN_REFUSAL
     rule = blocking.get("ruleId") or blocking.get("rule_id") or "policy"
     detail = blocking.get("message") or blocking.get("reason") or "blocked by policy"
     return f"Blocked by Prismor [{rule}]: {detail}"
@@ -1033,11 +1152,13 @@ class StreamScreen:
     """
 
     def __init__(self, screen: Screen, provider: str, model: str,
-                 subject: Optional[str], session_id: str = "") -> None:
+                 subject: Optional[str], session_id: str = "",
+                 spoken: bool = False) -> None:
         self.screen = screen
         self.provider = provider
         self.model = model
         self.subject = subject
+        self.spoken = spoken
         # The request's conversation, so a streamed tool call lands in the
         # same session as the prompt that produced it.
         self.session_id = session_id or screen.session_id
@@ -1166,7 +1287,6 @@ class StreamScreen:
             if reason is None:
                 continue
             self.blocked.append(reason)
-            sys.stderr.write(f"[prismor-proxy] {reason} (tool={tool_name})\n")
             return _sse_text_frames("google", reason)
         return chunk
 
@@ -1283,7 +1403,6 @@ class StreamScreen:
                     return held
                 self.blocked.append(reason)
                 self._denied[self._tool_name] = reason
-                sys.stderr.write(f"[prismor-proxy] {reason} (tool={self._tool_name})\n")
                 return _responses_refusal_frames(reason, self._tool_index)
             return b""
 
@@ -1303,10 +1422,16 @@ class StreamScreen:
             decision = self.screen.evaluate(event, self.subject)
         except Exception:
             # enforce-mode engine failure: the call never ships.
-            return "Blocked by Prismor: policy evaluation failed (fail-closed)"
+            reason = "Blocked by Prismor: policy evaluation failed (fail-closed)"
+            sys.stderr.write(f"[prismor-proxy] {reason} (tool={tool_name})\n")
+            return reason
         self.screen.log(decision, tool_name)
         blocking = self.screen.blocking(decision)
-        return None if blocking is None else refusal_reason(blocking)
+        if blocking is None:
+            return None
+        # Logged here, with the rule, even when the caller hears the spoken line.
+        sys.stderr.write(f"[prismor-proxy] {refusal_reason(blocking)} (tool={tool_name})\n")
+        return refusal_reason(blocking, self.spoken)
 
     def _judge_openai(self) -> bytes:
         """Judge each held chat/completions call; drop only the denied ones."""
@@ -1322,7 +1447,6 @@ class StreamScreen:
                 continue
             refusals.append(reason)
             self.blocked.append(reason)
-            sys.stderr.write(f"[prismor-proxy] {reason} (tool={call['name']})\n")
         if not refusals:
             return held
         delta: Dict[str, Any] = {"role": "assistant", "content": "\n".join(refusals)}
@@ -1349,7 +1473,6 @@ class StreamScreen:
             self._released = True
             return held
         self.blocked.append(reason)
-        sys.stderr.write(f"[prismor-proxy] {reason} (tool={self._tool_name})\n")
         return _sse_text_frames(self.provider, reason, self._tool_index)
 
 
@@ -1514,6 +1637,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _say(self, model: str, message: str, streaming: bool) -> None:
+        """Answer a refused chat/completions turn as the assistant, at 200.
+
+        A voice platform treats a 403 from its LLM as an outage: it drops the
+        call or, worse, retries on a backup model Prismor never sees. Spoken
+        mode keeps the turn alive and lets the agent say no out loud instead.
+        """
+        meta = {"id": f"chatcmpl-prismor-{int(time.time() * 1000)}",
+                "created": int(time.time()), "model": model or "prismor"}
+        if streaming:
+            frames = [
+                {**meta, "object": "chat.completion.chunk",
+                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": message},
+                              "finish_reason": None}]},
+                {**meta, "object": "chat.completion.chunk",
+                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ]
+            body = b"".join(f"data: {json.dumps(f)}\n\n".encode() for f in frames)
+            body += b"data: [DONE]\n\n"
+            ctype = "text/event-stream"
+        else:
+            body = json.dumps({**meta, "object": "chat.completion", "choices": [
+                {"index": 0, "finish_reason": "stop",
+                 "message": {"role": "assistant", "content": message}}]}).encode()
+            ctype = "application/json"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Prismor-Blocked", "1")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _provider(self) -> str:
         path = urlsplit(self.path).path
         for prefix, provider in PROVIDER_ROUTES:
@@ -1553,6 +1708,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         meta = self.config.resolve_key(presented) if presented else None
         if meta is None:
             return None, None, "unknown or revoked Prismor key"
+        self._key_meta = meta
         return meta.get("subject"), meta.get("upstream"), None
 
     # -- the request path ------------------------------------------------
@@ -1567,10 +1723,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # in the body is what marks it, so the lane is chosen per request.
             provider = "a2a"
             self._a2a_id = body.get("id")
+        self._key_meta: Dict[str, Any] = {}
         subject, upstream_override, auth_error = self._auth()
         if auth_error:
             self._refuse(provider, f"Blocked by Prismor: {auth_error}", status=401)
             return
+        self._spoken: Any = (self.headers.get("x-prismor-refusal") or "").strip().lower() == "spoken"
+        if self._spoken:
+            self._spoken = spoken_text(self.headers.get("x-prismor-refusal-text") or "") or True
 
         screened = body is not None and (
             (a2a and a2a_method(body) in A2A_SCREENED_METHODS)
@@ -1594,12 +1754,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
             sys.stderr.write("[prismor-proxy] google stream without alt=sse: "
                              "forwarded unscreened (observe)\n")
 
+        self._pending_verdict: Optional[Dict[str, Any]] = None
+        self._t0 = time.monotonic()
         if screened and self.screen is not None:
-            refusal = self._screen_request(provider, model, body, subject)
-            if refusal:
-                self._refuse(provider, refusal)
-                return
+            parallel = ((self.headers.get("x-prismor-screening") or "").strip().lower() == "parallel"
+                        and streaming and provider in ("openai", "anthropic"))
+            if parallel:
+                self._start_parallel_screen(provider, model, body, subject)
+            else:
+                refusal = self._screen_request(provider, model, body, subject)
+                if refusal:
+                    if self._spoken and provider == "openai":
+                        self._say(model, refusal, streaming)
+                    else:
+                        self._refuse(provider, refusal)
+                    return
             raw_body = json.dumps(body).encode()
+        if body is not None and isinstance(self._key_meta.get("body"), dict):
+            raw_body = json.dumps(apply_body_rules(body, self._key_meta["body"])).encode()
 
         name = upstream_override or provider
         try:
@@ -1627,6 +1799,85 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._refuse(provider, f"prismor-proxy: all upstreams failed: {last_error}",
                      status=502)
 
+    def _start_parallel_screen(self, provider: str, model: str, body: Dict[str, Any],
+                               subject: Optional[str]) -> None:
+        """Judge the prompt while the model is already working on it.
+
+        Opted into per request with ``X-Prismor-Screening: parallel``. A voice
+        caller waits for the verdict *and then* the model's first token when
+        screening runs first; here the two overlap, and the reply is held at the
+        gate (:meth:`_gate`) until the verdict is in, so what the caller hears is
+        unchanged and only ``max(0, verdict - model first token)`` is added.
+
+        The trade: the prompt reaches the provider before it is judged. Secrets
+        are still masked first (synchronously, below), and nothing the model
+        returns is released for a blocked turn -- but a data-boundary rule can
+        then stop the *reply*, not the transmission. That is why it is opt-in.
+        """
+        assert self.screen is not None
+        verdict: Dict[str, Any] = {"done": threading.Event(), "refusal": None}
+        self._pending_verdict = verdict
+        unmasked = json.loads(json.dumps(body))      # policy judges what the client sent
+
+        def _judge() -> None:
+            try:
+                verdict["refusal"] = self._screen_request(provider, model, unmasked, subject)
+            except Exception:
+                verdict["refusal"] = "Blocked by Prismor: policy evaluation failed (fail-closed)"
+            finally:
+                verdict["at"] = time.monotonic()
+                verdict["done"].set()
+
+        # Scrub already-blocked messages from what is sent, before the judge's
+        # copy is screened and marked, and mask secrets: both synchronous, so the
+        # provider never receives either.
+        declared = (self.headers.get("x-prismor-session") or "").strip()
+        if declared and _turns(body):
+            sid = self.screen.session_for(body, declared)
+            with self.screen._lock:
+                state = self.screen._screened.get(sid) or {}
+                blocked = set(state.get("blocked") or ())
+            for msg in _turns(body):
+                if _message_fingerprint(msg) in blocked:
+                    msg["content"] = SCRUBBED_MESSAGE
+        _mask_in_place(body, self.screen.redact)
+        threading.Thread(target=_judge, name="prismor-proxy-verdict", daemon=True).start()
+        # _session_id is set by _screen_request on the judge thread; the stream
+        # needs it now, and session_for is deterministic for the same input.
+        self._session_id = self.screen.session_for(unmasked, declared)
+
+    def _gate(self, provider: str, model: str, streaming: bool) -> bool:
+        """Hold the first byte to the client until a parallel verdict is in.
+
+        Returns True when the turn was refused (the refusal has been sent and
+        the upstream reply must be discarded). Observe mode never holds.
+        """
+        verdict = getattr(self, "_pending_verdict", None)
+        if verdict is None or verdict.get("released"):
+            return bool(verdict and verdict.get("refused"))
+        if self.screen is not None and self.screen.mode != "enforce":
+            verdict["released"] = True
+            return False
+        upstream_at = time.monotonic()
+        verdict["done"].wait(timeout=READ_TIMEOUT)
+        verdict["released"] = True
+        if os.environ.get("PRISMOR_PROXY_TIMING"):
+            t0 = getattr(self, "_t0", upstream_at)
+            sys.stderr.write(
+                f"[prismor-proxy] timing: upstream headers {1000 * (upstream_at - t0):.0f}ms, "
+                f"verdict {1000 * (verdict.get('at', upstream_at) - t0):.0f}ms, "
+                f"held {1000 * max(0.0, time.monotonic() - upstream_at):.0f}ms\n")
+        refusal = verdict["refusal"] if verdict["done"].is_set() else (
+            "Blocked by Prismor: policy evaluation timed out (fail-closed)")
+        if not refusal:
+            return False
+        verdict["refused"] = True
+        if self._spoken and provider == "openai":
+            self._say(model, refusal, streaming)
+        else:
+            self._refuse(provider, refusal)
+        return True
+
     def _screen_request(self, provider: str, model: str, body: Dict[str, Any],
                         subject: Optional[str]) -> Optional[str]:
         """Screen and mask the outbound prompt. Returns a refusal, or None.
@@ -1635,11 +1886,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         context, the provider's logs should not receive a live credential.
         """
         assert self.screen is not None
-        prompt = extract_prompt(body)
+        declared = (self.headers.get("x-prismor-session") or "").strip()
         # Resolved once per request and reused for the tool calls the response
         # proposes, so a turn's prompt and its consequences share a session.
-        self._session_id = self.screen.session_for(
-            body, self.headers.get("x-prismor-session") or "")
+        self._session_id = self.screen.session_for(body, declared)
+        new: Optional[List[Tuple[str, str]]] = None
+        if declared and provider in ("openai", "anthropic") and _turns(body):
+            prompt, new = self.screen.conversation_delta(self._session_id, body)
+        else:
+            prompt = extract_prompt(body)
         event = self.screen.prompt_event(
             provider, model, prompt, subject,
             session_id=self._session_id, parts=prompt_parts(body),
@@ -1650,10 +1905,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return "Blocked by Prismor: policy evaluation failed (fail-closed)"
         self.screen.log(decision, "llm_request")
         blocking = self.screen.blocking(decision)
+        if new is not None:
+            self.screen.mark_screened(self._session_id, new, blocked=blocking is not None)
         if blocking is not None:
-            reason = refusal_reason(blocking)
-            sys.stderr.write(f"[prismor-proxy] {reason}\n")
-            return reason
+            sys.stderr.write(f"[prismor-proxy] {refusal_reason(blocking)}\n")
+            return refusal_reason(blocking, getattr(self, "_spoken", False))
         _mask_in_place(body, self.screen.redact)
         return None
 
@@ -1665,11 +1921,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not base.hostname:
             raise ProxyConfigError(f"upstream {upstream_name!r} has no base_url")
 
-        conn_cls = HTTPSConnection if base.scheme != "http" else HTTPConnection
-        kwargs: Dict[str, Any] = {"timeout": CONNECT_TIMEOUT}
-        if conn_cls is HTTPSConnection:
-            kwargs["context"] = ssl.create_default_context()
-        conn = conn_cls(base.hostname, base.port, **kwargs)
+        scheme = "http" if base.scheme == "http" else "https"
 
         path = urlsplit(self.path).path
         if base.path and base.path != "/":
@@ -1683,30 +1935,41 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # mode that would forward the *Prismor* key to Google and leave the
             # swap in _upstream_headers with nothing to override.
             query = "&".join(p for p in query.split("&") if not p.startswith("key="))
-        try:
-            conn.request(self.command, path + (f"?{query}" if query else ""),
-                         body=raw_body or None,
-                         headers=self._upstream_headers(
-                             spec, raw_body, host=base.netloc or base.hostname or "",
-                             path=path, query=query))
-            conn.sock.settimeout(READ_TIMEOUT)  # type: ignore[union-attr]
-            resp = conn.getresponse()
-        except Exception as exc:
-            conn.close()
-            raise _Retryable(f"{upstream_name}: {exc}") from exc
+        headers = self._upstream_headers(spec, raw_body, host=base.netloc or base.hostname or "",
+                                         path=path, query=query)
+        for attempt in (1, 2):
+            conn, reused = UPSTREAM_POOL.get(scheme, base.hostname, base.port)
+            try:
+                conn.request(self.command, path + (f"?{query}" if query else ""),
+                             body=raw_body or None, headers=headers)
+                conn.sock.settimeout(READ_TIMEOUT)  # type: ignore[union-attr]
+                resp = conn.getresponse()
+                break
+            except Exception as exc:
+                conn.close()
+                if reused and attempt == 1:
+                    continue          # the server closed an idle connection: one fresh try
+                raise _Retryable(f"{upstream_name}: {exc}") from exc
 
         if resp.status >= 500 and self.config.chain(upstream_name)[1:]:
             conn.close()
             raise _Retryable(f"{upstream_name}: HTTP {resp.status}")
 
+        done = False
+        self._discard_upstream = False
         try:
             if streaming:
                 self._relay_stream(resp, provider, model, subject, upstream_name)
             else:
                 self._relay_buffered(resp, provider, model, screened, subject,
                                      upstream_name)
+            done = True
         finally:
-            conn.close()
+            if (done and not self._discard_upstream
+                    and resp.isclosed() and not resp.will_close):
+                UPSTREAM_POOL.put(scheme, base.hostname, base.port, conn)
+            else:
+                conn.close()
 
     def _upstream_headers(self, spec: Dict[str, Any], raw_body: bytes,
                           host: str = "", path: str = "",
@@ -1760,6 +2023,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         screened: bool, subject: Optional[str],
                         upstream_name: str) -> None:
         payload = resp.read()
+        if self._gate(provider, model, False):
+            self._discard_upstream = True
+            return
         if screened and self.screen is not None:
             if resp.status < 400:
                 payload = self._screen_response(provider, model, payload, subject)
@@ -1802,7 +2068,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.screen.log(decision, tool_name)
             blocking = self.screen.blocking(decision)
             if blocking is not None:
-                blocked[tool_name] = refusal_reason(blocking)
+                blocked[tool_name] = refusal_reason(blocking, getattr(self, "_spoken", False))
                 sys.stderr.write(
                     f"[prismor-proxy] {blocked[tool_name]} (tool={tool_name})\n")
         if blocked:
@@ -1814,6 +2080,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _relay_stream(self, resp: Any, provider: str, model: str,
                       subject: Optional[str], upstream_name: str) -> None:
         assert self.screen is not None
+        if self._gate(provider, model, True):
+            self._discard_upstream = True   # unread reply on the socket: never pool it
+            resp.close()
+            return
         if resp.status >= 400:
             # An error answer to a streaming request is plain JSON, not SSE, so
             # StreamScreen would pass it through unredacted. Buffer it instead.
@@ -1830,7 +2100,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         stream = StreamScreen(self.screen, provider, model, subject,
-                              getattr(self, "_session_id", ""))
+                              getattr(self, "_session_id", ""),
+                              spoken=getattr(self, "_spoken", False))
         try:
             for frame in _sse_frames(resp):
                 out = stream.feed(frame)
@@ -1849,6 +2120,49 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _write_chunk(self, data: bytes) -> None:
         self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
         self.wfile.flush()
+
+
+class _UpstreamPool:
+    """Idle keep-alive connections, per upstream host.
+
+    A fresh HTTPS connection per request paid a TCP + TLS handshake to the
+    provider on every turn: measured 330-560ms from a loaded host, all of it
+    in front of a voice caller's first word. A connection is returned only
+    after its response was read to the end and the server kept it open.
+    """
+
+    def __init__(self, per_host: int = 8, idle_seconds: float = 50.0) -> None:
+        self._idle: Dict[Tuple[str, str, Optional[int]], List[Tuple[Any, float]]] = {}
+        self._lock = threading.Lock()
+        self._per_host = per_host
+        self._idle_seconds = idle_seconds
+        self._context = ssl.create_default_context()
+
+    def get(self, scheme: str, host: str, port: Optional[int]) -> Tuple[Any, bool]:
+        """``(connection, reused)``."""
+        key = (scheme, host, port)
+        now = time.monotonic()
+        with self._lock:
+            idle = self._idle.get(key) or []
+            while idle:
+                conn, since = idle.pop()
+                if now - since < self._idle_seconds:
+                    return conn, True
+                conn.close()
+        if scheme == "http":
+            return HTTPConnection(host, port, timeout=CONNECT_TIMEOUT), False
+        return HTTPSConnection(host, port, timeout=CONNECT_TIMEOUT, context=self._context), False
+
+    def put(self, scheme: str, host: str, port: Optional[int], conn: Any) -> None:
+        with self._lock:
+            idle = self._idle.setdefault((scheme, host, port), [])
+            if len(idle) < self._per_host:
+                idle.append((conn, time.monotonic()))
+                return
+        conn.close()
+
+
+UPSTREAM_POOL = _UpstreamPool()
 
 
 class _Retryable(RuntimeError):
@@ -2004,6 +2318,114 @@ def _meter(screen: Screen, body: Dict[str, Any], model: str, session_id: str = "
 
 # ── entry point ──────────────────────────────────────────────────────────────
 
+def install_background_sinks(maxsize: int = 10000) -> "queue.Queue[Any]":
+    """Ship telemetry (sink dispatch + org heartbeat) from one background worker.
+
+    ``evaluate_tool_call`` hands findings to ``sinks.dispatch`` inline, which
+    is right for a hook: the process exits as soon as it answers, so there is
+    no later to ship them in. The proxy is a long-lived server, and inline it
+    put a control-plane POST (up to a 6s timeout, never skipped for a block)
+    inside every turn, under the lock that serializes evaluation. Measured on
+    ElevenLabs: blocked turns took 2-12s, past the platform's turn timeout, so
+    it retried and the caller heard nothing.
+
+    One worker keeps delivery order; a full queue falls back to sending inline
+    rather than dropping. ``run_proxy`` drains the queue on the way out.
+    """
+    from prismor.runtime import sinks
+
+    existing = getattr(sinks.dispatch, "queue", None)
+    if existing is not None:
+        return existing
+    inline = sinks.dispatch
+    pending: "queue.Queue[Any]" = queue.Queue(maxsize=maxsize)
+
+    def _worker() -> None:
+        while True:
+            args, kwargs = pending.get()
+            try:
+                call = kwargs.pop("_call", None)
+                if call is not None:
+                    fn, fargs, fkwargs = call
+                    fn(*fargs, **fkwargs)
+                else:
+                    inline(*args, **kwargs)
+            except Exception as exc:  # dispatch already swallows; belt and braces
+                sys.stderr.write(f"[prismor-proxy] telemetry error: {exc}\n")
+            finally:
+                pending.task_done()
+
+    def dispatch(*args: Any, **kwargs: Any) -> None:
+        try:
+            pending.put_nowait((args, kwargs))
+        except queue.Full:
+            inline(*args, **kwargs)
+
+    dispatch.queue = pending  # type: ignore[attr-defined]
+    dispatch.inline = inline  # type: ignore[attr-defined]
+    threading.Thread(target=_worker, name="prismor-proxy-sinks", daemon=True).start()
+    sinks.dispatch = dispatch
+
+    # The org heartbeat flush is the same kind of upload, reached from
+    # runtime.evaluate_tool_call rather than through dispatch: measured at
+    # 1.3s on the request path against a slow control plane. Its result is
+    # unused there, so it can ride the same worker. (The remote-policy version
+    # check stays inline on purpose: it is how an org kill switch arrives.)
+    try:
+        from prismor.runtime.enterprise import heartbeat
+
+        flush_inline = heartbeat.maybe_flush
+
+        def maybe_flush(*args: Any, **kwargs: Any) -> bool:
+            if kwargs.get("force"):          # process exit: must run now
+                return flush_inline(*args, **kwargs)
+            try:
+                pending.put_nowait(((), {"_call": (flush_inline, args, kwargs)}))
+            except queue.Full:
+                return flush_inline(*args, **kwargs)
+            return True
+
+        heartbeat.maybe_flush = maybe_flush
+    except Exception:
+        pass
+    return pending
+
+
+def warm_up(workspace: Optional[Path] = None) -> float:
+    """Pay the cold start before the first caller does. Returns seconds taken.
+
+    The first evaluation in a fresh process imports and loads everything (the
+    policy engine and its YAML, the threat feed, the semantic guard): measured
+    24-30s on a loaded host, which on a voice line is the first caller hearing
+    nothing. Warms the *pure* pieces only -- PolicyEngine.evaluate returns
+    findings and records nothing -- so no session, audit-trail record,
+    heartbeat or telemetry is written for a call that never happened.
+    """
+    t0 = time.monotonic()
+    try:
+        from prismor.runtime.feed import load_feed
+        from prismor.runtime.policy_engine import PolicyEngine
+        engine = PolicyEngine(workspace=workspace)
+        engine.evaluate({"type": "prompt", "agent_event": "prompt",
+                         "prompt": "warm-up: what is the status of order A1001?"}, 0)
+        load_feed()
+    except Exception as exc:
+        sys.stderr.write(f"[prismor-proxy] warm-up skipped: {exc}\n")
+    return time.monotonic() - t0
+
+
+def drain_background_sinks(timeout: float = 5.0) -> None:
+    """Give queued telemetry a bounded chance to ship before the process exits."""
+    from prismor.runtime import sinks
+
+    pending = getattr(sinks.dispatch, "queue", None)
+    if pending is None:
+        return
+    deadline = time.monotonic() + timeout
+    while pending.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+
 def default_config_path() -> Path:
     home = os.environ.get("PRISMOR_HOME") or str(Path.home() / ".prismor")
     return Path(home) / "proxy.json"
@@ -2035,8 +2457,15 @@ def default_workspace() -> Path:
 def run_proxy(host: str = "127.0.0.1", port: int = 7080,
               workspace: Optional[Path] = None, mode: str = "observe",
               config_path: Optional[Path] = None,
-              session_id: str = "", agent_name: str = "") -> None:
+              session_id: str = "", agent_name: str = "",
+              judge_budget_ms: int = 0, judge: str = "") -> None:
     """Start the LLM proxy (blocking)."""
+    if judge:
+        # Read by the semantic layer when the policy names no provider of its own.
+        os.environ["PRISMOR_SEMANTIC_PROVIDER"] = judge
+    if judge_budget_ms > 0:
+        # Read by the semantic layer when the policy sets no budget_ms of its own.
+        os.environ["PRISMOR_SEMANTIC_BUDGET_MS"] = str(int(judge_budget_ms))
     ws = workspace or default_workspace()
     try:
         ws = ws.resolve()
@@ -2045,6 +2474,8 @@ def run_proxy(host: str = "127.0.0.1", port: int = 7080,
     config = ProxyConfig.load(config_path if config_path is not None
                               else default_config_path())
     ProxyHandler.config = config
+    install_background_sinks()
+    warm = warm_up(ws)
     ProxyHandler.screen = Screen(
         workspace=ws, mode=mode,
         session_id=session_id or os.environ.get("PRISMOR_SESSION_ID")
@@ -2056,6 +2487,13 @@ def run_proxy(host: str = "127.0.0.1", port: int = 7080,
     base = f"http://{host}:{port}"
     print(f"[prismor] proxy listening on {base}  (mode: {mode})")
     print(f"[prismor] workspace: {ws}")
+    print(f"[prismor] warmed up in {warm:.1f}s")
+    if os.environ.get("PRISMOR_SEMANTIC_PROVIDER"):
+        print(f"[prismor] LLM judge: {os.environ['PRISMOR_SEMANTIC_PROVIDER']} "
+              "unless policy sets semantic_guard.provider")
+    if os.environ.get("PRISMOR_SEMANTIC_BUDGET_MS"):
+        print(f"[prismor] LLM judge budget: {os.environ['PRISMOR_SEMANTIC_BUDGET_MS']}ms per event "
+              "unless policy sets semantic_guard.budget_ms")
     if config.keys:
         print(f"[prismor] virtual keys: {len(config.keys)} "
               "(client keys swapped for provider credentials)")
@@ -2087,6 +2525,7 @@ def run_proxy(host: str = "127.0.0.1", port: int = 7080,
         if ProxyHandler.screen._writer.is_alive():
             ProxyHandler.screen._writer.join(timeout=2.0)
         ProxyHandler.screen.snapshot()
+        drain_background_sinks()
 
 
 if __name__ == "__main__":
