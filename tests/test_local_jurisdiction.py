@@ -220,6 +220,11 @@ class TestRemoteContextIsNotSelfEdit(unittest.TestCase):
             'ssh -o "ProxyCommand cat ~/.prismor/unlock.json" host',
             "ssh -o KnownHostsCommand='cat ~/.prismor/unlock.json' host",
             "ssh -i '~/.prismor/unlock.json' host",
+            # The whole option quoted as one word, or glued with escaped spaces.
+            'ssh "-oProxyCommand=cat ~/.prismor/unlock.json" host',
+            "ssh '-oProxyCommand cat ~/.prismor/unlock.json' host",
+            'ssh -oProxyCommand=sh\\ -c\\ "cat ~/.prismor/unlock.json" host',
+            'sshpass -p pw ssh -o ProxyCommand="cat ~/.prismor/unlock.json" host',
         ):
             with self.subTest(command=command):
                 self.assertTrue(_blocks(command, _SELF))
@@ -231,6 +236,22 @@ class TestRemoteContextIsNotSelfEdit(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(_blocks(command, _CFG))
 
+    def test_quotes_nested_in_local_commands_still_block(self):
+        """#607: a quoted span is only remote when ssh/docker itself receives it."""
+        for command in (
+            # An unquoted substitution runs locally to build ssh's argv.
+            'ssh host $(sh -c "cat ~/.prismor/unlock.json")',
+            'ssh host `sh -c "cat ~/.prismor/unlock.json"`',
+            'ssh host <(sh -c "cat ~/.prismor/unlock.json")',
+            # A newline ends the ssh command like `;` does.
+            'ssh host true\nsh -c "cat ~/.prismor/unlock.json"',
+            # File-copy subcommands and flag values read this machine's files.
+            'docker cp "$HOME/.prismor/unlock.json" c:/tmp/x',
+            'kubectl cp "$HOME/.prismor/unlock.json" pod:/tmp/x',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(_blocks(command, _SELF))
+
     def test_confirmed_remote_payloads_remain_exempt(self):
         """#607: confirmed remote payloads without local substitution remain exempt."""
         for command in (
@@ -239,6 +260,12 @@ class TestRemoteContextIsNotSelfEdit(unittest.TestCase):
             "ssh host 'echo $(cat ~/.prismor/unlock.json)'",
             'ssh host "echo $(hostname); prismor unlock --set-password"',
             'ssh -T user@host "cat ~/.prismor/unlock.json"',
+            'ssh host -t "cat ~/.prismor/unlock.json"',
+            'ssh -p 2222 -o StrictHostKeyChecking=no host "cat ~/.prismor/unlock.json"',
+            'ssh -- host "cat ~/.prismor/unlock.json"',
+            'sshpass -p pw ssh host "cat ~/.prismor/unlock.json"',
+            'docker exec -it c sh -c "cat ~/.prismor/unlock.json"',
+            'kubectl exec pod -- sh -c "cat ~/.prismor/unlock.json"',
         ):
             with self.subTest(command=command):
                 self.assertFalse(_blocks(command, _SELF))
