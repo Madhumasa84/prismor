@@ -52,6 +52,16 @@ _GH_TEXT_SUBCOMMANDS = frozenset({"pr", "issue", "release", "gist"})
 # A payload-bearing flag: -c, -e, and clustered forms such as -lc or -xec.
 _PAYLOAD_FLAG = re.compile(r"^-[a-zA-Z]*[ce]$")
 
+# OpenSSH options whose argument is a command executed locally on the client.
+_SSH_LOCAL_COMMAND_OPTIONS = frozenset({
+    "proxycommand",
+    "localcommand",
+    "knownhostscommand",
+})
+
+# Single-letter flags in OpenSSH that take an argument.
+_SSH_OPTION_ARG_LETTERS = frozenset("bcdefijlmopqrsw")
+
 _SEPARATORS = ";|&"
 _QUOTES = "\"" + chr(39)
 
@@ -348,6 +358,43 @@ def is_inert_match(command: str, match_start: int, match_end: int) -> bool:
     return False
 
 
+def _is_local_ssh_option(tokens_before: List[str], quoted_text: str) -> bool:
+    """True when a quoted span inside an ssh/sshpass command is a local client option."""
+    if not tokens_before:
+        return False
+    inner = quoted_text.strip()
+    if inner:
+        opt_in_quote = inner.split("=", 1)[0].split(None, 1)[0].lower()
+        if opt_in_quote in _SSH_LOCAL_COMMAND_OPTIONS:
+            return True
+
+    last = tokens_before[-1]
+    if last == "=" and len(tokens_before) >= 2:
+        last = tokens_before[-2]
+
+    norm = last
+    if norm.lower().startswith("-o") and len(norm) > 2:
+        norm = norm[2:].lstrip("= ")
+    elif norm.lower() == "-o":
+        return True
+
+    opt_name = norm.split("=")[0].strip().lower()
+    if opt_name in _SSH_LOCAL_COMMAND_OPTIONS:
+        return True
+
+    if len(tokens_before) >= 2 and tokens_before[-2].lower() == "-o":
+        return True
+    if last.lower().startswith("-o"):
+        return True
+
+    if last.startswith("-") and not _PAYLOAD_FLAG.match(last) and last != "--":
+        flag_char = last[-1].lower()
+        if flag_char in _SSH_OPTION_ARG_LETTERS:
+            return True
+
+    return False
+
+
 def is_remote_payload(command: str, match_start: int, match_end: int) -> bool:
     """True when the match lies inside the payload of a context-switching command.
 
@@ -361,6 +408,13 @@ def is_remote_payload(command: str, match_start: int, match_end: int) -> bool:
     a recognised context-switching command. `ssh -V; prismor allow` runs
     `prismor allow` locally -- the match is outside every quoted span, so this
     returns False and the finding stands.
+
+    Exemptions require confirmed remote execution:
+      * Matches inside unescaped command substitutions (`$(...)` or ```...```)
+        within double quotes execute locally before the remote command receives
+        them, and therefore stay live (issue #607).
+      * Matches inside locally evaluated SSH options such as ProxyCommand or
+        LocalCommand execute on this machine, and therefore stay live (issue #607).
     """
     if match_start < 0 or match_end > len(command):
         return False
@@ -380,6 +434,24 @@ def is_remote_payload(command: str, match_start: int, match_end: int) -> bool:
         # quote.
         if not (start < match_end <= end + 1):
             continue
+
+        # In double quotes, unescaped command substitutions ($(cmd) and `cmd`)
+        # execute on the LOCAL machine before the enclosing command runs.
+        # Any match overlapping an executable substitution is live local code.
+        if command[start] == '"':
+            inner = command[start + 1:end]
+            effective_start = max(match_start, start + 1)
+            effective_end = min(match_end, end)
+            is_sub = False
+            for sub_start, sub_end in command_substitution_spans(inner):
+                abs_start = start + 1 + sub_start
+                abs_end = start + 1 + sub_end
+                if effective_start < abs_end and effective_end > abs_start:
+                    is_sub = True
+                    break
+            if is_sub:
+                return False
+
         seg_start = 0
         for k in range(start):
             if bare[k] in _SEPARATORS:
@@ -387,5 +459,13 @@ def is_remote_payload(command: str, match_start: int, match_end: int) -> bool:
         tokens = bare[seg_start:start].split()
         if not tokens:
             return False
-        return tokens[0].rsplit("/", 1)[-1] in _REMOTE_CONTEXTS
+
+        cmd = tokens[0].rsplit("/", 1)[-1]
+        if cmd not in _REMOTE_CONTEXTS:
+            return False
+
+        if cmd in ("ssh", "sshpass") and _is_local_ssh_option(tokens, command[start + 1:end]):
+            return False
+
+        return True
     return False
