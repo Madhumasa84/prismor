@@ -32,7 +32,7 @@ class ResearchGateway(Gateway):
     cannot establish that property get a refusal before any forwarding.
     """
     def __init__(self, *args, visible_input, experiment, fast=None, stronger=None,
-                 unchanged_approval_fixture=False, **kwargs):
+                 unchanged_approval_fixture=False, native_short_circuit=False, **kwargs):
         if experiment not in EXPERIMENTS[1:] or kwargs.get("mode", "enforce") != "enforce":
             raise ValueError("research gateway requires an explicit scripted mode and enforcement")
         super().__init__(*args, **kwargs)
@@ -40,6 +40,7 @@ class ResearchGateway(Gateway):
         self.experiment = experiment
         self.fast, self.stronger = fast, stronger
         self.unchanged_approval_fixture = unchanged_approval_fixture
+        self.native_short_circuit = native_short_circuit
         self._research_active = False
         self.research_records = []
 
@@ -84,6 +85,12 @@ class ResearchGateway(Gateway):
                   "original_action": actual,
                   "model_call_count": 0}
         self.research_records.append(record)
+        if self.native_short_circuit and native.verdict == "block":
+            record.update(composed_decision=deepcopy(native.as_dict()),
+                          judge_call_count=0, scripted_call_count=0,
+                          judgment_provenance=None, routing_reason="native_block_short_circuit",
+                          human_approval_route={"native_required": False, "route": "not_requested"})
+            return native
         unsupported = None
         if action_hash(actual) != self._request.action_sha256:
             unsupported = "Action differs from the judge-visible proposal."

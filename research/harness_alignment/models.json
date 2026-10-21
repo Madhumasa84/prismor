@@ -1,0 +1,26 @@
+{
+  "niti": {
+    "available": false,
+    "adapter": null,
+    "endpoint_or_checkpoint": null,
+    "request_schema": null,
+    "response_schema": null,
+    "policy_conditioning": null,
+    "model_version": null,
+    "generation_parameters": null,
+    "authentication": null,
+    "interface_evidence": []
+  },
+  "stronger": {
+    "available": false,
+    "adapter": null,
+    "endpoint_or_checkpoint": null,
+    "request_schema": null,
+    "response_schema": null,
+    "policy_conditioning": null,
+    "model_version": null,
+    "generation_parameters": null,
+    "authentication": null,
+    "interface_evidence": []
+  }
+}

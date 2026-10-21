@@ -269,3 +269,85 @@ actual API/checkpoint/configuration before inference; design verified transform
 rebinding and typed grant/provenance/context adapters if needed. The subclass is
 for synchronous disposable research fixtures, not a production deployment.
 Prompt 5 remains pending; all existing working rules remain in force.
+
+## Prompt 5 — zero-request comparison infrastructure
+
+Rechecked the clean research branch, applicable root instructions and the
+previous specification/format/progress/code/diff before editing. Starting HEAD:
+`583dbfaf5921d2de70babb8884ecfd1c987b29a9`. No branch switch or production change.
+All established scope/input boundaries/fixture working rules remain in force.
+
+Repository searches found no supplied Niti interface or selected comparison
+judge configuration. Older semantic-judge-coverage examples are injection
+screening, not evidence of either requested authorization API. Both roles are
+explicitly unavailable in `models.json`; `live_settings.json` is false/zero.
+Exact missing evidence: endpoint/checkpoint, request/response schemas,
+policy/task/authorization/context conditioning, model/version, supported
+parameters, authentication/credential reference, then a verified concrete adapter.
+No model call, model download, approval-network call or external lookup ran.
+
+Added `model_io.py` internal budget/attempt/replay utilities and `comparison.py`
+zero-request planning/native pilot entry point. Every eventual inference
+attempt/question/retry must consume a shared budget; no hidden retries/fallback
+are supplied. Raw synthetic response/native fields and normalized parsing/error
+records are separate. Unknown usage/cost stay null; confidence text is not a
+probability. Exact replay identity includes full visible input, conditioning,
+version and inference configuration; replay never establishes live latency.
+Only explicit offline unit fixtures exercise the generic dispatch recorder.
+Concrete provider normalization and multi-question aggregation are blocked by
+missing interface evidence, rather than approximated with an invented schema.
+
+Judge-only plans retain both selected pair members regardless of native blocks.
+Gateway plans record actual judges-run lists separately and retain native
+short-circuiting. Added an optional short-circuit flag at the existing subclass
+seam (default false for the prior scripted controls) and tested that a native
+block invokes zero judges and forwards zero calls through inherited methods.
+No alternate forwarding path was introduced. All model plans remain unexecuted
+with null forwarding/judgment fields. No model gets credit for native blocks.
+The dry run separately executes only the established disposable native gateway.
+
+Run command:
+
+```bash
+python3 -m research.harness_alignment.comparison --mode dry-run
+python3 -m pytest tests/test_harness_alignment_models.py tests/test_harness_alignment_judge.py tests/test_harness_alignment_casebook.py tests/test_harness_alignment_gateway.py -q
+ruff check --select E9,F63,F7,F82 research/harness_alignment/*.py tests/test_harness_alignment_models.py
+```
+
+Actual dry run `20261021T192852Z-f1f7edf1`: zero inference; 15 supported native
+cases, nine unsupported; 10 recorded upstream calls; three simulated native
+approval requests. Provisional native requirement/forwarding agreement each
+15/15 cases, 10/10 pairs, 5/5 whole families. Incorrect permits and unnecessary
+blocks each 0/15 against provisional forwarding expectations. No reviewed labels
+or genuine judge responses; all judge paired rates and live latency/usage/cost
+unavailable. Comparison-plan rows: 15 observed native, 51 unavailable and 36
+unsupported (not model-request counts). Generated outputs remain ignored and
+include hashes, Git dirty state/configuration, source versions and run ID.
+The manifest separately records shipped native semantic enabled/auto settings;
+all fixture modes disable screening to avoid hidden model inference. Active live
+workspace/org effective settings were not resolved/refreshed and remain unknown.
+
+Final focused suite: **82 passed in 73.21s** (55 preceding checks and 27 new
+infrastructure checks); selected lint passed. No unrelated failures.
+Added tests for zero-call gates, failed retry budget, raw/text/usage retention,
+credential redaction, missing actual version, distinct errors, exact replay,
+input metadata boundary, genuine pair scoring and no credit for scripted/replay/
+short-circuit records. False/zero and enabled-but-unconfigured smoke refusal were
+exercised only in offline tests. The bounded future smoke command is documented
+and printed by dry run; it was not executed against any model.
+
+Changed files: new `comparison.py`, `model_io.py`, `live_settings.json`,
+`models.json`, `MODEL_INTEGRATION.md`, `PILOT_REPORT.md`,
+`INDEPENDENT_EVALUATION_PLAN.md`, `tests/test_harness_alignment_models.py`;
+small optional seam changes in `judged_gateway.py`/`offline.py`; README and this
+log. The separate mentor report states contribution, results, failure controls,
+limitations and next experiment. No final holdout was generated. Existing
+casebook, expectations, policy semantics, original gateway proof and production
+code are unchanged. Source examples flagged by Prismor were treated as data;
+no suggested live screening changes or external judge invocation was followed.
+
+Final scoped review also bound attempt limits to the hashed inference
+configuration and required genuine attempt records plus actual judges-run lists
+before judge scoring. This prevents native-only or synthetic metadata from
+earning judge credit. Repeated dry run retained zero real requests and the same
+native counts; generated run artifacts are confirmed ignored.

@@ -5,6 +5,28 @@ execution through Prismor's actual MCP gateway. This is an integration milestone
 `model_status` is `not_run`. Niti's API/checkpoint remain unverified. VLM monitoring
 and the Gemma competition project are separate.
 
+## Model comparison infrastructure (live execution disabled)
+
+**No live model was run.** Both real configurations remain unavailable because
+no supplied Niti/comparison protocol or selected model configuration was found.
+The [integration status](MODEL_INTEGRATION.md) lists exact prerequisites and the
+bounded future smoke command. The [mentor pilot report](PILOT_REPORT.md) separates
+actual native observations from unavailable model plans. A
+[fresh reviewed evaluation plan](INDEPENDENT_EVALUATION_PLAN.md) is separate from
+the current development casebook.
+
+```bash
+python3 -m research.harness_alignment.comparison --mode dry-run
+python3 -m pytest tests/test_harness_alignment_models.py tests/test_harness_alignment_judge.py tests/test_harness_alignment_casebook.py tests/test_harness_alignment_gateway.py -q
+```
+
+Dry run makes zero real requests, records the native fixture baseline (15
+supported, nine unsupported, ten recorded tool calls), and plans both members
+of a selected judge-only pair separately from native-short-circuiting deployment.
+Null model results stay null. Reviewed and genuine judge-pair denominators are
+zero/unavailable. The focused suite passed **82 tests**. Live configuration,
+permissions and production behavior remain unchanged.
+
 ## Scripted research judge
 
 [Judge interface and composition](JUDGE_INTERFACE.md) describes the research

@@ -124,6 +124,7 @@ def evaluate_native(case, mode, judge_configuration=None):
                 experiment=judge_configuration["experiment"],
                 fast=ScriptedJudge("scripted-fast", judge_configuration["fast"]),
                 stronger=ScriptedJudge("scripted-stronger", judge_configuration["stronger"]),
+                native_short_circuit=judge_configuration.get("native_short_circuit", False),
                 unchanged_approval_fixture=setup["approval_source"] in
                 ("not_requested", "unavailable", "approved", "denied"))
         else:
