@@ -5,6 +5,74 @@ execution through Prismor's actual MCP gateway. This is an integration milestone
 `model_status` is `not_run`. Niti's API/checkpoint remain unverified. VLM monitoring
 and the Gemma competition project are separate.
 
+## Development casebook and runner
+
+The [one-page specification](SPEC.md) defines this stage. The
+[case format](CASE_FORMAT.md) and `casebook.schema.json` separate judge-visible
+input from evaluator-only metadata. The casebook has **24 development cases in
+eight triples**, with 16 explicit scored pairs. Labels are 22 provisional and two
+unresolved; none are human-reviewed. There is no held-out benchmark.
+
+Run from the repository root using the existing development environment
+(runtime dependencies, pytest for tests, and jsonschema from this directory's
+`requirements.txt`; no dependencies were installed during this milestone):
+
+```bash
+python3 -m research.harness_alignment.runner --mode validate
+python3 -m research.harness_alignment.runner --mode decision-only
+python3 -m research.harness_alignment.runner --mode gateway
+python3 -m pytest tests/test_harness_alignment_casebook.py tests/test_harness_alignment_gateway.py -q
+```
+
+Each runner command prints a compact summary and its output directory. The
+default is ignored `runs/<run-id>/`, containing `observations.jsonl`,
+`summary.json`, and `manifest.json`. `--output <new-directory>` selects another
+location; existing directories are refused. The manifest records Git revision
+and dirty state, casebook/schema/policy hashes, Python version, configuration and
+run IDs. Generated runs stay out of commits.
+
+Validation covers all 24 cases. Native decision/gateway modes support 15 cases
+in task-scope, resource, upload, dummy-sensitivity and paraphrase families. Nine
+cases in provenance, argument-bound grants and contextual sufficiency remain
+unsupported, with precise per-case reasons. Two of those nine are unresolved
+(`provenance-unknown`, `context-missing`). Review all 22 provisional labels with
+the mentor; resolve these two before stronger evaluation.
+
+Supported native restrictions are explicitly encoded in fixture YAML. Native
+Prismor does not read the casebook's natural-language task, policy explanation
+or authorization evidence. Authorization is an explicit simulated service
+configuration; no grant validation or provenance understanding is implied.
+All general judge evaluations remain unsupported and `model_status: not_run`.
+
+Decision-only uses real event construction and `evaluate_tool_call` with
+`persist=False`, `record=False`, `register_agent=False`, `flush_at_exit=False`;
+it never calls a tool or resolves approval, and execution fields remain null.
+Gateway mode uses the real native branch with a recording upstream. The original
+four-case test below remains unchanged. New `offline.py` follows its fixture
+pattern, isolates each case, and guards external services without importing
+pytest into the runner. A denied simulated service response also exercises
+native approval polling. Service attempt counters fail even when errors are
+swallowed by native best-effort handling.
+
+Metrics are **provisional development agreement**, separately for native
+requirements, optional judge judgments and actual forwarding. On the development
+run, native requirements matched 15/15 compatible cases, 10/10 pairs and 5/5 whole
+families; gateway forwarding matched the same denominators. This is an integration
+observation against provisional labels, not independently validated accuracy.
+Decision-only forwarding and every judge denominator are zero, with null rates.
+Unsupported/unresolved/failed/unobserved cases are excluded from incompatible
+denominators and remain visible. A blocked tool response is a successful
+integration observation (`status: ok`, `response_status: tool_error`), not a
+runner failure.
+
+Validation: **22 passed** in the casebook/original-boundary focused command;
+the existing gateway/tool-policy/surface selection passed **33 tests**, with one
+pre-existing skip for the missing stdio demo fixture. The exact existing-check
+command is recorded in [the progress log](PROGRESS.md). Selected repository lint checks also
+passed. No production files or the original four-case test were changed.
+
+## Original four-case boundary
+
 From the repository root, display and check all four JSON observations:
 
 ```bash

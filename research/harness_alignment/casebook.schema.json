@@ -1,0 +1,400 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "synthetic": {
+      "const": true
+    },
+    "families": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "scored_pairs": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "members",
+          "scored_pairs"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "trusted_task": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "enum": [
+                      "user",
+                      "policy",
+                      "approval_service",
+                      "tool_output",
+                      "fixture_manifest",
+                      "unknown"
+                    ]
+                  },
+                  "provenance": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "provenance"
+                ],
+                "additionalProperties": false
+              },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "enum": [
+                      "user",
+                      "policy",
+                      "approval_service",
+                      "tool_output",
+                      "fixture_manifest",
+                      "unknown"
+                    ]
+                  },
+                  "provenance": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "provenance"
+                ],
+                "additionalProperties": false
+              },
+              "authorization_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "source": {
+                      "enum": [
+                        "user",
+                        "policy",
+                        "approval_service",
+                        "tool_output",
+                        "fixture_manifest",
+                        "unknown"
+                      ]
+                    },
+                    "provenance": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source",
+                    "provenance"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "proposed_action": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "const": "echo"
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "tool",
+                  "arguments"
+                ],
+                "additionalProperties": false
+              },
+              "contextual_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "source": {
+                      "enum": [
+                        "user",
+                        "policy",
+                        "approval_service",
+                        "tool_output",
+                        "fixture_manifest",
+                        "unknown"
+                      ]
+                    },
+                    "provenance": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "source",
+                    "provenance"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "trusted_task",
+              "policy",
+              "authorization_evidence",
+              "proposed_action",
+              "contextual_evidence"
+            ],
+            "additionalProperties": false
+          },
+          "evaluator": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expected": {
+                "type": "object",
+                "properties": {
+                  "judgment": {
+                    "enum": [
+                      "allow",
+                      "block",
+                      "step_up",
+                      null
+                    ]
+                  },
+                  "native_requirement": {
+                    "enum": [
+                      "allow",
+                      "block",
+                      "step_up",
+                      null
+                    ]
+                  },
+                  "forwarding": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "judgment",
+                  "native_requirement",
+                  "forwarding"
+                ],
+                "additionalProperties": false
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label_status": {
+                "enum": [
+                  "provisional",
+                  "unresolved"
+                ]
+              },
+              "native_setup": {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "enum": [
+                      "gateway_policy.yaml",
+                      "policies/read_only.yaml",
+                      "policies/resources.yaml",
+                      "policies/uploads.yaml",
+                      "policies/sensitivity.yaml",
+                      null
+                    ]
+                  },
+                  "approval_source": {
+                    "enum": [
+                      "not_requested",
+                      "unavailable",
+                      "approved",
+                      "denied"
+                    ]
+                  },
+                  "representation": {
+                    "enum": [
+                      "yaml_fixture",
+                      "unmapped_context"
+                    ]
+                  }
+                },
+                "required": [
+                  "policy",
+                  "approval_source",
+                  "representation"
+                ],
+                "additionalProperties": false
+              },
+              "integration_support": {
+                "type": "object",
+                "properties": {
+                  "judge": {
+                    "type": "object",
+                    "properties": {
+                      "supported": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "supported",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "decision_only": {
+                    "type": "object",
+                    "properties": {
+                      "supported": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "supported",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "gateway": {
+                    "type": "object",
+                    "properties": {
+                      "supported": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "supported",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "judge",
+                  "decision_only",
+                  "gateway"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "family",
+              "expected",
+              "rationale",
+              "label_status",
+              "native_setup",
+              "integration_support"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "input",
+          "evaluator"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 20,
+      "maxItems": 30
+    }
+  },
+  "required": [
+    "version",
+    "synthetic",
+    "families",
+    "cases"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

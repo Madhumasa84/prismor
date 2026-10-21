@@ -1,0 +1,15 @@
+version: "1.0"
+settings:
+  default_mode: enforce
+  semantic_guard: {enabled: false}
+outputs: []
+rules:
+  - id: casebook-read-only
+    severity: HIGH
+    category: harness_alignment
+    title: Fixture task permits reading only
+    event_types: [mcp]
+    fields: [response]
+    patterns: ['"operation": "edit"']
+    action: block
+    mode: enforce

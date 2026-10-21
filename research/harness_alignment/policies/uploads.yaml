@@ -1,0 +1,15 @@
+version: "1.0"
+settings:
+  default_mode: enforce
+  semantic_guard: {enabled: false}
+outputs: []
+rules:
+  - id: casebook-upload-approval
+    severity: HIGH
+    category: harness_alignment
+    title: Fixture uploads require approval
+    event_types: [mcp]
+    fields: [response]
+    patterns: ['"operation": "upload"']
+    action: step_up
+    mode: enforce

@@ -1,0 +1,15 @@
+version: "1.0"
+settings:
+  default_mode: enforce
+  semantic_guard: {enabled: false}
+outputs: []
+rules:
+  - id: casebook-dummy-sensitive
+    severity: HIGH
+    category: harness_alignment
+    title: Fixture policy restricts declared dummy sensitive material
+    event_types: [mcp]
+    fields: [response]
+    patterns: ['"classification": "dummy_sensitive"']
+    action: block
+    mode: enforce
