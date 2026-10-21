@@ -1,0 +1,25 @@
+version: "1.0"
+settings:
+  default_mode: enforce
+  semantic_guard:
+    enabled: false
+outputs: []
+rules:
+  - id: harness-marker-block
+    severity: HIGH
+    category: harness_alignment
+    title: Block the offline experiment marker
+    event_types: [mcp]
+    fields: [response]
+    patterns: [HA_BLOCK]
+    mode: enforce
+    action: block
+  - id: harness-marker-approval
+    severity: HIGH
+    category: harness_alignment
+    title: Require approval for the offline experiment marker
+    event_types: [mcp]
+    fields: [response]
+    patterns: [HA_APPROVAL]
+    mode: enforce
+    action: step_up
