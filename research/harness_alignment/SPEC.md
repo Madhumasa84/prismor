@@ -33,8 +33,9 @@ rubric. Expected native requirement describes the native pre-action `Decision`
 (e.g. an already approved upload still produces `step_up`). Expected forwarding
 describes exactly one upstream call or none. They must not be substituted for
 one another. Final pre-action reporting preserves native decisions and, in
-gateway mode, separately describes observed approval resolution. There is no
-invented judge/native arbiter. No expected value selects an action or service
+gateway mode, separately describes observed approval resolution. A research-only
+scripted restrictor composes findings through the native Decision contract; it
+never replaces forwarding or grants permission. No expected value selects an action or service
 response; explicit fixture configuration controls the simulated service.
 
 **Native support.** 15 cases in five families have explicit YAML projections
@@ -43,7 +44,8 @@ Native Prismor reads YAML and arguments, not the natural-language task or
 authorization evidence. Nine cases in the provenance, grant and context
 families are retained as unsupported: no verified mapping conveys their trust,
 scope/freshness, or contextual evidence to the relevant authorization interface.
-Two of those nine also have unresolved labels. General judge support is zero.
+Two of those nine also have unresolved labels. General model-judge support is
+zero; a scripted research contract exercises the gateway seam only.
 
 **Measurements.** Validation checks the closed schema, IDs, membership/pairs,
 evidence and native policy representation. Decision-only calls the real
@@ -60,4 +62,6 @@ configuration IDs, casebook/schema/default-policy/fixture hashes. Metrics are
 judge judgments and forwarding, at case/pair/whole-family levels. Unsupported,
 unresolved, failed, unexecuted and null observations are excluded from the
 corresponding denominator. Zero denominators have null rates. No model results
-exist: every observation has `model_status: not_run`.
+exist: every observation has `model_status: not_run`. Scripted controls are
+provenance-tagged and excluded from model-agreement metrics. See
+`JUDGE_INTERFACE.md` for composition, action binding and escalation limits.

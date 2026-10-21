@@ -182,3 +182,90 @@ approval does not establish an argument-bound grant API. General judge support
 remains zero until Niti's actual interface/checkpoint and inference settings are
 established. No held-out benchmark or model-performance claim was created.
 Prompts 4–5 remain pending; existing project restrictions continue to apply.
+
+## 2026-10-22 — Prompt 4 research judge composition and scripted routing
+
+Started from clean `f78964f4ecc42a8fb5c3acb575ddebe45895db55`. Read the research
+specification, format, progress, applicable root instructions and current
+gateway/Decision implementation. The production API verified here is
+`Decision.as_dict`, the `Decision` constructor and `contract.strongest`; verdict
+and transform are derived from blocking. No production implementation changed.
+
+### Implemented behavior
+
+- Added a research `Judge` protocol and explicit `ScriptedJudge`, with a typed
+  valid `Judgment` separate from `JudgeError`. Values distinguish allow, deny,
+  missing authorization and semantic uncertainty; errors distinguish invalid
+  output, timeout and unavailable. Raw native fields are preserved without
+  inventing confidence. This is not Niti's API/checkpoint or an inference adapter.
+- Added `ResearchGateway`, extending only `_evaluate`: call the native parent,
+  deep-copy native evidence, invoke scripts only for the explicitly active
+  pre-action echo call, construct a separate native-contract Decision, and return
+  to inherited forwarding/approval handling. No independent execution path or
+  semantic_guard completion adapter is used.
+- Native blocks remain blocks; allow cannot clear native step_up/modify, and
+  research deny wins over weaker native verdicts. Findings, native transforms,
+  subject, engine and explanation are preserved. Native evidence is never edited
+  to present composition as a native finding.
+- Research selective escalation happens only for valid semantic uncertainty.
+  Missing authorization, errors and unresolved final judgments refuse. Native
+  defer remains unsupported at this gateway and is not cleared by a script.
+- Native modify and possibly redacted approval composition are unsupported and
+  refused before forwarding. Step_up composition is supported only with verified
+  unchanged-argument approval fixtures, never arbitrary/live services. Original,
+  judge-visible, effective observed actions and forwarded arguments/hashes are
+  separate; mismatched proposals refuse before judging/forwarding.
+- Native, fast-script, stronger-script and selectively escalated modes share
+  policies, cases, enforcement and fresh state. Scripts never receive expected
+  labels. Every script result has provenance. Caching remains off; true model
+  calls are zero and are counted separately from script invocations.
+- Added composed pre-action evidence, native approval routing/outcome, each
+  judgment/error, routing reason and binding records to JSONL. Scripted results
+  are excluded from model agreement; native-only forwarding expectations do not
+  score added scripted restrictions. Reproducibility metadata includes control
+  configuration and hash plus the new research source hashes.
+
+### Commands and observations
+
+```bash
+python3 -m research.harness_alignment.runner --mode gateway --experiment native-rules
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-fast
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-stronger
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-selective
+python3 -m pytest tests/test_harness_alignment_judge.py tests/test_harness_alignment_casebook.py tests/test_harness_alignment_gateway.py -q
+env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/test_mcp_gateway.py tests/test_tool_policy_three_state.py tests/test_surface_conformance.py -q -rs -k 'call_forwarded_on_allow or call_blocked_pre_forward or engine_error_fails_closed or call_step_up or call_modify or gateway_end_to_end_real_engine or three_state or surface_conformance'
+ruff check --select E9,F63,F7,F82 research/harness_alignment/*.py tests/test_harness_alignment_judge.py tests/test_harness_alignment_casebook.py
+```
+
+All four modes: 15 native-supported cases, nine unmapped cases retained, no
+inference. Observed script-call / upstream-call totals were respectively:
+native **0 / 10**, fast **15 / 10**, stronger **15 / 0**, selective **30 / 10**.
+The stronger default deliberately denies; selective defaults to explicit
+uncertainty then explicit allow. These are scripted control-flow observations,
+not accuracy, calibration, attack-success reduction or real inference cost.
+
+Focused integration: **55 passed** (33 new judge tests plus 22 prior checks).
+Tests cover all requested branches, separate valid replies/errors, timeout and
+unavailable stronger behavior, native decision independence and precedence,
+unsupported transform/defer paths, action binding, preserved native approval,
+script provenance/call counts, no discovery/post calls, no caching and unchanged
+judge input after evaluator-only metadata changes. Existing checks: **33 passed,
+one pre-existing missing-demo skip, 48 deselected**. Selected lint checks passed.
+No unrelated failures were observed. Generated artifacts remain ignored; their
+manifests report the starting revision and dirty tested-source state.
+
+### Files and limits
+
+Added `judge.py`, `judged_gateway.py`, `scripted_controls.json`,
+`policies/judge_controls.yaml`, `JUDGE_INTERFACE.md`, and
+`tests/test_harness_alignment_judge.py`. Extended `offline.py`, `runner.py`,
+`casebook.py` reporting, the casebook metadata test, README/spec/format and this
+log. The original four-case test, original policy, 24-case data and production
+source remain unchanged. No hooks, live policy, permissions or real services
+were touched. Previously flagged source examples were treated as reference data.
+
+Remaining: mentor review of provisional/unresolved labels; establish Niti's
+actual API/checkpoint/configuration before inference; design verified transform
+rebinding and typed grant/provenance/context adapters if needed. The subclass is
+for synchronous disposable research fixtures, not a production deployment.
+Prompt 5 remains pending; all existing working rules remain in force.

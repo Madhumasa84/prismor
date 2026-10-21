@@ -1,0 +1,25 @@
+version: "1.0"
+settings:
+  default_mode: enforce
+  semantic_guard: {enabled: false}
+outputs: []
+rules:
+  - id: judge-control-modify
+    severity: HIGH
+    category: harness_alignment
+    title: Synthetic native input modification requirement
+    event_types: [mcp]
+    fields: [response]
+    patterns: [HA_MODIFY]
+    action: modify
+    transform: pii_redact
+    mode: enforce
+  - id: judge-control-defer
+    severity: HIGH
+    category: harness_alignment
+    title: Synthetic native defer requirement
+    event_types: [mcp]
+    fields: [response]
+    patterns: [HA_DEFER]
+    action: defer
+    mode: enforce

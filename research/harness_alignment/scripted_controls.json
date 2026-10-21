@@ -1,0 +1,15 @@
+{
+  "native-rules": {"fast": [], "stronger": []},
+  "scripted-fast": {
+    "fast": [{"decision": "allow", "reason": "Explicit scripted fast control: permit subject to all native restrictions."}],
+    "stronger": []
+  },
+  "scripted-stronger": {
+    "fast": [],
+    "stronger": [{"decision": "deny", "reason": "Explicit scripted stronger control: refuse this fixture action."}]
+  },
+  "scripted-selective": {
+    "fast": [{"decision": "unresolved_semantics", "reason": "Explicit scripted uncertainty; request the stronger control."}],
+    "stronger": [{"decision": "allow", "reason": "Explicit scripted resolution: permit subject to native restrictions."}]
+  }
+}

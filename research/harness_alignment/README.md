@@ -5,6 +5,57 @@ execution through Prismor's actual MCP gateway. This is an integration milestone
 `model_status` is `not_run`. Niti's API/checkpoint remain unverified. VLM monitoring
 and the Gemma competition project are separate.
 
+## Scripted research judge
+
+[Judge interface and composition](JUDGE_INTERFACE.md) describes the research
+protocol and safety limits. This is our contract, not Niti's API. The native
+evaluator and forwarding branch remain real. A research-only Gateway subclass
+snapshots native evidence and adds restrictions through the native `Decision`
+constructor and precedence API. It cannot clear native blocks or approvals.
+
+Run the comparable controls (same casebook, fixture policy and enforcement):
+
+```bash
+python3 -m research.harness_alignment.runner --mode gateway --experiment native-rules
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-fast
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-stronger
+python3 -m research.harness_alignment.runner --mode gateway --experiment scripted-selective
+python3 -m pytest tests/test_harness_alignment_judge.py tests/test_harness_alignment_casebook.py tests/test_harness_alignment_gateway.py -q
+```
+
+`ScriptedJudge` receives only judge-visible input, never expected labels. It
+distinguishes valid allow/deny/missing-authorization/semantic-uncertainty results
+from invalid-output/timeout/unavailable errors. All replies have scripted
+provenance. The default stronger control deliberately denies; selective mode
+escalates an explicit uncertainty to an explicit allow. These are control-flow
+fixtures, not model decisions. Script calls are counted separately from actual
+model calls (zero); no cross-case cache is used. No accuracy, calibration,
+attack-success or inference-cost claim follows from the controls.
+
+Native snapshots, composed decisions, approval routing/outcomes, original and
+judge-visible actions, effective action when available, and forwarded arguments
+remain separate in JSONL. General transforms/redacted approvals and native
+defer composition are explicitly unsupported and refuse before forwarding.
+Selective semantic escalation is a research extension; production gateway defer
+handling has not been changed. Full simulated native approval remains required
+for uploads even when a research judge allows. Errors and unresolved replies
+also refuse. General Niti/model-interface coverage remains zero.
+
+The comparable development runs each retained 15 native-supported cases and
+nine unsupported mappings. Their observed control-flow totals were:
+
+| Mode | Script calls | Model calls | Upstream tools/call |
+| --- | --- | --- | --- |
+| native-rules | 0 | 0 | 10 |
+| scripted-fast | 15 | 0 | 10 |
+| scripted-stronger | 15 | 0 | 0 |
+| scripted-selective | 30 | 0 | 10 |
+
+Focused integration tests: **55 passed** across the judge, casebook and original
+gateway suites. Relevant existing checks: **33 passed, one pre-existing skip**
+for the missing stdio demo. Selected lint checks passed. The nine unmapped
+casebook cases and original provisional/unresolved labels remain unchanged.
+
 ## Development casebook and runner
 
 The [one-page specification](SPEC.md) defines this stage. The

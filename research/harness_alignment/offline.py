@@ -5,7 +5,7 @@ Neither Gateway._evaluate nor runtime.evaluate_tool_call is replaced.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, nullcontext
 from copy import deepcopy
 import os
 from pathlib import Path
@@ -22,6 +22,8 @@ from prismor.runtime.principal import Subject
 from prismor.runtime.runtime import evaluate_tool_call
 
 from .casebook import policy_path
+from .judge import ScriptedJudge, action_hash
+from .judged_gateway import ResearchGateway
 
 
 class RecordingUpstream(mcp_gateway.Upstream):
@@ -82,9 +84,10 @@ def isolated(policy_reference, approval_source):
             source_requests.append(deepcopy(body))
             if approval_source == "unavailable":
                 return None
-            if approval_source in ("approved", "denied"):
+            if approval_source in ("approved", "approved_redacted", "denied"):
                 return {"id": "simulated-approval", "status":
-                        "approved" if approval_source == "approved" else "pending"}
+                        "pending" if approval_source == "denied" else "approved",
+                        "decision_mode": "redacted" if approval_source == "approved_redacted" else "full"}
             return forbid()
 
         def poll(*a, **k):
@@ -101,20 +104,30 @@ def isolated(policy_reference, approval_source):
 
 
 def snapshot(decision):
-    return {"verdict": decision.verdict, "allow": decision.allow,
-            "rule_id": decision.rule_id,
-            "matched_rules": [f["ruleId"] for f in decision.findings],
-            "reason": decision.reason}
+    record = deepcopy(decision.as_dict())
+    record["matched_rules"] = [f["ruleId"] for f in decision.findings]
+    return record
 
 
-def evaluate_native(case, mode):
+def evaluate_native(case, mode, judge_configuration=None):
     setup = case["evaluator"]["native_setup"]
+    if judge_configuration and mode != "gateway":
+        raise ValueError("scripted composition is supported at the gateway seam only")
     with isolated(setup["policy"], setup["approval_source"]) as (workspace, attempts, requests, stack):
         spec = mcp_gateway.UpstreamSpec(name="fixture", command=["true"], transport="stdio")
         upstream = RecordingUpstream(spec)
         stack.enter_context(patch.object(mcp_gateway, "make_upstream", lambda *a, **k: upstream))
-        gateway = mcp_gateway.Gateway([spec], workspace=workspace, mode="enforce",
-                                      session_id="offline-case")
+        gateway_kwargs = {"workspace": workspace, "mode": "enforce", "session_id": "offline-case"}
+        if judge_configuration:
+            gateway = ResearchGateway(
+                [spec], **gateway_kwargs, visible_input=case["input"],
+                experiment=judge_configuration["experiment"],
+                fast=ScriptedJudge("scripted-fast", judge_configuration["fast"]),
+                stronger=ScriptedJudge("scripted-stronger", judge_configuration["stronger"]),
+                unchanged_approval_fixture=setup["approval_source"] in
+                ("not_requested", "unavailable", "approved", "denied"))
+        else:
+            gateway = mcp_gateway.Gateway([spec], **gateway_kwargs)
         sent = []
         stack.enter_context(patch.object(gateway, "_send", sent.append))
         try:
@@ -154,7 +167,8 @@ def evaluate_native(case, mode):
             previous = sys.getprofile()
             try:
                 sys.setprofile(observe)
-                gateway._handle_tools_call_safe("action", {"name": "fixture__echo", "arguments": arguments})
+                with gateway.judging_action() if judge_configuration else nullcontext():
+                    gateway._handle_tools_call_safe("action", {"name": "fixture__echo", "arguments": arguments})
             finally:
                 sys.setprofile(previous)
             if len(pre) != 1:
@@ -165,19 +179,57 @@ def evaluate_native(case, mode):
             forwarded = [p for method, p in upstream.requests if method == "tools/call"]
             if attempts:
                 raise RuntimeError("; ".join(attempts))
-            final = deepcopy(pre[0])
-            if pre[0]["verdict"] == "step_up" and outcomes:
+            research = gateway.research_records[0] if judge_configuration else None
+            if research:
+                native_record = research["native_decision"]
+                final = deepcopy(research["composed_decision"])
+            else:
+                native_record = pre[0]
+                final = deepcopy(pre[0])
+            composed_requirement = final["verdict"]
+            if composed_requirement == "step_up" and outcomes:
                 # Research description of the observed native approval branch,
                 # not a new native Decision or a replacement authorization rule.
                 final = {"verdict": "allow" if outcomes[0]["approved"] else "block",
                          "source": "observed_native_gateway_approval_branch",
-                         "native_requirement": "step_up", "rule_id": pre[0]["rule_id"],
+                         "native_requirement": "step_up", "rule_id": native_record["rule_id"],
                          "reason": "Simulated approval source: " + outcomes[0]["status"]}
-            return {"native_decision": pre[0], "final_pre_action_decision": final,
+            original = deepcopy(case["input"]["proposed_action"])
+            effective = {"tool": forwarded[0]["name"], "arguments": deepcopy(forwarded[0]["arguments"])} if forwarded else None
+            # Known unchanged-argument approval fixtures and unsupported modify
+            # refusal bind all supported forwarding. An unexpected mismatch is
+            # surfaced as a failed integration, never counted as agreement.
+            if research and any(action_hash({"tool": p["name"], "arguments": p["arguments"]})
+                                != action_hash(original) for p in forwarded):
+                raise RuntimeError("forwarded action differs from the judged action; composition unsupported")
+            extra = {"original_action": original, "effective_transformed_action": effective,
+                     "judge_visible_action": original if research and research["judge_results"] else None,
+                     "forwarded_arguments": [deepcopy(p["arguments"]) for p in forwarded],
+                     "binding_status": "matched" if research and forwarded else "not_forwarded"
+                     if research else "not_applicable",
+                     "judge_results": [], "judge_call_count": 0, "scripted_call_count": 0,
+                     "judge_errors": [],
+                     "model_call_count": 0, "composition_status": "supported",
+                     "routing_reason": "native_rules", "judgment_provenance": None,
+                     "human_approval_route": {"native_required": native_record["verdict"] == "step_up",
+                                              "route": "native_gateway_approval" if outcomes else "not_requested"}}
+            if research:
+                extra.update({k: deepcopy(research[k]) for k in (
+                    "judge_results", "judge_call_count", "scripted_call_count", "model_call_count",
+                    "composition_status", "routing_reason", "judgment_provenance", "human_approval_route")})
+                extra["judge_errors"] = [deepcopy(call["result"]) for call in research["judge_results"]
+                                         if call["result"]["status"] == "error"]
+                if research["composition_status"] == "unsupported":
+                    extra["binding_status"] = "unsupported"
+            extra["native_defer_resolution"] = "unsupported_at_production_gateway" if native_record["verdict"] == "defer" else "not_required"
+            extra["human_approval_route"]["outcome"] = deepcopy(outcomes[0]) if outcomes else None
+            return {"native_decision": native_record, "final_pre_action_decision": final,
+                    "composed_pre_action_decision": deepcopy(research["composed_decision"]) if research else deepcopy(pre[0]),
+                    "judge_decision": deepcopy(research["judge_decision"]) if research else None,
                     "actual_forwarding": {"tools_call_count": len(forwarded),
                                           "requests": deepcopy(forwarded)},
                     "approval_outcome": outcomes[0] if outcomes else None,
                     "post_action": post,
-                    "response_status": "tool_error" if reply["result"].get("isError") else "ok"}
+                    "response_status": "tool_error" if reply["result"].get("isError") else "ok", **extra}
         finally:
             gateway.close()

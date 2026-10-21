@@ -117,6 +117,13 @@ def summarize(book, rows):
             expected = meta["expected"][target]
             if row["status"] != "ok" or meta["label_status"] != "provisional" or expected is None:
                 continue
+            # Scripted responses are control-flow fixtures, not model evidence.
+            # Native-only forwarding labels also do not label an added scripted
+            # restriction. Retain native-requirement checks as regression checks.
+            if target == "judgment" and row.get("judgment_provenance") == "scripted":
+                continue
+            if target == "forwarding" and row.get("experiment", "native-rules") != "native-rules":
+                continue
             if target == "forwarding":
                 obs = row["actual_forwarding"]
                 # True means exactly one call, not arbitrary nonzero execution.

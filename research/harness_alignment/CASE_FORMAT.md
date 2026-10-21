@@ -46,16 +46,19 @@ parsed into an authorization decision. `integration_support` gives independent
 `supported`/`reason` entries for `decision_only`, `gateway` and `judge`. A true
 native flag requires a validated enforce-mode YAML projection with no judge or
 telemetry outputs. A false flag preserves the case without attempting to invent
-an interface. Judge support must remain false in this stage.
+an interface. Model-judge support remains false; the scripted seam is reported
+separately without claiming a verified model interface.
 
 Each JSONL row includes case/family/configuration/run IDs, label/support status,
-request hash, native decision, null judge decision, final pre-action decision,
+request hash, native decision, optional research judgment, final pre-action decision,
 approval outcome, actual forwarding, post-action scans, response status,
 status/error and reason. For approvals, `native_decision` remains `step_up`;
 `final_pre_action_decision` is a research description of the observed native
 gateway approval branch (`allow`/`block`, with an explicit source label).
 Decision-only never resolves approval or populates execution. Unsupported
-cases have null decisions/execution and a precise support reason. Unresolved
+unmapped cases have null decisions/execution and a precise support reason. A
+research composition found unsupported at runtime retains the observed native
+decision and observed zero forwarding. Unresolved
 labels are visible in rows and counted separately, including when unsupported.
 
 The summary compares native requirements only to native decisions, judgment
@@ -64,3 +67,15 @@ A pair/family enters a denominator only when every member is compatible,
 provisional, successfully evaluated and has the relevant observation and label.
 The same case may appear in both declared pairs; these are dependent development
 observations. Results are not independently validated accuracy.
+
+Scripted modes add `experiment`, provenance-tagged `judge_results`, typed
+`judge_errors`, routing/human-approval details, `composed_pre_action_decision`,
+action/binding records, and separate script/model call counts. Native evidence
+is deep-copied before research findings are composed; approval resolution never
+rewrites it. `judge_decision` contains a valid research result or null; errors
+are separate. Scripted research decisions use allow/deny/missing_authorization/
+unresolved_semantics; no automatic model-rubric mapping is claimed. Scripted
+judgments and native-only forwarding expectations are excluded from corresponding
+agreement denominators. A `judge_error` status records a refused action with
+error details, and general model-interface support remains zero. See
+`JUDGE_INTERFACE.md` for the exact contract and unsupported-transform behavior.
