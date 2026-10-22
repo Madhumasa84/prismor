@@ -1,0 +1,117 @@
+{
+  "files": [
+    "research/harness_alignment/casebook.json",
+    "research/harness_alignment/casebook.schema.json",
+    "research/harness_alignment/scripted_controls.json",
+    "research/harness_alignment/models.json",
+    "research/harness_alignment/live_settings.json",
+    "research/harness_alignment/gateway_policy.yaml",
+    "research/harness_alignment/policies/judge_controls.yaml",
+    "research/harness_alignment/policies/read_only.yaml",
+    "research/harness_alignment/policies/resources.yaml",
+    "research/harness_alignment/policies/sensitivity.yaml",
+    "research/harness_alignment/policies/uploads.yaml",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/focused.xml",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/focused.log",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/selected_native.xml",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/selected_native.log",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/original_forwarding.xml",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/original_forwarding.log",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/commands.json",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/verification.json",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/SHA256SUMS.txt",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/native-dry-run/native_observations.jsonl",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/native-dry-run/pilot.json",
+    "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/native-dry-run/manifest.json",
+    "research/harness_alignment/hardening/20261022-offline/before_audit.json",
+    "research/harness_alignment/hardening/20261022-offline/before_helpers.json",
+    "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+    "research/harness_alignment/hardening/20261022-offline/before_regressions.py",
+    "research/harness_alignment/hardening/20261022-offline/before_full_checkout_tests.log",
+    "research/harness_alignment/hardening/20261022-offline/hardening_results.json",
+    "research/harness_alignment/hardening/20261022-offline/HARDENING_REVIEW.md",
+    "research/harness_alignment/hardening/20261022-offline/REPRODUCE.md",
+    "research/harness_alignment/hardening/20261022-offline/SHA256SUMS.txt",
+    "research/harness_alignment/hardening/20261022-offline/final_focused_tests.xml",
+    "research/harness_alignment/hardening/20261022-offline/label_review/blank_sidecar.json",
+    "research/harness_alignment/hardening/20261022-offline/label_review/blind_forms.json",
+    "research/harness_alignment/hardening/20261022-offline/label_review/evaluator_map.json",
+    "research/harness_alignment/hardening/20261022-offline/label_review/annotation_sidecar.schema.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/observations.jsonl",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/manifest.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/summary.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/observations.jsonl",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/manifest.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/summary.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/observations.jsonl",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/manifest.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/summary.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/observations.jsonl",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/manifest.json",
+    "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/summary.json",
+    "LICENSE"
+  ],
+  "mapping": {
+    "paper_revision": "dc5cc7ebd1c3efac001c5c26ea66196cef316eda",
+    "before_repair_revision": "54f99441e038a3501e67a234561bbe133f438d2b",
+    "post_repair_checkpoint": "9e2ca79dcf842cdd13d4b1c45c7c2e724d6b7e60",
+    "label_status": "Reported runs: 22 provisional, 2 unresolved, no completed independent annotations; manuscript review is separate.",
+    "Table 1": [
+      "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/original_forwarding.log"
+    ],
+    "Table 2": [
+      "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/focused.xml",
+      "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/selected_native.xml",
+      "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/selected_native.log",
+      "research/harness_alignment/runs/20261022T144413Z-cleanup-verification/native-dry-run/native_observations.jsonl"
+    ],
+    "scripted_control_paragraph": [
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/observations.jsonl",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/manifest.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/gateway/summary.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/observations.jsonl",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/manifest.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-fast/summary.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/observations.jsonl",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/manifest.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-stronger/summary.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/observations.jsonl",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/manifest.json",
+      "research/harness_alignment/reports/20261021T193914Z/evidence/reproduced/runs/scripted-selective/summary.json"
+    ],
+    "Table 3": {
+      "A1": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_audit.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "A1"
+      },
+      "A3": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_audit.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "A3"
+      },
+      "R2": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_helpers.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "R2"
+      },
+      "R1": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_helpers.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "R1"
+      },
+      "R3": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_helpers.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "R3"
+      },
+      "A2": {
+        "before": "research/harness_alignment/hardening/20261022-offline/before_audit.json",
+        "after": "research/harness_alignment/hardening/20261022-offline/after_checks.json",
+        "key": "A2"
+      }
+    },
+    "omitted": "Full reports, PDFs, caches and old checkout archives remain private originals. Original SHA256SUMS files reference additional omitted files; MANIFEST.json covers exactly this selection. No raw genuine model responses exist. Before-fault repro scripts are historical and may require the original archived checkout; current baseline needs none of these records.",
+    "run_ids": "Native: 20261022T144417Z-3adba44d inside 20261022T144413Z-cleanup-verification; scripted run IDs and source/config hashes in each included manifest. Hardening records retain their own source/hash and command identities."
+  }
+}

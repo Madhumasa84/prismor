@@ -1,0 +1,8 @@
+research/harness_alignment/README.md
+research/harness_alignment/MODEL_INTEGRATION.md
+research/harness_alignment/REPRODUCE.md
+research/harness_alignment/reproduce.py
+research/harness_alignment/evidence_package.py
+research/harness_alignment/historical_evidence.json
+research/harness_alignment/candidate_files.txt
+tests/test_harness_alignment_reproduce.py

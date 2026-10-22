@@ -5,6 +5,81 @@
 Niti or comparison adapter is implemented because no supplied protocol was
 found. `ScriptedJudge` retains its name and provenance; it is neither model.
 
+## Extension map and runnable scripted example
+
+All symbols below are existing research interfaces, not a Niti wire schema.
+
+| Responsibility | Exact symbol |
+| --- | --- |
+| Judge input / action binding | `casebook.serialize_judge_request`, `judge.JudgeRequest.from_input`, `judge.action_hash` |
+| Typed outcomes / errors | `judge.Judgment`, `judge.JudgeError`, `judge.reply_record` |
+| Scripted control | `judge.ScriptedJudge.judge` |
+| Live prerequisites / registration gate | `model_io.INTERFACE_FIELDS`, `model_io.missing_prerequisites`, `model_io.VERIFIED_ADAPTERS` (empty frozenset, no registration function) |
+| Attempt identity / budget | `model_io.request_identity`, `Budget.reserve`, `Budget.remaining` |
+| Invocation / redaction / replay | `model_io.dispatch`, `redact`, `replay` |
+| Declare / capture / parse checks | `evidence.RecordingBoundary.declare`, `.capture`, `.validate_attempt`, `.decision` |
+| Aggregation | `evidence.aggregate`, `AGGREGATIONS` |
+| Scoring | `comparison.judge_agreement` |
+| Gateway composition | `judged_gateway.ResearchGateway._evaluate`, `compose` |
+| Partial failures | `offline.ObservationFailure`, `runner.run_cases` |
+
+From the full checkout root, after README setup, this example runs **one scripted
+judgment with zero model inference and no tool execution**:
+
+```bash
+.venv/bin/python - <<'PYEXAMPLE'
+import json
+from research.harness_alignment.casebook import load
+from research.harness_alignment.judge import JudgeRequest, ScriptedJudge, reply_record
+request = JudgeRequest.from_input(load()["cases"][0]["input"])
+judge = ScriptedJudge("offline-example", [{"decision": "allow", "reason": "Scripted control"}])
+print(json.dumps({"provenance": judge.provenance,
+                  "input": json.loads(request.serialized_input),
+                  "action_sha256": request.action_sha256,
+                  "result": reply_record(judge.judge(request))}, indent=2))
+PYEXAMPLE
+```
+
+Input contains `trusted_task`, `policy`, `authorization_evidence`,
+`proposed_action`, `contextual_evidence`; no label or family field is passed.
+The result has `status: judgment`, `decision: allow`, the scripted reason and
+`native_fields`. Provenance is `kind: scripted, judge: offline-example`.
+This is neither a Niti schema nor evidence of a correct model answer.
+
+Run the current adapter/recording contract checks (all synthetic):
+
+```bash
+.venv/bin/python -m pytest tests/test_harness_alignment_models.py tests/test_harness_alignment_hardening.py tests/test_harness_alignment_judge.py -q
+```
+
+For Niti, the mentor must supply its actual protocol and implement a concrete
+transport plus a versioned parser returning `Judgment` or `JudgeError`. Bind the
+requested and returned immutable model identity, conditioning, generation
+parameters, every required question/stage and aggregation version before
+capture. Extend the verified-adapter gate only after contract tests establish
+identity equality, invalid/error handling, raw/normalized consistency, required
+attempt completeness, replay binding and budget exhaustion behavior. Keep
+credential values external; configuration contains references only.
+
+`dispatch` accepts a callback returning internal `raw_response` and
+`actual_model_version` (optional actual usage/cost), not an assumed provider
+format. Each underlying request/retry must reserve budget before sending;
+hidden retries must be disabled or separately accounted for. The concrete
+transport must enforce cancellation/deadlines, token limits and streaming byte
+limits; the helper's post-return deadline and retained-byte checks do not do so.
+Protect the persistent recording manifest independently of mutable result rows.
+
+Adding a key or setting a flag is insufficient: `comparison.main` currently
+refuses `real-smoke` unconditionally because no verified concrete adapter exists.
+The mentor must wire actual dispatch/required-stage orchestration and scoring to
+that CLI, and separately integrate any live gateway use while preserving native
+restrictions, action binding and partial failures. `ask` in a model response must
+not be assumed to mean human approval. A research `missing_authorization` holds
+execution; it has no approval route of its own. Only native `step_up` surviving
+composition invokes native approval. The initial future live pilot needs
+separate authorization and suitable independent labels; the offline example and
+contract checks do not authorize it.
+
 ## Evidence and missing prerequisites
 
 Repository searches for Niti, judges, checkpoints, comparison configuration,
@@ -73,8 +148,9 @@ General transformations, typed grants, context/provenance mappings and native
 defer escalation retain their existing unsupported status.
 
 Selective routing is planned only for a **valid explicit semantic uncertainty**
-followed by the stronger judge. Errors hold; missing authorization follows the
-native approval requirement and cannot be supplied by another model. No
+followed by the stronger judge. Errors hold. `missing_authorization` adds a research block and does not invoke
+approval; it cannot be supplied by another model. Only a composed native
+`step_up` reaches inherited gateway approval processing. No
 confidence band is assumed to detect confident errors. How either model exposes
 semantic uncertainty still needs verification against its response contract.
 
