@@ -423,3 +423,53 @@ bounded development smoke, after the actual Niti/stronger schemas, immutable
 identities, conditioning, concrete verified transports/parameters/auth references,
 deadline/token/byte/retry accounting and separate human live authorization exist.
 Exact prerequisites and limits: `MODEL_INTEGRATION.md` and the new hardening review.
+
+## 2026-10-22 — Checkpoint and conservative documentation cleanup
+
+Created the explicitly approved 19-file local checkpoint:
+`9e2ca79dcf842cdd13d4b1c45c7c2e724d6b7e60` —
+`Checkpoint offline harness alignment hardening`. Before committing, checked the
+exact staged list, credentials patterns and `git diff --cached --check`; no
+unrelated or production files were staged. No push, merge or PR was created.
+
+Backed up both complete evidence directories, including ignored/untracked files,
+to `/tmp/prismor-harness-evidence-checkpoint-20261022T144104421425Z/evidence.tar.gz`.
+The adjacent `manifest.json` records every file hash and archive verification.
+All 163 archived files matched the originals; existing hardening checksums were
+49/49 and historical-audit checksums 111/111. Archive SHA-256:
+`8b560a1b900bfbe0cd5a48b84357e34a6769cb0a0b2427d957f798ec6110707a`.
+This is a local `/tmp` backup; retain a durable copy before temporary storage is
+cleared. The original directories remain in place, with their evidence untracked
+or ignored except for the three checkpointed hardening instructions.
+
+Cleanup is limited to `README.md` and this appended progress note. Consolidated
+the README from 234 to 146 lines into current scope, decision-to-forwarding path,
+existing-environment setup, exact reproduction commands, measured observations,
+unsupported behavior and model/annotation prerequisites. Removed repeated
+explanations, conversational exclusions and superseded test summaries from that
+guide. No files were deleted: the other documents define contracts, preserve
+results or have citations. The unused-import check found none. Existing cache
+and `/runs/` ignore rules suffice; no new rules hide historical evidence.
+Implementation, tests, prompts/controls, casebooks, labels, policies,
+configurations, forms and historical reports/results remain unchanged.
+
+New verification is separate from historical evidence at
+`runs/20261022T144413Z-cleanup-verification/`; exact invocations are in
+`commands.json`, with per-command logs, JUnit and `native-dry-run/` observations.
+The tested revision is the checkpoint with the README cleanup dirty.
+
+- Full focused harness suite, including 25 hardening regressions: **107 passed**,
+  100.85s. No failures.
+- Same selected native gateway/tool-policy/surface checks: **33 passed,
+  one pre-existing missing-demo skip, 48 deselected**, 10.33s.
+- Separate original forwarding experiment: **4 passed**, 6.33s;
+  before/after counts remain **1,0,0,1**.
+- Supported-subset dry run: before/after **15 supported, nine unsupported,
+  ten upstream calls**; real model requests remain **zero**.
+- Selected lint plus unused imports passed; README links and `git diff --check`
+  passed. Historical checksums and all original evidence bytes still match.
+
+Live inference stays false/zero; no remote service or real approval system was
+used, and no labels were marked reviewed. The parent JEV helper remains uncalled
+because it invokes a remote service. Cleanup changes are left uncommitted for
+review, with the Git index empty.
