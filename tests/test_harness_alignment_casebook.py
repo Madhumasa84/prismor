@@ -180,7 +180,8 @@ def test_validation_cli_records_metadata_and_refuses_overwrite(tmp_path):
     assert manifest["configuration_id"] == rows[0]["configuration_id"]
     assert manifest["policy_hashes"] and manifest["casebook_sha256"]
     assert set(manifest["research_source_hashes"]) == {
-        "casebook.py", "offline.py", "runner.py", "judge.py", "judged_gateway.py"}
+        "casebook.py", "offline.py", "runner.py", "judge.py", "judged_gateway.py",
+        "model_io.py", "evidence.py", "comparison.py"}
     assert set(manifest["dependencies"]) == {"jsonschema", "PyYAML"}
     original = hashlib.sha256((output / "manifest.json").read_bytes()).hexdigest()
     assert main(["--mode", "validate", "--output", str(output)]) == 2

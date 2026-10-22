@@ -140,3 +140,74 @@ plans. The generic scorer is tested with explicit synthetic records; those tests
 are not model evidence. Live latency/usage/cost and replay timings remain null.
 End-to-end offline fixture duration is recorded separately and includes setup,
 approval simulation and instrumentation; it is not inference latency.
+
+## Offline hardening contract (2026-10-22)
+
+The earlier description of caller flags and request-only replay is superseded by
+`evidence.py`. `RecordingBoundary.declare` records the selected configuration,
+full identities and required attempts **before execution**. Each identity binds
+adapter, parser version, aggregation version, exact pinned model version, input,
+conditioning and inference configuration. `dispatch` captures the complete record
+at the boundary; scoring and replay compare it with the independently held
+manifest and recompute normalization through the registered parser. Actual and
+requested versions must match exactly; there is no alias or fallback policy.
+
+The deterministic aggregation contracts are `single-v1` (exactly one),
+`all-required-v1` (all declared questions, precedence deny > missing authorization
+> unresolved semantics > allow), and `selective-v1` (two possible stages declared;
+second required only after the first returns unresolved semantics). They are
+research utilities, not assertions that Niti implements these protocols. A
+concrete adapter must select and version its verified protocol before use.
+
+The manifest is the authoritative recording boundary, retained separately from
+editable result rows by the evaluator. In-process fixtures hold private copies
+of digests/plans; `from_trusted_manifest` explicitly requires a manifest supplied
+by that trusted evaluator. A future persistent recorder must protect it through
+independent access control or an authenticated archive with a key outside the
+result writer. No such live recorder is deployed here. A digest in the same
+editable JSON file is insufficient. This defends against stale/inconsistent
+rows, not an attacker who owns Python, changes parser code, or rewrites both
+records and the trusted manifest. It establishes no cryptographic provider
+provenance or proof of remote inference. Old unbound records fail closed.
+
+Offline fixture parsers live only in a `test_fixture` boundary. That boundary
+cannot create live evidence and is absent from `VERIFIED_ADAPTERS` (still empty).
+Explicit fixture replay is labelled `offline_replay` with recording kind
+`test_fixture`; all replay has null live latency. Production-style scoring
+accepts only the genuine namespace and a trusted boundary. Caller
+`verified_adapter` and `complete_decision` booleans grant no credit.
+
+Limit ownership is explicit:
+
+| Limit | Current local check | Concrete transport prerequisite |
+| --- | --- | --- |
+| Overall decision deadline | Shared monotonic `Budget` deadline refuses new dispatches and rejects results returned too late | Bound wall-clock execution/cancellation across all stages; callback code cannot be preempted here |
+| Per-request timeout | Pass remaining deadline or request timeout, whichever is smaller; reject a late returned envelope | Enforce connect/read/stream timeout and document remote cancellation semantics |
+| Provider generation-token cap | Recorded `output_limit` is an intended token cap; no character-to-token approximation | Verified provider parameter and tokenizer/usage behavior; no Niti transport is supplied |
+| Retained-response byte cap | Default 65,536 bytes of canonical JSON UTF-8; discard oversized raw/normalized response, keep byte count and digest | Stream byte cap before buffering, bound envelope/SDK allocation; current callback may already allocate the response |
+| Retries/questions | Each callback reserves one attempt, including failures; wrapper retries zero times | Disable SDK hidden retries, or reserve and capture every underlying send; verify at transport boundary |
+
+The sleep/large-response regressions are local callback contracts, **not transport
+experiments**. Late responses are rejected after return; no waiting thread or
+inference cancellation is claimed. All real execution remains refused pending
+these prerequisites. Unknown usage/cost remain null. Raw responses are redacted
+before recording; a redaction that prevents deterministic parsing makes the
+response ineligible rather than permitting an unverifiable answer.
+
+Scoring reports the preselected known-label population separately from attempted
+cases, completed valid responses, decisive allow/deny answers, semantic
+abstentions, authorization requests and errors. Authorization requests are valid
+but separate from decisive permit/refuse accuracy. `cases`/`pairs` retain their
+conditional meaning; `answer_coverage`, `correct_over_attempted`,
+`unconditional_pairs` (attempted pairs), and `correct_pairs_over_predeclared`
+expose the other denominators. Two known attempted cases with allow/uncertainty
+produce 1/1 conditional accuracy, 1/2 coverage, 1/2 correct over attempts,
+0/1 fully correct attempted pairs and null conditional pair correctness.
+Unresolved references receive no forced correctness label. Duplicate case rows
+across runs receive no extra samples or decisive credit. Native summaries retain
+conditional metrics and add attempts/coverage; failures retain partial execution
+evidence through `ObservationFailure`. A post-forward mismatch is a detected
+execution, never a prevented one. Unobserved forwarding remains unknown.
+
+See [the hardening review](hardening/20261022-offline/HARDENING_REVIEW.md) and
+[blank independent label review](hardening/20261022-offline/LABEL_REVIEW.md).

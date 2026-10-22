@@ -13,6 +13,7 @@ from research.harness_alignment.judge import JudgeRequest, Judgment
 from research.harness_alignment.model_io import (
     Budget, dispatch, missing_prerequisites, replay, request_identity,
 )
+from research.harness_alignment.evidence import RecordingBoundary
 from research.harness_alignment.offline import evaluate_native
 from research.harness_alignment.runner import run_cases
 
@@ -24,7 +25,8 @@ def request():
 def identity():
     return request_identity(request(), model_version="synthetic-test-version",
                             inference_configuration={"output_limit": 50, "timeout_seconds": 1},
-                            conditioning={"prompt": "explicit synthetic test"})
+                            conditioning={"prompt": "explicit synthetic test"},
+                            adapter="offline-test", parser_version="fixture-v1", aggregation_version="single-v1")
 
 
 def envelope(**kwargs):
@@ -32,9 +34,16 @@ def envelope(**kwargs):
             "actual_model_version": "synthetic-test-version", **kwargs}
 
 
+def parse_fixture(raw):
+    return Judgment(raw["answer"], "test", raw)
+
+
+TEST_BOUNDARY = RecordingBoundary(kind="test_fixture", parsers={("offline-test", "fixture-v1"): parse_fixture})
+
+
 def attempt(send, **kwargs):
     return dispatch(Budget({"LIVE_MODEL_RUN": True, "MAX_REAL_REQUESTS": 1}, 1),
-                    identity(), send, lambda raw: Judgment("allow", "test", raw),
+                    identity(), send, parse_fixture, boundary=TEST_BOUNDARY,
                     timeout_seconds=1, output_limit=50, **kwargs)
 
 
@@ -106,16 +115,16 @@ def test_mismatched_limits_are_rejected_before_budget_or_send():
 
 
 def test_credentials_redacted_from_raw_and_normalized_records():
-    row = attempt(Mock(return_value=envelope(raw_response={"answer": "synthetic-credential"})),
+    row = attempt(Mock(return_value=envelope(raw_response={"answer": "allow", "text": "synthetic-credential"})),
                   credential_values=("synthetic-credential",))
     assert "synthetic-credential" not in json.dumps(row)
-    assert row["raw_response"]["answer"] == "[credential redacted]"
+    assert row["raw_response"]["text"] == "[credential redacted]"
 
 
 def genuine_replay_fixture():
     # Explicit fabricated test provenance to exercise replay verification, NOT
     # written to pilot records and never evidence of an actual model response.
-    return attempt(Mock(return_value=envelope()), provenance="genuine_live")
+    return attempt(Mock(return_value=envelope()))
 
 
 @pytest.mark.parametrize("field", ["judge_input", "model_version", "inference_configuration", "conditioning"])
@@ -124,21 +133,21 @@ def test_replay_requires_complete_identity(field):
     changed = deepcopy(identity())
     changed[field] = {"different": True} if field != "model_version" else "other-version"
     with pytest.raises(ValueError):
-        replay(row, changed)
+        replay(row, changed, boundary=TEST_BOUNDARY)
 
 
 def test_replay_matches_policy_context_and_never_claims_live_latency():
     row = genuine_replay_fixture()
-    result = replay(row, identity())
+    result = replay(row, identity(), boundary=TEST_BOUNDARY)
     assert result["provenance"] == "offline_replay" and result["live_latency_ms"] is None
     assert result["replay_processing_ms"] >= 0
     changed = identity()
     changed["judge_input"]["policy"]["text"] += " changed"
     with pytest.raises(ValueError):
-        replay(row, changed)
+        replay(row, changed, boundary=TEST_BOUNDARY)
     row["actual_model_version"] = "different-version"
     with pytest.raises(ValueError):
-        replay(row, identity())
+        replay(row, identity(), boundary=TEST_BOUNDARY)
 
 
 def test_scripted_or_test_records_cannot_be_replayed_as_models():
@@ -179,27 +188,32 @@ def test_pair_planning_does_not_short_circuit_judge_only_or_fabricate_execution(
     assert all(missing_prerequisites(c) for c in models.values())
 
 
+SCORE_BOUNDARY = None
+
+
 def score_rows():
-    rows = [{"case_id": cid, "configuration_id": "test", "evaluation": "judge-only", "status": "ok",
-             "response_provenance": "genuine_live", "verified_adapter": True, "complete_decision": True,
-             "judge_decision": {"decision": decision}}
-            for cid, decision in (("task-read", "allow"), ("task-edit", "deny"))]
-    for row in rows:
-        case = next(c for c in load()["cases"] if c["evaluator"]["id"] == row["case_id"])
-        ident = request_identity(JudgeRequest.from_input(case["input"]), model_version="synthetic-test-version",
-                                 inference_configuration={"output_limit": 50, "timeout_seconds": 1}, conditioning={})
-        attempt_record = dispatch(Budget({"LIVE_MODEL_RUN": True, "MAX_REAL_REQUESTS": 1}, 1),
-                                  ident, Mock(return_value=envelope()),
-                                  lambda raw: Judgment(row["judge_decision"]["decision"], "test", raw),
-                                  timeout_seconds=1, output_limit=50, provenance="genuine_live")
-        row.update(model_attempts=[attempt_record], model_call_count=1, judges_actually_run=["synthetic-test"])
+    global SCORE_BOUNDARY
+    SCORE_BOUNDARY = RecordingBoundary(kind="test_fixture", parsers={("offline-test", "fixture-v1"): parse_fixture})
+    rows = []
+    for cid, decision in (("task-read", "allow"), ("task-edit", "deny")):
+        case = next(c for c in load()["cases"] if c["evaluator"]["id"] == cid)
+        ident = identity()
+        ident["judge_input"] = json.loads(JudgeRequest.from_input(case["input"]).serialized_input)
+        SCORE_BOUNDARY.declare(cid, "test", "judge-only", [ident])
+        record = dispatch(Budget({"LIVE_MODEL_RUN": True, "MAX_REAL_REQUESTS": 1}, 1),
+                          ident, Mock(return_value=envelope(raw_response={"answer": decision})),
+                          parse_fixture, timeout_seconds=1, output_limit=50, boundary=SCORE_BOUNDARY)
+        rows.append({"case_id": cid, "configuration_id": "test", "evaluation": "judge-only", "status": "ok",
+                     "response_provenance": "test_fixture", "judge_decision": {"decision": decision},
+                     "aggregation_version": "single-v1", "model_attempts": [record],
+                     "model_call_count": 1, "judges_actually_run": ["offline-test"]})
     return rows
 
 
 def test_paired_judge_scoring_needs_both_valid_genuine_responses_and_suitable_labels():
     book, rows = load(), score_rows()
     def scores(rs, label="provisional"):
-        return judge_agreement(book, rs, configuration_id="test", evaluation="judge-only", label_status=label)
+        return judge_agreement(book, rs, configuration_id="test", evaluation="judge-only", label_status=label, boundary=SCORE_BOUNDARY, evidence_kind="test_fixture")
     assert scores(rows)["pairs"] == {"matches": 1, "denominator": 1, "rate": 1}
     assert scores(rows[:1])["pairs"]["rate"] is None
     assert scores(rows, "human_reviewed")["cases"]["rate"] is None

@@ -13,7 +13,7 @@ import sys
 import uuid
 
 from .casebook import ROOT, load, policy_path, serialize_judge_request, summarize
-from .offline import evaluate_native
+from .offline import ObservationFailure, evaluate_native
 from .judge import EXPERIMENTS, configuration as judge_configuration
 
 REPO = ROOT.parents[1]
@@ -62,8 +62,10 @@ def run_cases(book, mode, run_id, configuration_id, experiment="native-rules"):
                         row.update(status="judge_error", error=json.dumps(row["judge_errors"]),
                                    reason="Research judge failed; native gateway refused the action.")
                 except Exception as exc:
+                    if isinstance(exc, ObservationFailure):
+                        row.update(exc.evidence)
                     row.update(status="failed", error=f"{type(exc).__name__}: {exc}",
-                               reason="Offline integration failed; excluded from agreement.")
+                               reason="Offline integration failed; partial observations retained; included in attempts.")
         rows.append(row)
     return rows
 
@@ -94,7 +96,7 @@ def metadata(book_path, book, mode, run_id, experiment="native-rules"):
             "python": sys.version,
             "dependencies": {name: version(name) for name in ("jsonschema", "PyYAML")},
             "research_source_hashes": {name: digest((ROOT / name).read_bytes())
-                                       for name in ("casebook.py", "offline.py", "runner.py", "judge.py", "judged_gateway.py")},
+                                       for name in ("casebook.py", "offline.py", "runner.py", "judge.py", "judged_gateway.py", "model_io.py", "evidence.py", "comparison.py")},
             "scripted_controls_sha256": digest((ROOT / "scripted_controls.json").read_bytes()),
             "created_at": datetime.now(timezone.utc).isoformat()}
 
@@ -122,7 +124,9 @@ def main(argv=None):
                        judge_call_count=sum(r["judge_call_count"] for r in rows),
                        scripted_call_count=sum(r["scripted_call_count"] for r in rows),
                        model_call_count=sum(r["model_call_count"] for r in rows),
-                       observed_tools_call_count=sum((r["actual_forwarding"] or {}).get("tools_call_count", 0) for r in rows))
+                       observed_tools_call_count=sum(r["actual_forwarding"]["tools_call_count"] for r in rows if r.get("actual_forwarding") is not None),
+                       unknown_forwarding_cases=sum(r["status"] == "failed" and r.get("actual_forwarding") is None for r in rows),
+                       observed_failed_execution_cases=sum(r["status"] == "failed" and r.get("actual_forwarding") is not None for r in rows))
         summary["scripted_seam_cases"] = sum(r.get("judgment_provenance") == "scripted" for r in rows)
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         (destination / "observations.jsonl").write_text(

@@ -351,3 +351,75 @@ configuration and required genuine attempt records plus actual judges-run lists
 before judge scoring. This prevents native-only or synthetic metadata from
 earning judge credit. Repeated dry run retained zero real requests and the same
 native counts; generated run artifacts are confirmed ignored.
+
+## 2026-10-22 — Measurement/evidence hardening (offline only)
+
+Inspected actual branch `research/harness-alignment-eval`, HEAD
+`54f99441e038a3501e67a234561bbe133f438d2b`. Initial tracked diff was empty;
+`reports/20261021T193914Z` was already untracked and is preserved. Read applicable
+root/parent instructions, prior progress, actual definitions/tests and latest
+audit/probe script. The parent JEV helper uses an external TypeSafe client, so
+it was not invoked under the explicit no-remote-services restriction.
+
+Before editing, ran the existing A1–A3 audit script and full-checkout source
+helper probes for R1–R3. Also reproduced all six with six pytest probes in a
+full local archive of the inspected starting revision, including valid raw
+uncertainty and a real native-gateway post-forward fault. No extracted-definition
+helper substituted for integration. See the new, separate
+`hardening/20261022-offline/` output directory; historical artifacts remain intact.
+
+Implemented a separately retained recording boundary, predeclared full request
+identities and required stages, registered parser versions, explicit versioned
+single/all-required/selective aggregation, exact requested/actual model-version
+checks, and authoritative-record validation/re-parsing for replay and scoring.
+Offline fixture parsers remain outside the empty live adapter registry. The
+trust boundary excludes whole-process or manifest-owner compromise; checksums
+are consistency checks, not cryptographic provider provenance. Old unbound rows
+fail closed. Replay always has replay provenance and null live latency.
+
+Reporting now exposes population/attempt/completion/decisive/abstention/
+authorization/error counts, coverage, conditional and unconditional correctness,
+predeclared/attempted/completed/answered pairs, unresolved references and duplicate
+rows. Valid allow/uncertainty gives 1/1 decisive accuracy, 1/2 coverage, 1/2
+correct over attempts, 0/1 correct attempted pairs and null conditional pair rate.
+Native failures carry partial requests/arguments/snapshots/counts/binding evidence
+through `ObservationFailure`; post-forward detection is not prevention. Unknown
+forwarding remains separately counted. No native execution semantics changed.
+
+Budget deadlines refuse new calls and reject late callback/normalization results;
+retained canonical UTF-8 response bytes have a separate cap. These are callback
+contracts, not provider transport experiments or cancellation guarantees. No
+Niti transport was invented. Actual token-cap/streaming/hard-deadline/SDK-retry
+verification remains a concrete adapter prerequisite.
+
+Added 24 blank blind review forms, evaluator-only hash/family map and a proposed
+version-1 annotation sidecar schema. No original labels/schema or fixture policies
+changed. No human reviewer, decision or approval was invented. The later human
+import procedure is documented; automatic import/approval is not implemented.
+
+Actual verification (commands/logs in `hardening/20261022-offline/REPRODUCE.md`):
+
+- Full focused suite: **107 passed in 106.16s**, including **25** new hardening
+  regressions. JUnit and log: `passing_focused_tests.*`.
+- Existing gateway/tool-policy/surface selection: **33 passed, one pre-existing
+  missing-demo skip, 48 deselected**, 10.70s.
+- Six pre-hardening full-checkout witness tests: **6 passed**, 8.32s.
+- Native four-case forwarding: **1,0,0,1**. Final native dry run: **15 supported,
+  nine unsupported, ten upstream calls**, three simulated approval requests;
+  provisional native requirements/forwarding each **15/15 cases, 10/10 pairs,
+  5/5 whole families**. These remain engineering observations, not model accuracy.
+- Selected lint and `git diff --check` pass. Interim logs retain a stale source-
+  hash-list expectation and a deadline-test setup failure, both corrected; neither
+  was an actual model failure.
+
+Changed only research implementation/docs, focused tests and the new hardening
+output. No production source, live hooks/policies/settings, model download,
+external service, branch switch/reset/stash/pull, Git commit/push/merge occurred.
+`LIVE_MODEL_RUN=false`, `MAX_REAL_REQUESTS=0`; real external inference requests:
+**zero**. Explicit offline budgets were fixture-only and never genuine results.
+
+Single next experiment: the same independently reviewed two-case judge-only
+bounded development smoke, after the actual Niti/stronger schemas, immutable
+identities, conditioning, concrete verified transports/parameters/auth references,
+deadline/token/byte/retry accounting and separate human live authorization exist.
+Exact prerequisites and limits: `MODEL_INTEGRATION.md` and the new hardening review.

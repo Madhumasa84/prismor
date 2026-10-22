@@ -109,7 +109,22 @@ def snapshot(decision):
     return record
 
 
+class ObservationFailure(RuntimeError):
+    """A failed fixture execution with observations captured before cleanup."""
+    def __init__(self, cause, evidence):
+        super().__init__(str(cause))
+        self.evidence = deepcopy(evidence)
+
+
 def evaluate_native(case, mode, judge_configuration=None):
+    evidence = {}
+    try:
+        return _evaluate_native(case, mode, judge_configuration, evidence)
+    except Exception as exc:
+        raise ObservationFailure(exc, evidence) from exc
+
+
+def _evaluate_native(case, mode, judge_configuration, evidence):
     setup = case["evaluator"]["native_setup"]
     if judge_configuration and mode != "gateway":
         raise ValueError("scripted composition is supported at the gateway seam only")
@@ -129,6 +144,7 @@ def evaluate_native(case, mode, judge_configuration=None):
                 ("not_requested", "unavailable", "approved", "denied"))
         else:
             gateway = mcp_gateway.Gateway([spec], **gateway_kwargs)
+        pre, post, outcomes = [], [], []
         sent = []
         stack.enter_context(patch.object(gateway, "_send", sent.append))
         try:
@@ -152,8 +168,6 @@ def evaluate_native(case, mode, judge_configuration=None):
                         "final_pre_action_decision": snapshot(decision),
                         "actual_forwarding": None, "approval_outcome": None,
                         "post_action": [], "response_status": None}
-
-            pre, post, outcomes = [], [], []
 
             def observe(frame, event, value):
                 if event != "return" or value is None:
@@ -233,4 +247,28 @@ def evaluate_native(case, mode, judge_configuration=None):
                     "post_action": post,
                     "response_status": "tool_error" if reply["result"].get("isError") else "ok", **extra}
         finally:
+            # Observe before cleanup, including exceptions raised after forwarding.
+            # Detection after a call is evidence of execution, not prevention.
+            forwarded = [deepcopy(p) for method, p in upstream.requests if method == "tools/call"]
+            records = getattr(gateway, "research_records", [])
+            research = records[0] if records else None
+            original = deepcopy(case["input"]["proposed_action"])
+            mismatch = any(action_hash({"tool": p["name"], "arguments": p["arguments"]})
+                           != action_hash(original) for p in forwarded)
+            evidence.update(
+                upstream_requests=deepcopy(upstream.requests),
+                actual_forwarding={"tools_call_count": len(forwarded), "requests": forwarded}
+                if mode == "gateway" else None,
+                forwarded_arguments=[deepcopy(p["arguments"]) for p in forwarded],
+                native_decision=deepcopy(research["native_decision"]) if research else deepcopy(pre[0]) if pre else None,
+                decision_snapshots=deepcopy(pre), post_action=deepcopy(post),
+                approval_outcome=deepcopy(outcomes[0]) if outcomes else None,
+                approval_requests=deepcopy(requests), original_action=original,
+                effective_transformed_action={"tool": forwarded[0]["name"], "arguments": deepcopy(forwarded[0]["arguments"])} if forwarded else None,
+                binding_status="mismatch_observed_after_forward" if mismatch else "matched" if forwarded else "not_forwarded",
+                model_call_count=research["model_call_count"] if research else 0,
+                judge_call_count=research["judge_call_count"] if research else 0,
+                scripted_call_count=research["scripted_call_count"] if research else 0,
+                judge_results=deepcopy(research["judge_results"]) if research else [],
+                composed_pre_action_decision=deepcopy(research["composed_decision"]) if research else deepcopy(pre[0]) if pre else None)
             gateway.close()

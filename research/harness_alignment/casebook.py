@@ -107,13 +107,16 @@ def _agreement(values):
 
 def summarize(book, rows):
     """Compare observations after execution; expectations never drive actions."""
-    by_id = {r["case_id"]: r for r in rows}
+    counts = Counter(r["case_id"] for r in rows)
+    by_id = {r["case_id"]: r for r in rows if counts[r["case_id"]] == 1}
     scores = {}
     for target in ("native_requirement", "judgment", "forwarding"):
         outcomes = {}
         for case in book["cases"]:
             meta = case["evaluator"]
-            row = by_id[meta["id"]]
+            row = by_id.get(meta["id"])
+            if row is None:
+                continue
             expected = meta["expected"][target]
             if row["status"] != "ok" or meta["label_status"] != "provisional" or expected is None:
                 continue
@@ -141,11 +144,27 @@ def summarize(book, rows):
                     pairs.append(all(outcomes[cid] for cid in pair))
             if all(cid in outcomes for cid in family["members"]):
                 families.append(all(outcomes[cid] for cid in family["members"]))
-        scores[target] = {"cases": _agreement(list(outcomes.values())),
+        eligible = {c["evaluator"]["id"] for c in book["cases"]
+                    if c["evaluator"]["label_status"] == "provisional"
+                    and c["evaluator"]["expected"][target] is not None}
+        attempted = {r["case_id"] for r in rows if r["case_id"] in eligible
+                     and r["status"] in ("ok", "failed", "judge_error")}
+        attempted_pairs = [p for f in book["families"] for p in f["scored_pairs"]
+                           if all(cid in attempted for cid in p)]
+        scores[target] = {"population_known_label_cases": len(eligible),
+                          "attempted_cases": len(attempted),
+                          "completed_observations": len(outcomes),
+                          "answer_coverage": {"matches": len(outcomes), "denominator": len(attempted),
+                                              "rate": len(outcomes) / len(attempted) if attempted else None},
+                          "correct_over_attempted": {"matches": sum(outcomes.values()), "denominator": len(attempted),
+                                                     "rate": sum(outcomes.values()) / len(attempted) if attempted else None},
+                          "attempted_pairs": len(attempted_pairs),
+                          "unconditional_pairs": _agreement([all(outcomes.get(cid, False) for cid in p) for p in attempted_pairs]),"cases": _agreement(list(outcomes.values())),
                           "scored_pairs": _agreement(pairs),
                           "whole_families": _agreement(families),
                           "excluded_cases": len(rows) - len(outcomes)}
-    return {"case_count": len(rows), "family_count": len(book["families"]),
+    return {"case_count": len(counts), "input_row_count": len(rows),
+            "duplicate_case_count": sum(n > 1 for n in counts.values()), "family_count": len(book["families"]),
             "status_counts": dict(Counter(r["status"] for r in rows)),
             "integration_coverage": {
                 lane: sum(c["evaluator"]["integration_support"][lane]["supported"] for c in book["cases"])

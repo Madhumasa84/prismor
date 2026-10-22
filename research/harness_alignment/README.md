@@ -219,3 +219,16 @@ This proves the in-process gateway forwarding boundary with real policy. It
 does not test stdio wire transport, a live approval server, model decisions,
 Niti performance, latency, redacted approvals, or defer/modify behavior. Native
 gateway defer resolution remains a separate gap identified in Prompt 1.
+
+## Measurement hardening milestone
+
+The [offline hardening review](hardening/20261022-offline/HARDENING_REVIEW.md)
+contains reproduced A1–A3/R1–R3 witnesses, patched regressions, exact test logs and
+native observations. Conditional agreement is now accompanied by attempted-case
+coverage and unconditional counts; native failed executions preserve partial
+forwarding evidence. Scoring/replay require a separately retained recording
+boundary and versioned registered normalization/aggregation. Historical counts
+above remain historical; the updated contract and transport limitations are in
+[MODEL_INTEGRATION.md](MODEL_INTEGRATION.md#offline-hardening-contract-2026-10-22).
+The [label handoff](hardening/20261022-offline/LABEL_REVIEW.md) provides 24 blank
+blind forms and a proposed annotation sidecar, without approving any label.

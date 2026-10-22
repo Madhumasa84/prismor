@@ -79,3 +79,18 @@ judgments and native-only forwarding expectations are excluded from correspondin
 agreement denominators. A `judge_error` status records a refused action with
 error details, and general model-interface support remains zero. See
 `JUDGE_INTERFACE.md` for the exact contract and unsupported-transform behavior.
+
+
+## Measurement and review hardening
+
+The pair/family denominators above describe conditional agreement. Scoring also
+reports preselected known-label populations, attempted cases/pairs, completed
+valid responses, decisive answers, semantic abstentions, authorization requests,
+errors, coverage and unconditional correctness. Failed native executions retain
+partial observations; unknown execution is not a zero. Duplicate rows do not
+create extra samples. See `MODEL_INTEGRATION.md` for the binding contract.
+
+Independent human annotations use the proposed separate
+`annotation_sidecar.schema.json`, exported by `annotations.py`. The original
+casebook schema and labels are unchanged; blank exports approve nothing. See
+`hardening/20261022-offline/LABEL_REVIEW.md` for the later human import procedure.

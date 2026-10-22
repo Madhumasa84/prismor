@@ -59,9 +59,12 @@ cases remain a separate regression. Local writes never target live settings.
 written under ignored `runs/`. Metadata includes revision/dirty state, run and
 configuration IDs, casebook/schema/default-policy/fixture hashes. Metrics are
 **provisional development agreement**, separately for native requirements,
-judge judgments and forwarding, at case/pair/whole-family levels. Unsupported,
-unresolved, failed, unexecuted and null observations are excluded from the
-corresponding denominator. Zero denominators have null rates. No model results
+judge judgments and forwarding, at case/pair/whole-family levels. Conditional correctness requires completed decisive compatible observations.
+Report the preselected population, attempts, errors, semantic abstentions and
+authorization requests separately; errors/abstentions remain in attempted-case
+and attempted-pair unconditional denominators. Unresolved references are not
+correctness targets. Unavailable metrics have null rates. See the versioned
+recording/aggregation and coverage contract in `MODEL_INTEGRATION.md`. No model results
 exist: every observation has `model_status: not_run`. Scripted controls are
 provenance-tagged and excluded from model-agreement metrics. See
 `JUDGE_INTERFACE.md` for composition, action binding and escalation limits.
