@@ -3717,6 +3717,11 @@ class PolicyEngine:
         for entry in self.allowlists:
             if entry.type != "allow" or not entry.applies_to(rule_id):
                 continue
+            # A `rule_ids: ["*"]` or match-anything entry blanks every floor and
+            # self-protection finding. Those rules stay pinned; a named allow
+            # for one rule still applies.
+            if _floor_allowlist_rejected(rule_id, entry, rule):
+                continue
             if rule is None or not shell:
                 if entry.patterns.search(evidence):
                     return entry
@@ -4123,6 +4128,19 @@ def _dequote_shell(cmd: str) -> Optional[str]:
 
 
 _HEREDOC_START_RE = re.compile(r"<<-?[ \t]*['\"]?(\w+)['\"]?")
+
+
+def _floor_allowlist_rejected(rule_id: str, entry: "AllowlistEntry", rule: Optional["CompiledRule"]) -> bool:
+    """True when this allowlist entry must not suppress a floor finding."""
+    protected = rule_id in _NON_OVERRIDABLE_RULE_IDS
+    if rule is not None and getattr(rule, "category", None) in _CORE_BLOCK_CATEGORIES:
+        protected = True
+    if not protected:
+        return False
+    # Only the blanket forms: every rule, or a pattern that matches anything
+    # (it matches the empty string). A named search allow such as
+    # `patterns: [scratch]` on destructive-command still applies.
+    return "*" in entry.rule_ids or entry.patterns.search("") is not None
 
 
 def _expand_braces(cmd: str) -> str:
