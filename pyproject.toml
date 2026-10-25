@@ -227,6 +227,7 @@ packages = [
 "docs/sdk-integration.md" = "prismor/runtime/data/docs/sdk-integration.md"
 "docs/semantic-guard.md" = "prismor/runtime/data/docs/semantic-guard.md"
 "docs/skill-scanner.md" = "prismor/runtime/data/docs/skill-scanner.md"
+"docs/subagent-limits.md" = "prismor/runtime/data/docs/subagent-limits.md"
 "docs/subagents.md" = "prismor/runtime/data/docs/subagents.md"
 "docs/supply-chain.md" = "prismor/runtime/data/docs/supply-chain.md"
 "docs/sweep-and-cloak.md" = "prismor/runtime/data/docs/sweep-and-cloak.md"
