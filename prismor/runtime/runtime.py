@@ -295,6 +295,12 @@ def evaluate_tool_call(
     _parent_agent = _parent_agent_of(event, _agent_name)
     if _parent_agent:
         event.setdefault("metadata", {}).setdefault("parent_agent_name", _parent_agent)
+    if (event.get("metadata") or {}).get("subagent_id"):
+        # Where in the agent tree the call sits, for `when: subagent.depth/chain`.
+        from prismor.runtime.subagent_context import current_chain
+        _chain = [n for n in current_chain() if n != _agent_name] or ([_parent_agent] if _parent_agent else [])
+        event["metadata"].setdefault("subagent_chain", _chain)
+        event["metadata"].setdefault("subagent_depth", max(len(event["metadata"]["subagent_chain"]), 1))
 
     # Stamp principal and agent identity onto the event.
     meta = event.setdefault("metadata", {})
@@ -314,6 +320,11 @@ def evaluate_tool_call(
             session_id=session_id, subject=subject,
             identity_token=identity_token or current_token(), explain=explain,
         )
+
+    from prismor.runtime import delegations as _delegations
+    from prismor.runtime.subagent_context import tree_session
+    _scope = str(meta.get("delegation_scope") or tree_session(session_id, bool(meta.get("subagent_id"))))
+    _delegations.stamp(event, _agent_name, _scope)
 
     perf.lap()
     if not record:
@@ -929,6 +940,8 @@ def evaluate_tool_call(
         }
     if blocking is None and mode == "observe" and meta.get("framework"):
         _warn_observe_adapter(str(meta["framework"]), findings)
+    if blocking is None and record:
+        _delegations.record(event, _agent_name, _scope)
     return Decision(
         allow=blocking is None,
         findings=findings,

@@ -20,8 +20,9 @@ import uuid
 from contextlib import contextmanager
 from typing import Iterator, Optional, Tuple
 
-# (label, call id, the guard's agent name, type for an unnamed nested call)
-_RUNNING: contextvars.ContextVar[Optional[Tuple[str, str, str, Optional[str]]]] = contextvars.ContextVar(
+# (label, call id, the guard's agent name, type for an unnamed nested call,
+#  agent names of every running tool's agent, outermost first)
+_RUNNING: contextvars.ContextVar[Optional[Tuple[str, str, str, Optional[str], Tuple[str, ...]]]] = contextvars.ContextVar(
     "prismor_running_tool", default=None)
 
 
@@ -46,6 +47,30 @@ def current_parent() -> Optional[str]:
     return parent[2] if parent else None
 
 
+def current_chain() -> Tuple[str, ...]:
+    """Agent names of every guarded tool running right now, outermost
+    first: the ancestors of a subagent call made underneath. Its length is
+    that call's depth."""
+    parent = _RUNNING.get()
+    return parent[4] if parent else ()
+
+
+# The session of the last main-agent call screened in this context. Frameworks
+# give each agent run its own session id, so a subagent's calls are counted in
+# the delegation records of the main agent's session instead.
+_TREE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("prismor_tree_session", default=None)
+
+
+def tree_session(session_id: str, is_subagent: bool) -> str:
+    """The session a call's delegation records belong to."""
+    if not is_subagent:
+        _TREE.set(session_id)
+        return session_id
+    # Only while a guarded tool runs the subagent: outside one, a remembered
+    # session may belong to an earlier, unrelated run.
+    return (_TREE.get() if _RUNNING.get() is not None else None) or session_id
+
+
 @contextmanager
 def running(agent_label: str, call_id: Optional[str] = None, *,
             agent_name: Optional[str] = None, child_type: Optional[str] = None) -> Iterator[None]:
@@ -56,7 +81,11 @@ def running(agent_label: str, call_id: Optional[str] = None, *,
     nested call whose own guard has no label (e.g. the agent a handoff runs).
     """
     label = agent_label or "agent"
-    token = _RUNNING.set((label, str(call_id or uuid.uuid4().hex[:12]), agent_name or label, child_type))
+    name = agent_name or label
+    chain = current_chain()
+    if not chain or chain[-1] != name:  # a tool calling its own agent's tool is not a level
+        chain += (name,)
+    token = _RUNNING.set((label, str(call_id or uuid.uuid4().hex[:12]), name, child_type, chain))
     try:
         yield
     finally:

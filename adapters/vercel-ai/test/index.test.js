@@ -401,7 +401,28 @@ test("a toolset run inside another agent's tool reports as a subagent", async ()
   const by = (n) => requests.filter((r) => r.body.tool_name === n);
   assert.equal(by("fetch_url")[0].body.subagent, undefined);          // main agent
   assert.equal(by("ask_researcher")[0].body.subagent, undefined);     // main agent launching it
-  assert.deepEqual(by("fetch_url")[1].body.subagent, { id: "support-bot:c2", type: "researcher", parent: "support-bot" });
+  const { root, ...sub } = by("fetch_url")[1].body.subagent;
+  assert.deepEqual(sub, { id: "support-bot:c2", type: "researcher", parent: "support-bot", depth: 1, chain: ["support-bot"] });
+  assert.equal(root, by("ask_researcher")[0].body.session_id);  // counted in the launching call's session
+});
+
+test("a subagent of a subagent reports depth 2 and its chain", async () => {
+  const requests = [];
+  await withMockFetch(recordingFetch(requests), async () => {
+    const lookup = { execute: async () => "found" };
+    const summTools = prismorTools({ lookup }, { agentName: "summarizer" });
+    const resTools = prismorTools({
+      ask_summarizer: { execute: async () => summTools.lookup.execute({}, { toolCallId: "s1" }) },
+    }, { agentName: "researcher" });
+    const mainTools = prismorTools({
+      ask_researcher: { execute: async () => resTools.ask_summarizer.execute({}, { toolCallId: "r1" }) },
+    }, { agentName: "support-bot" });
+    await mainTools.ask_researcher.execute({}, { toolCallId: "m1" });
+  });
+  const { root, ...sub } = requests.find((r) => r.body.tool_name === "lookup").body.subagent;
+  assert.equal(root, requests.find((r) => r.body.tool_name === "ask_researcher").body.session_id);
+  assert.deepEqual(sub, { id: "researcher:r1", type: "summarizer", parent: "researcher",
+                          depth: 2, chain: ["support-bot", "researcher"] });
 });
 
 test("langgraph js: a call inside an agent subgraph is a subagent; a lone ReAct agent is not", async () => {
@@ -415,4 +436,16 @@ test("langgraph js: a call inside an agent subgraph is a subagent; a lone ReAct 
   });
   assert.equal(requests[0].body.subagent, undefined);
   assert.deepEqual(requests[1].body.subagent, { id: "researcher:a730", type: "researcher" });
+});
+
+test("a tool listed in handoffs sends handoff_to", async () => {
+  const requests = [];
+  await withMockFetch(recordingFetch(requests), async () => {
+    const tools = prismorTools({ ask_researcher: { execute: async () => "ok" }, other: { execute: async () => "ok" } },
+      { agentName: "support-bot", handoffs: { ask_researcher: "researcher" } });
+    await tools.ask_researcher.execute({ q: "x" }, { toolCallId: "h1" });
+    await tools.other.execute({}, { toolCallId: "h2" });
+  });
+  assert.equal(requests[0].body.handoff_to, "researcher");
+  assert.equal(requests[1].body.handoff_to, undefined);
 });
