@@ -464,6 +464,12 @@ Full policy model, rule schema, and the default rule list: [Prismor](prismor-run
 
 ---
 
+### chatgpt-logs
+
+| Command | Key flags | Description |
+|---|---|---|
+| `prismor chatgpt-logs sync` | `--workspace-id` (required; `org-…` for an API Platform org), `--workspace`, `--since-hours` (24) | Pull new `CONVERSATION_MESSAGE` logs from the ChatGPT Enterprise Compliance Logs Platform (key in `OPENAI_COMPLIANCE_API_KEY`), screen each message and report it under the `chatgpt` agent. After the fact, never blocks; the cursor lives in `~/.prismor/chatgpt-logs/`. See [ChatGPT](chatgpt.md). |
+
 ## Visibility
 
 | Command | Key flags | Description |

@@ -447,6 +447,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         parser.parse_args(["copilot-studio", "--help"])
         return
 
+    # ── chatgpt-logs: screen ChatGPT conversations from the compliance logs ──
+    if args.command == "chatgpt-logs":
+        from prismor.runtime import chatgpt_logs as _cgl
+        if getattr(args, "cgl_command", None) == "sync":
+            sys.exit(_cgl.cmd_sync(args.workspace_id, args.workspace, args.since_hours, args.api_base))
+        parser.parse_args(["chatgpt-logs", "--help"])
+        return
+
     # ── proxy: the LLM lane ──────────────────────────────────────────────
     if args.command == "proxy":
         from pathlib import Path as _Path
@@ -4027,6 +4035,26 @@ def build_parser() -> argparse.ArgumentParser:
     _cs_test.add_argument("--user-messages", choices=("user", "untrusted"), default=None,
                           help="Screen the user's message as a trusted user (default) or as untrusted content")
     _cs_test.add_argument("--json", action="store_true", help="One JSON verdict per line")
+
+    # ── chatgpt-logs: ChatGPT Enterprise compliance logs ──────────────────
+    _cgl = subparsers.add_parser(
+        "chatgpt-logs",
+        help="Screen ChatGPT conversations from the Enterprise compliance logs and report them to the console",
+        description=(
+            "ChatGPT chat runs on OpenAI's servers, out of reach of a local hook. On Enterprise and Edu "
+            "workspaces, `sync` pulls new CONVERSATION_MESSAGE logs, screens every message against this "
+            "workspace's policy and reports findings under the `chatgpt` agent. After the fact: nothing is blocked. "
+            "Needs OPENAI_COMPLIANCE_API_KEY. Run it on a schedule (cron, systemd timer)."
+        ),
+    )
+    _cgl_sub = _cgl.add_subparsers(dest="cgl_command")
+    _cgl_sync = _cgl_sub.add_parser("sync", help="Pull and screen new conversation logs")
+    _cgl_sync.add_argument("--workspace-id", required=True,
+                           help="ChatGPT workspace id (or an org-... API Platform org id)")
+    _cgl_sync.add_argument("--workspace", default=None, help="Workspace whose policy applies (default: cwd)")
+    _cgl_sync.add_argument("--since-hours", type=float, default=24,
+                           help="On the first run, how far back to start (default: 24; logs are kept about 30 days)")
+    _cgl_sync.add_argument("--api-base", default="https://api.chatgpt.com/v1/compliance", help=argparse.SUPPRESS)
 
     # ── inference-hook: Claude Inference Hooks AI-security server ──────
     def _add_ih_serve_args(p: argparse.ArgumentParser) -> None:

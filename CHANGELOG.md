@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Added
+- **ChatGPT chat is reported from the Enterprise compliance logs.** ChatGPT mode runs on OpenAI's servers, so no hook sees it; only the app's Codex mode, which runs the bundled Codex runtime and its hooks, was covered. `prismor chatgpt-logs sync --workspace-id <id>` reads the Compliance Logs Platform (`OPENAI_COMPLIANCE_API_KEY`, ChatGPT Enterprise and Edu), screens what each person typed as a prompt and what the model wrote as untrusted content, and reports every conversation to the console as a `chatgpt` session, at the time each message was sent and with the sender's email as the user. Pasted credentials are masked before screening or reporting, findings are always observed (the message was already sent), and a cursor in `~/.prismor/chatgpt-logs/` lets a scheduled run continue where the last stopped. The compliance key stays on the machine running the sync; the download's signed-URL redirect is followed without it. Verified against a local server speaking the published API: findings for a pasted AWS key and an injected reply showed in the console under the sending user. See docs/chatgpt.md.
+
 ## [1.67.1] — 2026-10-25
 
 ### Fixed
