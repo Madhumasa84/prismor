@@ -60,7 +60,9 @@ def _get(url: str, headers: Dict[str, str], timeout: float = 60) -> bytes:
             # The signed URL carries its own authorization. Never forward the
             # compliance key to whatever host the redirect names.
             loc = urllib.parse.urljoin(url, exc.headers["Location"])
-            with urllib.request.urlopen(urllib.request.Request(loc), timeout=timeout) as resp:
+            if urllib.parse.urlsplit(loc).scheme not in ("https", "http"):
+                raise ApiError(f"refusing to follow a redirect to {loc.split('?')[0]}")
+            with urllib.request.urlopen(urllib.request.Request(loc), timeout=timeout) as resp:  # nosec B310 - scheme checked above
                 return resp.read()
         body = exc.read()[:300].decode("utf-8", "replace")
         raise ApiError(f"HTTP {exc.code} from {url.split('?')[0]}: {body}") from None
