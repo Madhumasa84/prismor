@@ -24,9 +24,11 @@ live model) and on OpenAI Agents SDK ``FunctionTool`` objects.
 """
 from __future__ import annotations
 
+import contextvars
 import functools
 import json
 import os
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
@@ -213,6 +215,62 @@ def prismor_guard(
 
 # ── OpenAI Agents SDK FunctionTool support ──────────────────────────────────
 
+# Which agent is the main one is a property of the run, not of the `name=`
+# label: the first agent whose tool runs is the main agent, and an agent
+# reached by a handoff is a subagent. Every ToolContext of one run shares the
+# run's Usage object, so it keys the run (by id: Usage is an unhashable
+# dataclass; a finalizer drops the entry when the run is gone). An agent used as a tool runs a nested
+# Runner inside the parent's tool call, so that whole nested run is a subagent;
+# _RUNNING_AGENT carries the parent across that boundary.
+_RUN_ROOT: dict = {}
+# Both hold (agent id, the guard's agent name): the name is the parent whose
+# per-agent controls a subagent's calls inherit.
+_RUNNING_AGENT: contextvars.ContextVar[Optional[tuple]] = contextvars.ContextVar(
+    "prismor_openai_running_agent", default=None)
+
+
+def _subagent_of(ctx: Any, guard_name: str = "") -> tuple:
+    """(subagent_id, subagent_type, parent guard name) for this call, or
+    (None, None, None) on the main agent."""
+    active = getattr(ctx, "agent", None)
+    if active is None:
+        return None, None, None
+    outer = _RUNNING_AGENT.get()
+    nested = outer is not None and outer[0] != id(active)
+    usage = getattr(ctx, "usage", None)
+    if usage is None:  # no run to key on: treat the agent as the main one
+        root = (id(active), guard_name)
+    else:
+        key = id(usage)
+        if key not in _RUN_ROOT:
+            _RUN_ROOT[key] = (id(active), guard_name)
+            try:
+                weakref.finalize(usage, _RUN_ROOT.pop, key, None)
+            except TypeError:
+                pass
+        root = _RUN_ROOT[key]
+    if not nested and root[0] == id(active):
+        return None, None, None
+    name = getattr(active, "name", None) or "agent"
+    parent = outer[1] if nested else root[1]
+    return f"{name}-{id(active)}", name, parent or None
+
+
+def _subagents_of(agent_obj: Any) -> List[Any]:
+    """Agents ``agent_obj`` can run: its handoff targets and its agents-as-tools."""
+    found = []
+    for h in getattr(agent_obj, "handoffs", None) or []:
+        ref = getattr(h, "_agent_ref", None)  # a Handoff keeps a weakref to its agent
+        target = ref() if callable(ref) else (h if hasattr(h, "tools") else None)
+        if target is not None:
+            found.append(target)
+    for tool in getattr(agent_obj, "tools", None) or []:
+        inner = getattr(tool, "_agent_instance", None)  # Agent.as_tool()
+        if inner is not None:
+            found.append(inner)
+    return found
+
+
 def _is_function_tool(obj: Any) -> bool:
     """Duck-type an OpenAI Agents SDK FunctionTool (has an async on_invoke_tool)."""
     return hasattr(obj, "on_invoke_tool") and hasattr(obj, "name")
@@ -265,16 +323,18 @@ def _guard_function_tool(
     @functools.wraps(original)
     async def guarded(ctx: Any, input_str: Any) -> Any:
         # ctx (a ToolContext) carries the SDK's active agent for this call.
-        # It differs from the statically-guarded top-level agent when the run
-        # reached this tool via a handoff or an agent-as-tool nested run —
-        # that's the Agents SDK's equivalent of Claude Code's subagent spawn.
-        active_agent = getattr(ctx, "agent", None)
-        active_name = getattr(active_agent, "name", None)
-        sub_id: Optional[str] = None
-        sub_type: Optional[str] = None
-        if active_name and active_name != (_agent_name or agent):
-            sub_type = active_name
-            sub_id = f"{active_name}-{id(active_agent)}"
+        # A handoff or an agent-as-tool nested run makes it a subagent, the
+        # Agents SDK's equivalent of Claude Code's subagent spawn.
+        sub_id, sub_type, parent = _subagent_of(ctx, _agent_name or agent)
+        active = getattr(ctx, "agent", None)
+        _token = _RUNNING_AGENT.set((id(active), _agent_name or agent) if active is not None else None)
+        try:
+            return await _run(ctx, input_str, sub_id, sub_type, parent)
+        finally:
+            _RUNNING_AGENT.reset(_token)
+
+    async def _run(ctx: Any, input_str: Any, sub_id: Optional[str], sub_type: Optional[str],
+                   parent: Optional[str] = None) -> Any:
         event = build_event(
             tool_name=tool_name,
             payload=_payload_from_tool_input(input_str),
@@ -285,6 +345,9 @@ def _guard_function_tool(
             subagent_id=sub_id,
             subagent_type=sub_type,
         )
+        if sub_id and parent:
+            # The agent it runs under; its per-agent controls apply on top.
+            event["metadata"]["parent_agent_name"] = parent
         decision = evaluate_tool_call(
             event=event,
             workspace=ws,
@@ -353,25 +416,40 @@ def guard_agent(
 
     Defaults to ``raise_on_block=False`` so a blocked call returns a denial
     string to the model (a smoother agent UX) rather than aborting the run; set
-    ``raise_on_block=True`` for a hard stop. Returns the same Agent. Non-function
-    tools (hosted tools, handoffs) are left untouched.
+    ``raise_on_block=True`` for a hard stop. Returns the same Agent. Hosted
+    tools are left untouched.
+
+    Every agent this one can hand off to or runs as a tool (``as_tool``),
+    recursively, is guarded too, with the same settings: a subagent runs on its
+    parent's authority, so it is held to the same policy and per-agent controls
+    (its calls are told apart by ``when: subagent.*``). An agent nobody guarded
+    would otherwise run its tools with no policy at all.
     """
     guarded: List[str] = []
-    for tool in getattr(agent_obj, "tools", None) or []:
-        if _is_function_tool(tool):
-            _guard_function_tool(
-                tool,
-                subject=subject,
-                workspace=workspace,
-                agent=agent,
-                name=name,
-                mode=mode,
-                session_id=session_id,
-                event_type=event_type,
-                raise_on_block=raise_on_block,
-                approvals=approvals,
-            )
-            guarded.append(getattr(tool, "name", "tool"))
+    seen_agents: set = set()
+    pending = [agent_obj]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen_agents:
+            continue
+        seen_agents.add(id(current))
+        pending.extend(_subagents_of(current))
+        for tool in getattr(current, "tools", None) or []:
+            if _is_function_tool(tool):
+                _guard_function_tool(
+                    tool,
+                    subject=subject,
+                    workspace=workspace,
+                    agent=agent,
+                    name=name,
+                    mode=mode,
+                    session_id=session_id,
+                    event_type=event_type,
+                    raise_on_block=raise_on_block,
+                    approvals=approvals,
+                )
+                if current is agent_obj:
+                    guarded.append(getattr(tool, "name", "tool"))
     agent_obj.__prismor_guarded_tools__ = guarded  # type: ignore[attr-defined]
     # Declare the complete SDK roster immediately; no tool needs to be invoked
     # before it appears in the enterprise capability inventory.

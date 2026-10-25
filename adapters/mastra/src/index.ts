@@ -22,6 +22,9 @@
  *     name: "ops", model: openai("gpt-4o-mini"),
  *     tools: { run_shell: prismorTool("run_shell", runShell, { mode: "enforce" }) },
  *   });
+ *
+ * Sub-agents (`agents: { researcher }`): call `registerSubagents(agent)` once so
+ * their tool calls report as subagents for `when: subagent.*` rules.
  */
 
 export interface PrismorMastraOptions {
@@ -81,11 +84,76 @@ function timeoutSignal(ms: number): AbortSignal | undefined {
   return undefined;
 }
 
+// ── Subagents ───────────────────────────────────────────────────────────────
+// Mastra runs a sub-agent (`agents: { researcher }`) through a tool of its own
+// making, and the sub-agent's tool calls carry only its own agentId: nothing
+// links them to the parent. registerSubagents() wraps the parent's run entry
+// points (generate, stream, ...) so the run carries the parent in
+// AsyncLocalStorage; a guarded call made under it by another agent (a
+// sub-agent, or an agent called from inside a guarded tool) is a subagent of
+// it. The same agent run on its own has no parent and is the main agent.
+
+/** `parent`: the agent it runs under, whose per-agent controls also apply. */
+export interface Subagent { id: string; type: string; parent?: string }
+
+interface AgentLike { id?: string; name?: string; [k: string]: any }
+
+interface Running { agent: string; callId: string; name: string }
+let _running: { run<T>(s: Running, fn: () => T): T; getStore(): Running | undefined } | null | undefined;
+function running() {
+  if (_running !== undefined) return _running;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    _running = new (require("node:async_hooks").AsyncLocalStorage)();
+  } catch {
+    _running = null;
+  }
+  return _running;
+}
+
+const RUN_METHODS = ["generate", "stream", "streamUntilIdle", "resumeStream", "resumeGenerate",
+  "generateLegacy", "streamLegacy", "network", "resumeNetwork"];
+let _runCounter = 0;
+
+/**
+ * Make `agent`'s runs carry it as the parent of the sub-agents it calls, so
+ * their tool calls report as its subagents and inherit its per-agent controls
+ * (pause, mode, denied tools). `agentName` is the Prismor agentName the
+ * parent's tools are guarded under (default: the agent's id). Sub-agents need
+ * their own tools guarded (prismorTools). Returns the agent.
+ */
+export function registerSubagents<T extends AgentLike>(agent: T, opts: { agentName?: string } = {}): T {
+  if ((agent as any).__prismor_parent__) return agent;
+  const id = agent.id ?? agent.name ?? "agent";
+  const name = opts.agentName ?? id;
+  for (const m of RUN_METHODS) {
+    const original = agent[m];
+    if (typeof original !== "function") continue;
+    (agent as any)[m] = function (this: any, ...args: any[]) {
+      const store = running();
+      const me: Running = { agent: id, callId: `run${++_runCounter}`, name };
+      return store ? store.run(me, () => original.apply(this, args)) : original.apply(this, args);
+    };
+  }
+  (agent as any).__prismor_parent__ = true;
+  return agent;
+}
+
+function subagentOf(ctx: any, agentName: string): Subagent | undefined {
+  const agentId: string | undefined = ctx?.agent?.agentId;
+  const parent = running()?.getStore();
+  if (parent && parent.agent !== (agentId ?? agentName)) {
+    return { id: `${parent.agent}:${parent.callId}`, type: agentId ?? (agentName || "agent"), parent: parent.name };
+  }
+  return undefined;
+}
+
 async function evaluateToolCall(
   toolName: string,
   args: unknown,
   resolved: Required<PrismorMastraOptions>,
   sessionId: string,
+  subagent?: Subagent,
 ): Promise<PrismorDecision> {
   try {
     const res = await fetch(`${resolved.evalUrl}/v1/evaluate`, {
@@ -105,6 +173,7 @@ async function evaluateToolCall(
         session_id: sessionId,
         subject: resolved.subject,
         workspace: resolved.workspace,
+        ...(subagent ? { subagent } : {}),
       }),
       signal: timeoutSignal(resolved.timeoutMs),
     });
@@ -144,11 +213,14 @@ export function prismorTool<T extends { execute?: (...args: any[]) => any }>(
   const original = tool.execute.bind(tool);
 
   const guarded = async (inputData: unknown, ...rest: any[]) => {
-    const decision = await evaluateToolCall(toolName, inputData, resolved, sid);
+    const ctx = rest[0];
+    const decision = await evaluateToolCall(toolName, inputData, resolved, sid, subagentOf(ctx, resolved.agentName));
     if (!decision.allow) {
       throw new PrismorBlocked(decision.reason ?? "policy violation");
     }
-    return original(inputData, ...rest);
+    const store = running();
+    const me: Running = { name: resolved.agentName || resolved.agent, agent: ctx?.agent?.agentId ?? resolved.agentName, callId: String(ctx?.agent?.toolCallId ?? ctx?.writer?.callId ?? Date.now()) };
+    return store ? store.run(me, () => original(inputData, ...rest)) : original(inputData, ...rest);
   };
 
   return { ...tool, execute: guarded, __prismor_guarded__: true } as T;
