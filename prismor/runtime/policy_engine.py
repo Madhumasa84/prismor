@@ -401,6 +401,18 @@ class InMemoryTaintStore:
         self.injection_detected: bool = False
         self.injection_event_index: Optional[int] = None
         self.seen_domains: set = set()
+        self.sources: list = []
+        self.installed: set = set()
+
+    def _update(self, **fields: Any) -> None:
+        """No disk: the attribute writes in the shared methods are the whole store."""
+
+    # Doc/skill provenance, shared verbatim with the disk store so the two can't
+    # drift — data-boundary screening calls these and silently skipped itself
+    # when they were missing (GHSA-5vjv-5xrf-37jj).
+    add_source = _TaintStore.add_source
+    add_installed = _TaintStore.add_installed
+    latest_source = _TaintStore.latest_source
 
     def mark_injection(self, event_index: int) -> None:
         self.injection_detected = True
