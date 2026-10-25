@@ -97,3 +97,20 @@ def test_home_gemini_dir_is_not_gemini_cli(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.setattr("shutil.which", lambda _name: None)
     assert _detect_agents(home)["gemini"] is False
+
+
+def test_chatgpt_app_counts_as_codex(tmp_path, monkeypatch):
+    # The ChatGPT desktop app ships the Codex runtime and loads ~/.codex hooks,
+    # so it alone makes Codex worth hooking. An app without that runtime doesn't.
+    from prismor.runtime import setup_wizard as sw
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    real_is_dir = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda p: str(p).startswith(str(tmp_path)) and real_is_dir(p))
+    (home / "Applications" / "ChatGPT.app" / "Contents" / "Resources").mkdir(parents=True)
+    assert sw._chatgpt_app() is None and sw._detect_agents(home)["codex"] is False
+    (home / "Applications" / "ChatGPT.app" / "Contents" / "Resources" / "codex-cli").mkdir()
+    assert sw._chatgpt_app() == home / "Applications" / "ChatGPT.app"
+    assert sw._detect_agents(home)["codex"] is True
