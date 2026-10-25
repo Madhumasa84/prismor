@@ -1,3 +1,8 @@
+## [1.67.0] — 2026-10-25
+
+### Added
+- **Claude Cowork plugin.** Cowork runs its tools in a Linux sandbox that Anthropic hosts, which hooks in `~/.claude/settings.json` never reach, so a laptop install saw no Cowork sessions. Cowork does run plugin hooks inside that sandbox and honours a deny, so `packaging/cowork/build_plugin.py` builds a `.plugin` that carries the runtime with it (Linux x86_64 or aarch64, Python 3.13) and screens prompts, tool calls and their results there. It ships the `dev-safe` mode with secret-file reads blocking and egress reporting only, blocks with no network, and reports to the console when the plugin carries an agent key and the sandbox may reach `www.prismor.dev`. A block tells the agent to ask an admin, since `prismor allow` and approvals cannot run in the sandbox. Releases attach keyless `prismor-cowork-linux-x86_64.plugin` and `-aarch64.plugin`; the console's Integrations page adds an org agent key per download. Verified in the Claude app: `cat .env` blocked in a Cowork task and the session shown in the console. See docs/claude-cowork.md.
+
 ## [1.66.0] — 2026-10-24
 
 ### Added
