@@ -1,3 +1,14 @@
+## [1.68.1] — 2026-10-26
+
+### Added
+- **Hosted MCP endpoints run on AWS Lambda, one function per org.** `prismor.runtime.lambda_mcp_handler` serves `POST /mcp/<key>` behind a Function URL: it resolves the key with the console (cached 30 s, fails closed when a key was never resolved), refuses keys from another org, and runs the unmodified `prismor mcp-gateway` as that key, one warm process per key. `npx` / `uvx` servers run inside the function; browser servers stay local. The image is `deploy/lambda/Dockerfile.mcp`, and the release now pushes `prismor-eval:<version>` and `prismor-mcp:<version>` to ECR after an emulator smoke test. Replaces the Cloudflare edge (`PrismorSec/prismor-fleet`, now archived). See deploy/lambda/README.md and docs/mcp-gateway.md.
+
+### Fixed
+- **An agent key's uploads no longer carry the machine's hook events.** With `PRISMOR_AGENT_KEY` set on a machine that also has hooks installed, the SDK agent drained the shared telemetry spool and posted the machine's queued events under the service identity, so the console showed a phantom Claude Code agent on it; a 401 for the key also marked the whole device revoked. The env identity now has its own spool and revoked marker.
+- **Vercel AI SDK: one session per request, not per process.** `useSession(id, fn)` reports the guarded calls inside `fn` under `id` (for example `chat:${chatId}`), so a toolset wrapped once at module scope no longer mixes every user's calls into one session.
+- **Docs that mention printing a key are no longer withheld as an injection.** The "print/show the secret" pattern now needs the secret word to end at a word boundary, so `"key-a"` in a Workers KV sample, `key_id` columns and "keyboard shortcuts" pass.
+- **The MCP gateway no longer withholds a tool result over a keyword-only semantic warn.** Ordinary docs (`export` next to `context.env`, a "service account key file" flag) scored 0.70 without a judge and were withheld; a keyword-only finding below `heuristic_block_threshold` now warns as the policy engine already intended.
+
 ## [1.68.0] — 2026-10-26
 
 ### Added
