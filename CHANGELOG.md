@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Added
+- **ChatGPT chat is reported from the Enterprise compliance logs.** ChatGPT mode runs on OpenAI's servers, so no hook sees it; only the app's Codex mode, which runs the bundled Codex runtime and its hooks, was covered. `prismor chatgpt-logs sync --workspace-id <id>` reads the Compliance Logs Platform (`OPENAI_COMPLIANCE_API_KEY`, ChatGPT Enterprise and Edu), screens what each person typed as a prompt and what the model wrote as untrusted content, and reports every conversation to the console as a `chatgpt` session, at the time each message was sent and with the sender's email as the user. Pasted credentials are masked before screening or reporting, findings are always observed (the message was already sent), and a cursor in `~/.prismor/chatgpt-logs/` lets a scheduled run continue where the last stopped. The compliance key stays on the machine running the sync; the download's signed-URL redirect is followed without it. Verified against a local server speaking the published API: findings for a pasted AWS key and an injected reply showed in the console under the sending user. See docs/chatgpt.md.
+
+### Fixed
+- **Installing Codex hooks now leaves Codex screening, and `prismor status` no longer calls stale Codex trust "trusted".** Codex runs a hook only when `~/.codex/config.toml` holds a trust record whose hash matches the hook as it is now; a changed command (a re-install, a new Python path) turns the old record into "modified" and Codex skips the hook without a word. Prismor only checked that a record existed, so after `prismor setup` rewrote the Codex hooks it reported them trusted while Codex ran none of them, which also left the ChatGPT app's Codex and Cowork modes unscreened. Prismor now computes Codex's hash (the normalized hook as sorted JSON, as codex-rs does) and, on install, records trust for exactly the handlers it wrote, never for another entry in the file, even one that mentions `hook-dispatch`. The trust check compares hashes. Verified with the ChatGPT app's bundled codex-cli 0.163: hooks installed into a fresh Codex home ran on `codex exec` with no trust prompt and no bypass flag.
+- **`prismor setup` sees the ChatGPT desktop app.** The app ships the Codex runtime and its Codex and Cowork modes load `~/.codex` hooks, so it alone now counts as Codex being installed; the agent row reads "Codex + ChatGPT app" and the summary notes that chat itself runs on OpenAI's servers.
+
 ## [1.67.1] — 2026-10-25
 
 ### Fixed

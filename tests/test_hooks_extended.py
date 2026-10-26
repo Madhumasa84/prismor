@@ -588,7 +588,7 @@ class TestInstallUninstallRoundtrip(unittest.TestCase):
         self.assertIn("js_repl = false", config_toml)  # unrelated settings preserved
         self.assertIn('model = "gpt-5.4"', config_toml)
 
-    def test_codex_install_leaves_already_correct_config_untouched(self):
+    def test_codex_install_keeps_config_and_only_adds_trust_records(self):
         codex_home = Path(os.environ["CODEX_HOME"])
         codex_home.mkdir(parents=True)
         original = "[features]\nhooks = true\njs_repl = false\n"
@@ -597,7 +597,9 @@ class TestInstallUninstallRoundtrip(unittest.TestCase):
             repo_root=self.repo_root, workspace=self.workspace,
             agent="codex", scope="project", mode="enforce",
         )
-        self.assertEqual((codex_home / "config.toml").read_text(), original)
+        text = (codex_home / "config.toml").read_text()
+        self.assertTrue(text.startswith(original))
+        self.assertIn("[hooks.state.", text[len(original):])
 
     def test_uninstall_nonexistent_config(self):
         results = uninstall_hooks(

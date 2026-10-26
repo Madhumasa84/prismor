@@ -172,6 +172,12 @@ def install_hooks(*, repo_root: Path, workspace: Path, agent: str, scope: str, m
             # itself is correctly scoped).
             codex_home = _codex_home()
             _ensure_codex_hooks_feature_enabled(codex_home / "config.toml")
+            # Installing is the person's consent to these hooks; without the
+            # trust record Codex would skip every one of them silently.
+            try:
+                trust_codex_hooks(config_path, command, codex_home)
+            except Exception as exc:
+                sys.stderr.write(f"[prismor] could not record Codex hook trust: {exc}\n")
     return results
 
 
@@ -189,39 +195,129 @@ _PLUGIN_FILE_AGENTS = ("opencode", "openclaw", "hermes")
 _CODEX_TRUST_EVENTS = ("user_prompt_submit", "pre_tool_use", "permission_request", "post_tool_use")
 
 
+# Codex's trust record is a hash of the normalized hook, not of the file: its
+# event label, its matcher (dropped for events that take none) and the handler
+# with defaults filled in, as sorted compact JSON. Mirrors hook_hash /
+# version_for_toml in codex-rs (hooks/src/engine/discovery.rs,
+# config/src/fingerprint.rs); a record whose hash no longer matches counts as
+# "modified" and Codex skips the hook just as if it had never been trusted.
+_CODEX_EVENT_LABELS = {
+    "PreToolUse": "pre_tool_use", "PermissionRequest": "permission_request",
+    "PostToolUse": "post_tool_use", "PreCompact": "pre_compact", "PostCompact": "post_compact",
+    "SessionStart": "session_start", "SessionEnd": "session_end",
+    "UserPromptSubmit": "user_prompt_submit", "SubagentStart": "subagent_start",
+    "SubagentStop": "subagent_stop", "Stop": "stop", "Interrupt": "interrupt",
+}
+_CODEX_NO_MATCHER = {"user_prompt_submit", "stop", "interrupt"}
+
+
+def codex_hook_hash(event: str, matcher: Optional[str], handler: Dict[str, Any]) -> str:
+    """The ``trusted_hash`` Codex expects for one command handler of ``event``."""
+    label = _CODEX_EVENT_LABELS[event]
+    timeout = handler.get("timeout")
+    if label in ("session_end", "interrupt"):
+        timeout = min(max(int(timeout or 1), 1), 3)
+    else:
+        timeout = max(int(timeout or 600), 1)
+    norm: Dict[str, Any] = {"type": "command", "command": handler["command"],
+                            "timeout": timeout, "async": bool(handler.get("async", False))}
+    for key, alias in (("commandWindows", "command_windows"), ("statusMessage", None),
+                       ("additionalContextLimit", None)):
+        value = handler.get(key, handler.get(alias) if alias else None)
+        if value is not None:
+            norm[key] = value
+    ident: Dict[str, Any] = {"event_name": label, "hooks": [norm]}
+    if label not in _CODEX_NO_MATCHER and matcher is not None:
+        ident["matcher"] = matcher
+    blob = json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _codex_entries(path: Path, wanted) -> List[Tuple[str, str, str]]:
+    """(event label, trust key, expected hash) for each handler in a Codex
+    hooks.json whose command satisfies ``wanted``."""
+    try:
+        hooks = json.loads(path.read_text(encoding="utf-8")).get("hooks") or {}
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for event, groups in hooks.items():
+        if event not in _CODEX_EVENT_LABELS or not isinstance(groups, list):
+            continue
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate((group or {}).get("hooks") or []):
+                if handler.get("type", "command") == "command" and wanted(str(handler.get("command") or "")):
+                    label = _CODEX_EVENT_LABELS[event]
+                    out.append((label, f"{path}:{label}:{gi}:{hi}",
+                                codex_hook_hash(event, group.get("matcher"), handler)))
+    return out
+
+
+def _codex_trust_state(config_toml: Path) -> Dict[str, Any]:
+    try:
+        return ((_toml_loads(config_toml.read_text(encoding="utf-8")).get("hooks") or {}).get("state")) or {}
+    except Exception:
+        return {}
+
+
+def trust_codex_hooks(hooks_json: Path, command: str, codex_home: Optional[Path] = None) -> int:
+    """Record Codex's trust for the handlers Prismor just wrote: only entries whose
+    command is exactly ``command``, so a hooks file someone else put in a repo is
+    never approved on their behalf. Returns how many records were written."""
+    config_toml = (codex_home or _codex_home()) / "config.toml"
+    entries = _codex_entries(hooks_json.resolve(), lambda c: c == command)
+    state = _codex_trust_state(config_toml)
+    todo = [(k, h) for _, k, h in entries if (state.get(k) or {}).get("trusted_hash") != h]
+    if not todo:
+        return 0
+    try:
+        text = config_toml.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    for key, digest in todo:
+        header = f"[hooks.state.{json.dumps(key)}]"
+        line = f'trusted_hash = "{digest}"'
+        start = text.find(header)
+        if start < 0:
+            text = text.rstrip("\n") + f"\n\n{header}\n{line}\n"
+            continue
+        body_start = start + len(header)
+        nxt = text.find("\n[", body_start)
+        end = len(text) if nxt < 0 else nxt
+        rest = [l for l in text[body_start:end].strip("\n").splitlines()
+                if l.strip() and not re.match(r"\s*trusted_hash\s*=", l)]
+        tail = "\n" + text[end:].lstrip("\n") if nxt >= 0 else ""
+        text = text[:body_start] + "\n" + "\n".join([line] + rest) + "\n" + tail
+    _toml_loads(text)  # never leave Codex a config it can't parse
+    config_toml.parent.mkdir(parents=True, exist_ok=True)
+    config_toml.write_text(text, encoding="utf-8")
+    return len(todo)
+
+
 def codex_hook_trust(workspace: Path, codex_home: Optional[Path] = None) -> Dict[str, Any]:
     """Whether Codex will actually run the hooks Prismor installed, at either scope.
 
     Returns ``{"status": "not-installed" | "trusted" | "untrusted", "missing": [...],
-    "scopes": {"project" | "global": [untrusted events]}}``. A scope counts only when
-    its hooks file carries Prismor's dispatcher, so a user's own hooks are never
-    judged. ``untrusted`` means at least one Prismor entry has no trust record, so
-    that event never dispatches. Text-based: the record's exact hash is Codex's
-    business; its presence is what we can know.
+    "scopes": {"project" | "global": [untrusted events]}}``. Only Prismor's own
+    entries are judged. An entry counts as trusted only when its record holds the
+    hash Codex computes for it now: a record left from an older command is
+    "modified" to Codex, which then skips the hook.
     """
     home = codex_home or _codex_home()
     candidates = {
         "project": (workspace / ".codex" / "hooks.json").resolve(),
         "global": (home / "hooks.json").resolve(),
     }
-    installed: Dict[str, Path] = {}
+    state = _codex_trust_state(home / "config.toml")
+    scopes: Dict[str, List[str]] = {}
     for scope, path in candidates.items():
-        try:
-            if path.exists() and "hook-dispatch" in path.read_text(encoding="utf-8"):
-                installed[scope] = path
-        except OSError:
-            continue
-    if not installed:
+        entries = _codex_entries(path, lambda c: "hook-dispatch" in c)
+        if entries:
+            scopes[scope] = sorted({label for label, key, digest in entries
+                                    if (state.get(key) or {}).get("trusted_hash") != digest})
+    if not scopes:
         return {"status": "not-installed", "missing": [], "scopes": {}}
-    try:
-        text = (home / "config.toml").read_text(encoding="utf-8")
-    except OSError:
-        text = ""
-    scopes = {
-        scope: [ev for ev in _CODEX_TRUST_EVENTS if f'[hooks.state."{path}:{ev}:0:0"]' not in text]
-        for scope, path in installed.items()
-    }
-    missing = sorted({ev for evs in scopes.values() for ev in evs}, key=_CODEX_TRUST_EVENTS.index)
+    missing = sorted({ev for evs in scopes.values() for ev in evs})
     return {"status": "untrusted" if missing else "trusted", "missing": missing, "scopes": scopes}
 
 

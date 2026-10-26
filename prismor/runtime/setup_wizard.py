@@ -330,6 +330,16 @@ def _holds_real_config(p: Path, ours: set) -> bool:
     return not seen_ours  # an empty marker dir still counts, as it always has
 
 
+def _chatgpt_app() -> Optional[Path]:
+    """The ChatGPT desktop app, when it carries the Codex runtime: its Codex and
+    Cowork modes run that runtime, which loads the same hooks as the Codex CLI."""
+    for apps in (Path("/Applications"), Path.home() / "Applications"):
+        app = apps / "ChatGPT.app"
+        if (app / "Contents" / "Resources" / "codex-cli").is_dir():
+            return app
+    return None
+
+
 def _detect_agents(target: Path) -> dict:
     home = Path.home()
     ours = _prismor_hook_files(target)
@@ -345,7 +355,8 @@ def _detect_agents(target: Path) -> dict:
         "windsurf": found_t(target / ".windsurf") or found(home / ".codeium"),
         "openclaw": shutil.which("openclaw") is not None or found_t(target / ".openclaw") or found(home / ".openclaw"),
         "hermes":   shutil.which("hermes") is not None or found_t(target / ".hermes") or found(home / ".hermes"),
-        "codex":    shutil.which("codex") is not None or found_t(target / ".codex") or found(home / ".codex"),
+        "codex":    shutil.which("codex") is not None or found_t(target / ".codex") or found(home / ".codex")
+                    or _chatgpt_app() is not None,
         "grok":     shutil.which("grok") is not None or found_t(target / ".grok") or found(home / ".grok"),
         "kiro":     shutil.which("kiro-cli") is not None or shutil.which("kiro") is not None or found_t(target / ".kiro") or found(home / ".kiro"),
         "crush":    shutil.which("crush") is not None or found_t(target / "crush.json") or found(home / ".config" / "crush"),
@@ -663,7 +674,8 @@ def _step_agents(target: Path, step: int = 2, total: int = 4) -> list:
         {"name": "windsurf", "label": "Windsurf",    "on": detected.get("windsurf", False)},
         {"name": "openclaw", "label": "OpenClaw",    "on": detected.get("openclaw", False)},
         {"name": "hermes",   "label": "Hermes",      "on": detected.get("hermes", False)},
-        {"name": "codex",    "label": "Codex",       "on": detected.get("codex", False)},
+        {"name": "codex",    "label": "Codex + ChatGPT app" if _chatgpt_app() else "Codex",
+         "on": detected.get("codex", False)},
         {"name": "grok",     "label": "Grok Build",  "on": detected.get("grok", False)},
         {"name": "kiro",     "label": "Kiro CLI",    "on": detected.get("kiro", False)},
         {"name": "crush",     "label": "Crush",       "on": detected.get("crush", False)},
@@ -1734,6 +1746,10 @@ def _do_install(target: Path, mode: str, rules: List[dict], agents: List[str], c
     if "codex" in agents:
         _info("Codex",  "hooks run only after you trust them — accept the hook-trust prompt in the Codex TUI once,")
         print(f"          {_w('or pass --dangerously-bypass-hook-trust to `codex exec` for headless runs', DIM)}")
+    if "codex" in agents and _chatgpt_app():
+        _info("ChatGPT", "the app's Codex and Cowork modes run on these Codex hooks; chat itself runs on")
+        _chat_note = "OpenAI's servers (Enterprise: prismor chatgpt-logs sync, see docs/chatgpt.md)"
+        print(f"          {_w(_chat_note, DIM)}")
     if "claude" in agents:
         _info("Skill",  str(target / ".claude" / "skills" / "immunity-agent").replace(home, "~"))
     _info("Docs",       "https://github.com/PrismorSec/prismor")
